@@ -1,11 +1,11 @@
 #pragma once
 
+#include "IoDevice.hpp"
 #include "KernelAllocator.hpp"
 #include "error/ErrorCode.hpp"
 #include "note.hpp"
 #include "rx/Rc.hpp"
 #include "rx/SharedMutex.hpp"
-#include "IoDevice.hpp"
 #include "stat.hpp"
 #include <cstdint>
 

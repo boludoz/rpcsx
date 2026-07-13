@@ -1678,8 +1678,8 @@ static bool initVirtualPad(const std::shared_ptr<Pad> &pad) {
 }
 
 static bool setVirtualPadData(int playerIndex, int digital1, int digital2,
-                              int leftStickX, int leftStickY,
-                              int rightStickX, int rightStickY) {
+                              int leftStickX, int leftStickY, int rightStickX,
+                              int rightStickY) {
   if (playerIndex < 0 || playerIndex >= kMaxVirtualPads) {
     return false;
   }
@@ -1730,10 +1730,9 @@ extern "C" bool _rpcsx_overlayPadData(int digital1, int digital2,
 // Extended version of _rpcsx_overlayPadData that targets one of up to
 // kMaxVirtualPads player slots, so multiple physical/on-screen controllers
 // detected on the Android side can each drive a distinct PS3 pad.
-extern "C" bool _rpcsx_multiPadData(int playerIndex, int digital1,
-                                    int digital2, int leftStickX,
-                                    int leftStickY, int rightStickX,
-                                    int rightStickY) {
+extern "C" bool _rpcsx_multiPadData(int playerIndex, int digital1, int digital2,
+                                    int leftStickX, int leftStickY,
+                                    int rightStickX, int rightStickY) {
   return setVirtualPadData(playerIndex, digital1, digital2, leftStickX,
                            leftStickY, rightStickX, rightStickY);
 }

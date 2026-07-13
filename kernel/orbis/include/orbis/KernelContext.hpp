@@ -109,7 +109,8 @@ public:
     return {};
   }
 
-  std::tuple<kmap<kstring, rx::StaticString<128>> &, std::unique_lock<rx::shared_mutex>>
+  std::tuple<kmap<kstring, rx::StaticString<128>> &,
+             std::unique_lock<rx::shared_mutex>>
   getKernelEnv() {
     std::unique_lock lock(m_kenv_mtx);
     return {m_kenv, std::move(lock)};
