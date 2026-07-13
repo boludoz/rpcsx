@@ -339,8 +339,9 @@ static orbis::ErrorCode host_mmap(orbis::File *file, void **address,
   if (!hostFile->dirEntries.empty())
     return orbis::ErrorCode::ISDIR;
 
-  auto result = vm::map(*address, size, prot, flags,
-                        vm::kMapInternalReserveOnly, hostFile->device.get(), offset);
+  auto result =
+      vm::map(*address, size, prot, flags, vm::kMapInternalReserveOnly,
+              hostFile->device.get(), offset);
 
   if (result == (void *)-1) {
     return orbis::ErrorCode::NOMEM;

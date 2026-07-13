@@ -313,9 +313,8 @@ public:
 };
 
 template <typename T> class Payload<T *> {
-  static constexpr std::uintptr_t
-      kCloseOpenBit = alignof(T) > 1 ? 1
-                                     : (1ull << (sizeof(std::uintptr_t) * 8 - 1));
+  static constexpr std::uintptr_t kCloseOpenBit =
+      alignof(T) > 1 ? 1 : (1ull << (sizeof(std::uintptr_t) * 8 - 1));
   static constexpr std::uintptr_t kClose = 0;
   std::uintptr_t value = kClose;
 
@@ -368,9 +367,8 @@ public:
 };
 
 template <typename T> class Payload<Ref<T>> {
-  static constexpr std::uintptr_t
-      kCloseOpenBit = alignof(T) > 1 ? 1
-                                     : (1ull << (sizeof(std::uintptr_t) * 8 - 1));
+  static constexpr std::uintptr_t kCloseOpenBit =
+      alignof(T) > 1 ? 1 : (1ull << (sizeof(std::uintptr_t) * 8 - 1));
   static constexpr std::uintptr_t kClose = 0;
   std::uintptr_t value = kClose;
 

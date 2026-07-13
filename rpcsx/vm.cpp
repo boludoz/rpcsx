@@ -776,8 +776,8 @@ constexpr auto kMainDirectMemorySize =
     kPhysicalMemorySize - kFlexibleMemorySize;
 
 void *vm::map(void *addr, std::uint64_t len, std::int32_t prot,
-              std::int32_t flags, std::int32_t internalFlags, orbis::IoDevice *device,
-              std::uint64_t offset) {
+              std::int32_t flags, std::int32_t internalFlags,
+              orbis::IoDevice *device, std::uint64_t offset) {
   std::println(stderr, "vm::map(addr = {}, len = {}, prot = {}, flags = {})",
                addr, len, mapProtToString(prot), mapFlagsToString(flags));
 

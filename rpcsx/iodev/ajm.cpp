@@ -316,7 +316,8 @@ ajm_ioctl_start_batch_buffer(orbis::Thread *, AjmDevice *device,
   args.result = 0;
   args.batchId = device->batchId++;
   // ORBIS_LOG_ERROR(__FUNCTION__, args.result, args.unk0, args.pBatch,
-  //                 args.batchSize, args.priority, args.batchError, args.batchId);
+  //                 args.batchSize, args.priority, args.batchError,
+  //                 args.batchId);
   // thread->where();
 
   auto ptr = args.pBatch;

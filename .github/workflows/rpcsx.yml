@@ -120,6 +120,13 @@ jobs:
         $ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip build/librpcsx-android.so
         mv build/librpcsx-android.so librpcsx-android-${{ matrix.abi }}-${{ matrix.arch }}.so
 
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: librpcsx-android-${{ matrix.abi }}-${{ matrix.arch }}
+        path: librpcsx-android-${{ matrix.abi }}-${{ matrix.arch }}.so
+        if-no-files-found: error
+
     - name: Deploy build
       uses: softprops/action-gh-release@v2
       if: |
