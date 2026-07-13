@@ -95,8 +95,13 @@ extern std::string g_android_executable_dir;
 extern std::string g_android_config_dir;
 extern std::string g_android_cache_dir;
 
+// Player slots wired to Android-side virtual pads (touch overlay or
+// physical controllers relayed through the Kotlin input layer). RPCS3's
+// pad_thread supports up to 7 players (g_cfg_input.player1..player7); we
+// only configure the first kMaxVirtualPads of them as virtual_pad devices.
+static constexpr int kMaxVirtualPads = 4;
 static std::mutex g_virtual_pad_mutex;
-static std::shared_ptr<Pad> g_virtual_pad;
+static std::shared_ptr<Pad> g_virtual_pads[kMaxVirtualPads];
 
 std::string g_input_config_override;
 cfg_input_configurations g_cfg_input_configs;
@@ -1665,21 +1670,24 @@ static bool initVirtualPad(const std::shared_ptr<Pad> &pad) {
   pad->m_vibrateMotors[0] = VibrateMotor(true, 0);
   pad->m_vibrateMotors[1] = VibrateMotor(false, 0);
 
-  if (pad->m_player_id == 0) {
+  if (pad->m_player_id < static_cast<u32>(kMaxVirtualPads)) {
     std::lock_guard lock(g_virtual_pad_mutex);
-    g_virtual_pad = pad;
+    g_virtual_pads[pad->m_player_id] = pad;
   }
   return true;
 }
 
-extern "C" bool _rpcsx_overlayPadData(int digital1, int digital2,
-                                      int leftStickX, int leftStickY,
-                                      int rightStickX, int rightStickY) {
+static bool setVirtualPadData(int playerIndex, int digital1, int digital2,
+                              int leftStickX, int leftStickY,
+                              int rightStickX, int rightStickY) {
+  if (playerIndex < 0 || playerIndex >= kMaxVirtualPads) {
+    return false;
+  }
 
-  auto pad = [] {
+  auto pad = [&] {
     std::shared_ptr<Pad> result;
     std::lock_guard lock(g_virtual_pad_mutex);
-    result = g_virtual_pad;
+    result = g_virtual_pads[playerIndex];
     return result;
   }();
 
@@ -1691,7 +1699,8 @@ extern "C" bool _rpcsx_overlayPadData(int digital1, int digital2,
     if (btn.m_offset == CELL_PAD_BTN_OFFSET_DIGITAL1) {
       btn.m_pressed = (digital1 & btn.m_outKeyCode) != 0;
 
-      if (btn.m_outKeyCode == CELL_PAD_CTRL_PS && btn.m_pressed) {
+      if (playerIndex == 0 && btn.m_outKeyCode == CELL_PAD_CTRL_PS &&
+          btn.m_pressed) {
         if (auto padThread = pad::get_pad_thread(true)) {
           padThread->open_home_menu();
         }
@@ -1710,6 +1719,26 @@ extern "C" bool _rpcsx_overlayPadData(int digital1, int digital2,
   pad->m_sticks[3].m_value = rightStickY;
   return true;
 }
+
+extern "C" bool _rpcsx_overlayPadData(int digital1, int digital2,
+                                      int leftStickX, int leftStickY,
+                                      int rightStickX, int rightStickY) {
+  return setVirtualPadData(0, digital1, digital2, leftStickX, leftStickY,
+                           rightStickX, rightStickY);
+}
+
+// Extended version of _rpcsx_overlayPadData that targets one of up to
+// kMaxVirtualPads player slots, so multiple physical/on-screen controllers
+// detected on the Android side can each drive a distinct PS3 pad.
+extern "C" bool _rpcsx_multiPadData(int playerIndex, int digital1,
+                                    int digital2, int leftStickX,
+                                    int leftStickY, int rightStickX,
+                                    int rightStickY) {
+  return setVirtualPadData(playerIndex, digital1, digital2, leftStickX,
+                           leftStickY, rightStickX, rightStickY);
+}
+
+extern "C" int _rpcsx_getMaxVirtualPads() { return kMaxVirtualPads; }
 
 extern "C" bool _rpcsx_initialize(std::string_view rootDir,
                                   std::string_view user) {
@@ -1811,8 +1840,16 @@ extern "C" bool _rpcsx_initialize(std::string_view rootDir,
   Emu.SetUsr(std::string(user));
   Emu.Init();
 
+  static_assert(kMaxVirtualPads == 4);
   g_cfg_input.player1.handler.set(pad_handler::virtual_pad);
   g_cfg_input.player1.device.from_string("Virtual");
+  g_cfg_input.player2.handler.set(pad_handler::virtual_pad);
+  g_cfg_input.player2.device.from_string("Virtual");
+  g_cfg_input.player3.handler.set(pad_handler::virtual_pad);
+  g_cfg_input.player3.device.from_string("Virtual");
+  g_cfg_input.player4.handler.set(pad_handler::virtual_pad);
+  g_cfg_input.player4.device.from_string("Virtual");
+
   g_cfg_input.save("", g_cfg_input_configs.default_config);
 
   g_cfg.core.llvm_cpu.from_string("cortex-a34");
@@ -1995,7 +2032,7 @@ extern "C" bool _rpcsx_usbDeviceEvent(int fd, int vendorId, int productId,
             &g_cfg_input.player1.config);
         if (selectedHandler != pad_handler::virtual_pad) {
           std::lock_guard lock(g_virtual_pad_mutex);
-          g_virtual_pad = nullptr;
+          g_virtual_pads[0] = nullptr;
         }
       }
 
