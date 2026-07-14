@@ -190,5 +190,5 @@ namespace rsx
 			inline bool read_unsafe(register_pair& data);
 			bool skip_methods(u32 count);
 		};
-	} // namespace FIFO
-} // namespace rsx
+	}
+}

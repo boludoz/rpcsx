@@ -17,7 +17,7 @@ namespace vk
 			return "Extended fault info is not available. Extension 'VK_EXT_device_fault' is probably not supported by your driver.";
 		}
 
-		ensure(g_render_device->_vkGetDeviceFaultInfoEXT);
+		ensure(_vkGetDeviceFaultInfoEXT);
 
 		VkDeviceFaultCountsEXT fault_counts{
 			.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT};
@@ -28,7 +28,7 @@ namespace vk
 		std::string fault_description;
 
 		// Retrieve sizes
-		g_render_device->_vkGetDeviceFaultInfoEXT(*g_render_device, &fault_counts, nullptr);
+		_vkGetDeviceFaultInfoEXT(*g_render_device, &fault_counts, nullptr);
 
 		// Resize arrays and fill
 		address_info.resize(fault_counts.addressInfoCount);
@@ -39,8 +39,9 @@ namespace vk
 			.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT,
 			.pAddressInfos = address_info.data(),
 			.pVendorInfos = vendor_info.data(),
-			.pVendorBinaryData = vendor_binary_data.data()};
-		g_render_device->_vkGetDeviceFaultInfoEXT(*g_render_device, &fault_counts, &fault_info);
+			.pVendorBinaryData = vendor_binary_data.data()
+		};
+		_vkGetDeviceFaultInfoEXT(*g_render_device, &fault_counts, &fault_info);
 
 		fault_description = fault_info.description;
 		std::string fault_message = fmt::format(
@@ -238,14 +239,9 @@ namespace vk
 		return false;
 	}
 
-	// Temporarily
-#ifndef _MSC_VER
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-#endif
-
-	VkBool32 BreakCallback(VkFlags msgFlags, VkDebugReportObjectTypeEXT objType,
-		u64 srcObject, usz location, s32 msgCode,
-		const char* pLayerPrefix, const char* pMsg, void* pUserData)
+	VkBool32 BreakCallback(VkFlags /*msgFlags*/, VkDebugReportObjectTypeEXT /*objType*/,
+		u64 /*srcObject*/, usz /*location*/, s32 /*msgCode*/,
+		const char* /*pLayerPrefix*/, const char* /*pMsg*/, void* /*pUserData*/)
 	{
 #ifdef _WIN32
 		DebugBreak();

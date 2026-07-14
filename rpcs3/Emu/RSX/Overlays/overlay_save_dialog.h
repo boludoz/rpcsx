@@ -18,7 +18,6 @@ namespace rsx
 				void set_selected(bool selected) override;
 
 			private:
-				std::unique_ptr<image_info> icon_data;
 				overlay_element* m_image = nullptr;
 			};
 

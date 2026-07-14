@@ -14,8 +14,7 @@ struct VKVertexDecompilerThread : public VertexProgramDecompiler
 
 	std::string& m_shader;
 	std::vector<vk::glsl::program_input> inputs;
-	class VKVertexProgram* vk_prog;
-	vk::pipeline_binding_table m_binding_table{};
+	class VKVertexProgram *vk_prog;
 
 	struct
 	{
@@ -37,6 +36,9 @@ protected:
 
 	const RSXVertexProgram& rsx_vertex_program;
 
+	void prepareBindingTable();
+
+	const RSXVertexProgram &rsx_vertex_program;
 public:
 	VKVertexDecompilerThread(const RSXVertexProgram& prog, std::string& shader, ParamArray&, class VKVertexProgram& dst)
 		: VertexProgramDecompiler(prog), m_shader(shader), vk_prog(&dst), rsx_vertex_program(prog)
@@ -44,10 +46,9 @@ public:
 	}
 
 	void Task();
-	const std::vector<vk::glsl::program_input>& get_inputs()
-	{
-		return inputs;
-	}
+	const std::vector<vk::glsl::program_input>& get_inputs() { return inputs; }
+
+	void insertFSExport(std::stringstream& OS);
 };
 
 class VKVertexProgram : public rsx::VertexProgramBase
@@ -60,6 +61,19 @@ public:
 	VkShaderModule handle = nullptr;
 	vk::glsl::shader shader;
 	std::vector<vk::glsl::program_input> uniforms;
+
+	// Quick attribute indices
+	struct
+	{
+		u32 context_buffer_location = umax;        // Vertex program context
+		u32 cr_pred_buffer_location = umax;        // Conditional rendering predicate
+		u32 vertex_buffers_location = umax;        // Vertex input streams (3)
+		u32 cbuf_location = umax;                  // Vertex program constants register file
+		u32 instanced_lut_buffer_location = umax;  // Instancing redirection table
+		u32 instanced_cbuf_location = umax;        // Instancing constants register file
+		u32 vtex_location[4];                      // Vertex textures (inf)
+
+	} binding_table;
 
 	void Decompile(const RSXVertexProgram& prog);
 	void Compile();

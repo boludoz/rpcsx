@@ -151,7 +151,40 @@ namespace drum
 namespace midi
 {
 
-	u8 min_velocity()
+u8 min_velocity()
+{
+	return g_cfg_rb3drums.minimum_velocity;
+}
+
+Note str_to_note(const std::string_view name)
+{
+	static const std::unordered_map<std::string_view, Note> mapping{
+		{"Invalid", Note::Invalid},
+		{"Kick", Note::Kick},
+		{"HihatPedal", Note::HihatPedal},
+		{"Snare", Note::Snare},
+		{"SnareRim", Note::SnareRim},
+		{"HiTom", Note::HiTom},
+		{"LowTom", Note::LowTom},
+		{"FloorTom", Note::FloorTom},
+		{"HihatWithPedalUp", Note::HihatWithPedalUp},
+		{"Hihat", Note::Hihat},
+		{"Ride", Note::Ride},
+		{"Crash", Note::Crash},
+	};
+	auto it = mapping.find(name);
+	return it != std::end(mapping) ? it->second : Note::Invalid;
+}
+
+std::optional<std::pair<Id, Note>> parse_midi_override(const std::string_view config)
+{
+	const auto split = fmt::split_sv(config, {"="});
+	if (split.size() != 2)
+	{
+		return {};
+	}
+	uint64_t id_int = 0;
+	if (!try_to_uint64(&id_int, split[0], 0, 255))
 	{
 		return g_cfg_rb3drums.minimum_velocity;
 	}
@@ -176,7 +209,10 @@ namespace midi
 		return it != std::end(mapping) ? it->second : Note::Invalid;
 	}
 
-	std::optional<std::pair<Id, Note>> parse_midi_override(const std::string_view config)
+	// Apply configured overrides.
+	const std::string midi_overrides = g_cfg_rb3drums.midi_overrides.to_string();
+	const std::vector<std::string_view> segments = fmt::split_sv(midi_overrides, {","});
+	for (const std::string_view& segment : segments)
 	{
 		auto split = fmt::split(config, {"="});
 		if (split.size() != 2)
@@ -250,7 +286,15 @@ namespace midi
 		return mapping;
 	}
 
-	namespace combo
+std::vector<u8> parse_combo(const std::string_view name, const std::string_view csv)
+{
+	if (csv.empty())
+	{
+		return {};
+	}
+	std::vector<u8> notes;
+	const auto note_names = fmt::split_sv(csv, {","});
+	for (const auto& note_name : note_names)
 	{
 
 		std::vector<u8> parse_combo(const std::string_view name, const std::string_view csv)

@@ -5,6 +5,7 @@
 #include "Emu/Io/pad_types.h"
 #include "Emu/Io/pad_config.h"
 #include "Emu/Io/pad_config_types.h"
+#include "Input/mouse_gyro_handler.h"
 #include "util/mutex.h"
 
 #include <map>
@@ -24,15 +25,9 @@ public:
 
 	void operator()();
 
-	PadInfo& GetInfo()
-	{
-		return m_info;
-	}
-	std::array<std::shared_ptr<Pad>, CELL_PAD_MAX_PORT_NUM>& GetPads()
-	{
-		return m_pads;
-	}
-	void SetRumble(const u32 pad, u8 large_motor, bool small_motor);
+	PadInfo& GetInfo() { return m_info; }
+	std::array<std::shared_ptr<Pad>, CELL_PAD_MAX_PORT_NUM>& GetPads() { return m_pads; }
+	void SetRumble(u32 pad, u8 large_motor, u8 small_motor);
 	void SetIntercepted(bool intercepted);
 
 	s32 AddLddPad();
@@ -49,6 +44,8 @@ public:
 	static void InitPadConfig(cfg_pad& cfg, pad_handler type, std::shared_ptr<PadHandlerBase>& handler);
 
 	static auto constexpr thread_name = "Pad Thread"sv;
+
+	mouse_gyro_handler& get_mouse_gyro() { return m_mouse_gyro; }
 
 protected:
 	void Init();
@@ -68,6 +65,7 @@ protected:
 	u32 num_ldd_pad = 0;
 
 private:
+	void apply_copilots();
 	void update_pad_states();
 
 	u32 m_mask_start_press_to_resume = 0;
@@ -75,6 +73,8 @@ private:
 	bool m_resume_emulation_flag = false;
 	bool m_ps_button_pressed = false;
 	atomic_t<bool> m_home_menu_open = false;
+
+	mouse_gyro_handler m_mouse_gyro;
 };
 
 namespace pad

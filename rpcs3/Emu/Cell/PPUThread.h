@@ -146,7 +146,7 @@ public:
 	virtual void dump_regs(std::string&, std::any& custom_data) const override;
 	virtual std::string dump_callstack() const override;
 	virtual std::vector<std::pair<u32, u32>> dump_callstack_list() const override;
-	virtual std::string dump_misc() const override;
+	virtual void dump_misc(std::string& ret, std::any& custom_data) const override;
 	virtual void dump_all(std::string&) const override;
 	virtual void cpu_task() override final;
 	virtual void cpu_sleep() override;
@@ -165,6 +165,110 @@ public:
 	void save(utils::serial& ar);
 
 	using cpu_thread::operator=;
+
+	u64 gpr[32] = {}; // General-Purpose Registers
+	f64 fpr[32] = {}; // Floating Point Registers
+	v128 vr[32] = {}; // Vector Registers
+
+	union alignas(16) cr_bits
+	{
+		u8 bits[32];
+		u32 fields[8];
+
+		u8& operator [](usz i)
+		{
+			return bits[i];
+		}
+
+		// Pack CR bits
+		u32 pack() const
+		{
+			u32 result{};
+
+			for (u32 bit : bits)
+			{
+				result <<= 1;
+				result |= bit;
+			}
+
+			return result;
+		}
+
+		// Unpack CR bits
+		void unpack(u32 value)
+		{
+			for (u8& b : bits)
+			{
+				b = !!(value & (1u << 31));
+				value <<= 1;
+			}
+		}
+	};
+
+	cr_bits cr{}; // Condition Registers (unpacked)
+
+	// Floating-Point Status and Control Register (unpacked)
+	union
+	{
+		struct
+		{
+			// TODO
+			bool _start[16];
+			bool fl; // FPCC.FL
+			bool fg; // FPCC.FG
+			bool fe; // FPCC.FE
+			bool fu; // FPCC.FU
+			bool _end[12];
+		};
+
+		u32 fields[8];
+		cr_bits bits;
+	}
+	fpscr{};
+
+	u64 lr{}; // Link Register
+	u64 ctr{}; // Counter Register
+	u32 vrsave{0xffffffff}; // VR Save Register
+	u32 cia{}; // Current Instruction Address
+
+	// Fixed-Point Exception Register (abstract representation)
+	struct
+	{
+		ENABLE_BITWISE_SERIALIZATION;
+
+		bool so{}; // Summary Overflow
+		bool ov{}; // Overflow
+		bool ca{}; // Carry
+		u8 cnt{};  // 0..6
+	}
+	xer;
+
+	/*
+		Non-Java. A mode control bit that determines whether vector floating-point operations will be performed
+		in a Java-IEEE-C9X-compliant mode or a possibly faster non-Java/non-IEEE mode.
+		0	The Java-IEEE-C9X-compliant mode is selected. Denormalized values are handled as specified
+			by Java, IEEE, and C9X standard.
+		1	The non-Java/non-IEEE-compliant mode is selected. If an element in a source vector register
+			contains a denormalized value, the value '0' is used instead. If an instruction causes an underflow
+			exception, the corresponding element in the target vr is cleared to '0'. In both cases, the '0'
+			has the same sign as the denormalized or underflowing value.
+	*/
+	bool nj = true;
+
+	// Sticky saturation bit
+	v128 sat{};
+
+	// Optimization: precomputed java-mode mask for handling denormals
+	u32 jm_mask = 0x7f80'0000;
+
+	u32 raddr{0}; // Reservation addr
+	u64 rtime{0};
+	alignas(64) std::byte rdata[128]{}; // Reservation data
+	bool use_full_rdata{};
+	u32 res_cached{0}; // Reservation "cached" addresss
+	u32 res_notify{0};
+	u64 res_notify_time{0};
+	u32 res_notify_postpone_streak{0};
 
 	union ppu_prio_t
 	{
@@ -331,20 +435,6 @@ struct ppu_gpr_cast_impl<vm::_ptr_base<T, AT>>
 	}
 
 	static inline vm::_ptr_base<T, AT> from(const u64 reg)
-	{
-		return vm::cast(ppu_gpr_cast_impl<AT>::from(reg));
-	}
-};
-
-template <typename T, typename AT>
-struct ppu_gpr_cast_impl<vm::_ref_base<T, AT>>
-{
-	static inline u64 to(const vm::_ref_base<T, AT>& value)
-	{
-		return ppu_gpr_cast_impl<AT>::to(value.addr());
-	}
-
-	static inline vm::_ref_base<T, AT> from(const u64 reg)
 	{
 		return vm::cast(ppu_gpr_cast_impl<AT>::from(reg));
 	}

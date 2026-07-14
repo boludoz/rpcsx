@@ -93,23 +93,21 @@ namespace rsx
 					// Move last 32 bits
 					reinterpret_cast<u32*>(dst)[0] = reinterpret_cast<const u32*>(src)[count - 1];
 					RSX(ctx)->invalidate_fragment_program(dst_dma, dst_offset, 4);
+					return;
+				}
+
+				if (dst_dma & CELL_GCM_LOCATION_MAIN)
+				{
+					// May overlap
+					std::memmove(dst, src, data_length);
 				}
 				else
 				{
-					if (dst_dma & CELL_GCM_LOCATION_MAIN)
-					{
-						// May overlap
-						std::memmove(dst, src, data_length);
-					}
-					else
-					{
-						// Never overlaps
-						std::memcpy(dst, src, data_length);
-					}
-
-					RSX(ctx)->invalidate_fragment_program(dst_dma, dst_offset, count * 4);
+					// Never overlaps
+					std::memcpy(dst, src, data_length);
 				}
 
+				RSX(ctx)->invalidate_fragment_program(dst_dma, dst_offset, count * 4);
 				break;
 			}
 			case blit_engine::transfer_destination_format::r5g6b5:

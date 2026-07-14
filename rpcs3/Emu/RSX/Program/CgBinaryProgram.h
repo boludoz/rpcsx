@@ -9,20 +9,15 @@
 #include <cstddef>
 #include <span>
 
-#ifndef WITHOUT_OPENGL
-#include "Emu/RSX/GL/GLVertexProgram.h"
-#include "Emu/RSX/GL/GLFragmentProgram.h"
-#endif
-
-using CGprofile = be_t<u32>;
-using CGbool = be_t<s32>;
-using CGresource = be_t<u32>;
-using CGenum = be_t<u32>;
-using CGtype = be_t<u32>;
-using CGbitfield = be_t<u32>;
-using CGbitfield16 = be_t<u16>;
-using CGint = be_t<s32>;
-using CGuint = be_t<u32>;
+using CGprofile = u32;
+using CGbool = s32;
+using CGresource = u32;
+using CGenum = u32;
+using CGtype = u32;
+using CGbitfield = u32;
+using CGbitfield16 = u16;
+using CGint = s32;
+using CGuint = u32;
 
 using CgBinaryOffset = CGuint;
 using CgBinarySize = CgBinaryOffset;
@@ -176,8 +171,9 @@ class CgBinaryDisasm
 	D3 d3;
 	SRC src[3];
 
-	u8* m_buffer = nullptr;
-	usz m_buffer_size = 0;
+	std::string m_path; // used for FP decompiler thread, delete this later
+
+	std::vector<char> m_buffer;
 	std::string m_arb_shader;
 	std::string m_glsl_shader;
 	std::string m_dst_reg_name;
@@ -192,10 +188,10 @@ class CgBinaryDisasm
 	std::vector<u32> m_loop_end_offsets;
 
 	// VP members
-	u32 m_sca_opcode;
-	u32 m_vec_opcode;
-	static const usz m_max_instr_count = 512;
-	usz m_instr_count;
+	u32 m_sca_opcode = 0;
+	u32 m_vec_opcode = 0;
+	static constexpr usz m_max_instr_count = 512;
+	usz m_instr_count = 0;
 	std::vector<u32> m_data;
 
 public:
@@ -239,198 +235,33 @@ public:
 	void SetDSTVecDisasm(const std::string& code);
 	void SetDSTScaDisasm(const std::string& code);
 
-	CgBinaryDisasm(const std::string& path)
-	{
-		fs::file f(path);
-		if (!f)
-			return;
 
-		m_buffer_size = f.size();
-		m_buffer = new u8[m_buffer_size];
-		f.read(m_buffer, m_buffer_size);
-		fmt::append(m_arb_shader, "Loading... [%s]\n", path.c_str());
-	}
-
-	~CgBinaryDisasm()
-	{
-		delete[] m_buffer;
-	}
-
-	static std::string GetCgParamType(u32 type)
-	{
-		switch (type)
-		{
-		case 1045: return "float";
-		case 1046:
-		case 1047:
-		case 1048: return fmt::format("float%d", type - 1044);
-		case 1064: return "float4x4";
-		case 1066: return "sampler2D";
-		case 1069: return "samplerCUBE";
-		case 1091: return "float1";
-
-		default: return fmt::format("!UnkCgType(%d)", type);
-		}
-	}
-
-	std::string GetCgParamName(u32 offset) const
-	{
-		return std::string(reinterpret_cast<char*>(&m_buffer[offset]));
-	}
-
-	std::string GetCgParamRes(u32 /*offset*/) const
-	{
-		// rsx_log.warning("GetCgParamRes offset 0x%x", offset);
-		// TODO
-		return "";
-	}
-
-	std::string GetCgParamSemantic(u32 offset) const
-	{
-		return std::string(reinterpret_cast<char*>(&m_buffer[offset]));
-	}
-
-	std::string GetCgParamValue(u32 offset, u32 end_offset) const
-	{
-		std::string offsets = "offsets:";
-
-		u32 num = 0;
-		offset += 6;
-		while (offset < end_offset)
-		{
-			fmt::append(offsets, " %d,", m_buffer[offset] << 8 | m_buffer[offset + 1]);
-			offset += 4;
-			num++;
-		}
-
-		if (num > 4)
-			return "";
-
-		offsets.pop_back();
-		return fmt::format("num %d ", num) + offsets;
-	}
+	CgBinaryDisasm(const std::string& path);
 
 	template <typename T>
-	T readData(const u32 offset)
+	CgBinaryDisasm(const std::span<T>& data)
+		: m_path("<raw>")
 	{
-		T result;
-		std::memcpy(&result, m_buffer + offset, sizeof(result));
-		return result;
+		m_buffer.resize(data.size_bytes());
+		std::memcpy(m_buffer.data(), data.data(), data.size_bytes());
 	}
 
-	void BuildShaderBody()
+	~CgBinaryDisasm() = default;
+
+	template<typename T>
+	T& GetCgRef(const u32 offset)
 	{
-		ParamArray param_array;
-
-		auto prog = readData<CgBinaryProgram>(0);
-
-		ensure(prog.profile == 7003u || prog.profile == 7004u);
-
-		if (prog.profile == 7004u)
-		{
-			auto fprog = readData<CgBinaryFragmentProgram>(prog.program);
-			m_arb_shader += "\n";
-			fmt::append(m_arb_shader, "# binaryFormatRevision 0x%x\n", prog.binaryFormatRevision);
-			fmt::append(m_arb_shader, "# profile sce_fp_rsx\n");
-			fmt::append(m_arb_shader, "# parameterCount %d\n", prog.parameterCount);
-			fmt::append(m_arb_shader, "# instructionCount %d\n", fprog.instructionCount);
-			fmt::append(m_arb_shader, "# attributeInputMask 0x%x\n", fprog.attributeInputMask);
-			fmt::append(m_arb_shader, "# registerCount %d\n\n", fprog.registerCount);
-
-			CgBinaryParameterOffset offset = prog.parameterArray;
-			for (u32 i = 0; i < prog.parameterCount; i++)
-			{
-				auto fparam = readData<CgBinaryParameter>(offset);
-
-				std::string param_type = GetCgParamType(fparam.type) + " ";
-				std::string param_name = GetCgParamName(fparam.name) + " ";
-				std::string param_res = GetCgParamRes(fparam.res) + " ";
-				std::string param_semantic = GetCgParamSemantic(fparam.semantic) + " ";
-				std::string param_const = GetCgParamValue(fparam.embeddedConst, fparam.name);
-
-				fmt::append(m_arb_shader, "#%d%s%s%s%s\n", i, param_type, param_name, param_semantic, param_const);
-
-				offset += u32{sizeof(CgBinaryParameter)};
-			}
-
-			m_arb_shader += "\n";
-			m_offset = prog.ucode;
-			TaskFP();
-
-			std::vector<u32> be_data;
-
-			// Swap bytes. FP decompiler expects input in BE
-			for (u32 *ptr = reinterpret_cast<u32*>(m_buffer + m_offset),
-					 *end = reinterpret_cast<u32*>(m_buffer + m_buffer_size);
-				ptr < end; ++ptr)
-			{
-				be_data.push_back(std::bit_cast<be_t<u32>>(*ptr));
-			}
-
-			RSXFragmentProgram prog;
-			auto metadata = program_hash_util::fragment_program_utils::analyse_fragment_program(be_data.data());
-			prog.ctrl = (fprog.outputFromH0 ? 0 : 0x40) | (fprog.depthReplace ? 0xe : 0);
-			prog.offset = metadata.program_start_offset;
-			prog.ucode_length = metadata.program_ucode_length;
-			prog.total_length = metadata.program_ucode_length + metadata.program_start_offset;
-			prog.data = reinterpret_cast<u8*>(be_data.data()) + metadata.program_start_offset;
-			for (u32 i = 0; i < 16; ++i)
-				prog.texture_state.set_dimension(rsx::texture_dimension_extended::texture_dimension_2d, i);
-#ifndef WITHOUT_OPENGL
-			u32 unused;
-			GLFragmentDecompilerThread(m_glsl_shader, param_array, prog, unused).Task();
-#endif
-		}
-
-		else
-		{
-			const auto vprog = readData<CgBinaryVertexProgram>(prog.program);
-			m_arb_shader += "\n";
-			fmt::append(m_arb_shader, "# binaryFormatRevision 0x%x\n", prog.binaryFormatRevision);
-			fmt::append(m_arb_shader, "# profile sce_vp_rsx\n");
-			fmt::append(m_arb_shader, "# parameterCount %d\n", prog.parameterCount);
-			fmt::append(m_arb_shader, "# instructionCount %d\n", vprog.instructionCount);
-			fmt::append(m_arb_shader, "# registerCount %d\n", vprog.registerCount);
-			fmt::append(m_arb_shader, "# attributeInputMask 0x%x\n", vprog.attributeInputMask);
-			fmt::append(m_arb_shader, "# attributeOutputMask 0x%x\n\n", vprog.attributeOutputMask);
-
-			CgBinaryParameterOffset offset = prog.parameterArray;
-			for (u32 i = 0; i < prog.parameterCount; i++)
-			{
-				auto vparam = readData<CgBinaryParameter>(offset);
-
-				std::string param_type = GetCgParamType(vparam.type) + " ";
-				std::string param_name = GetCgParamName(vparam.name.get()) + " ";
-				std::string param_res = GetCgParamRes(vparam.res) + " ";
-				std::string param_semantic = GetCgParamSemantic(vparam.semantic) + " ";
-				std::string param_const = GetCgParamValue(vparam.embeddedConst, vparam.name);
-
-				fmt::append(m_arb_shader, "#%d%s%s%s%s\n", i, param_type, param_name, param_semantic, param_const);
-
-				offset += u32{sizeof(CgBinaryParameter)};
-			}
-
-			m_arb_shader += "\n";
-			m_offset = prog.ucode;
-			ensure((m_buffer_size - m_offset) % sizeof(u32) == 0);
-
-			auto vdata = reinterpret_cast<be_t<u32>*>(&m_buffer[m_offset]);
-			m_data.resize(prog.ucodeSize / sizeof(u32));
-			for (std::size_t i = 0; i < m_data.size(); ++i)
-			{
-				m_data[i] = vdata[i];
-			}
-			TaskVP();
-
-			RSXVertexProgram prog;
-			program_hash_util::vertex_program_utils::analyse_vertex_program(m_data.data(), 0, prog);
-			for (u32 i = 0; i < 4; ++i)
-				prog.texture_state.set_dimension(rsx::texture_dimension_extended::texture_dimension_2d, i);
-#ifndef WITHOUT_OPENGL
-			GLVertexDecompilerThread(prog, m_glsl_shader, param_array).Task();
-#endif
-		}
+		return reinterpret_cast<T&>(m_buffer[offset]);
 	}
+
+	static std::string GetCgParamType(u32 type);
+	std::string GetCgParamName(u32 offset) const;
+	std::string GetCgParamRes(u32 /*offset*/) const;
+	std::string GetCgParamSemantic(u32 offset) const;
+	std::string GetCgParamValue(u32 offset, u32 end_offset) const;
+
+	void ConvertToLE(CgBinaryProgram& prog);
+	void BuildShaderBody(bool include_glsl = true);
 
 	static u32 GetData(const u32 d)
 	{

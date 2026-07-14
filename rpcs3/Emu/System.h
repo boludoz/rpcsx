@@ -59,6 +59,7 @@ enum class game_boot_result : u32
 	still_running,
 	already_added,
 	currently_restricted,
+	database_config_missing,
 };
 
 constexpr bool is_error(game_boot_result res)
@@ -103,8 +104,9 @@ struct EmuCallbacks
 	std::function<std::string(localized_string_id, const char*)> get_localized_string;
 	std::function<std::u32string(localized_string_id, const char*)> get_localized_u32string;
 	std::function<std::string(const cfg::_base*, u32)> get_localized_setting;
-	std::function<void(const std::string&)> play_sound;
-	std::function<bool(const std::string&, std::string&, s32&, s32&, s32&)> get_image_info;    // (filename, sub_type, width, height, CellSearchOrientation)
+	std::function<std::string(std::string_view)> get_photo_path;
+	std::function<void(const std::string&, std::optional<f32>)> play_sound;
+	std::function<bool(const std::string&, std::string&, s32&, s32&, s32&)> get_image_info; // (filename, sub_type, width, height, CellSearchOrientation)
 	std::function<bool(const std::string&, s32, s32, s32&, s32&, u8*, bool)> get_scaled_image; // (filename, target_width, target_height, width, height, dst, force_fit)
 	std::string (*resolve_path)(std::string_view) = [](std::string_view arg)
 	{
@@ -117,11 +119,18 @@ struct EmuCallbacks
 	std::function<void(bool)> enable_display_sleep;
 	std::function<void()> check_microphone_permissions;
 	std::function<std::unique_ptr<class video_source>()> make_video_source;
+	std::function<void(bool)> enable_gamemode;
+	std::function<std::string(const std::string&)> get_database_config;
 };
 
 namespace utils
 {
 	struct serial;
+};
+
+struct emu_precompilation_option_t
+{
+	bool is_fast = false;
 };
 
 class Emulator final
@@ -138,14 +147,17 @@ class Emulator final
 
 	games_config m_games_config;
 
+	std::set<video_renderer> m_supported_renderers;
 	video_renderer m_default_renderer;
 	std::string m_default_graphics_adapter;
 
 	cfg_mode m_config_mode = cfg_mode::custom;
 	std::string m_config_path;
+	std::optional<std::string> m_db_config; // std::nullopt means it has not been retrieved yet
 	std::string m_path;
 	std::string m_path_old;
 	std::string m_path_original;
+	std::string m_path_real;
 	std::string m_title_id;
 	std::string m_title;
 	std::string m_localized_title;
@@ -166,6 +178,8 @@ class Emulator final
 
 	bool m_continuous_mode = false;
 	bool m_has_gui = true;
+	bool m_headless = false;
+	bool m_add_database_config = false;
 
 	bool m_state_inspection_savestate = false;
 
@@ -197,13 +211,17 @@ public:
 	static constexpr std::string_view game_id_boot_prefix = "%RPCS3_GAMEID%:";
 	static constexpr std::string_view vfs_boot_prefix = "%RPCS3_VFS%:";
 
-	Emulator() noexcept = default;
-	~Emulator() noexcept = default;
+	Emulator() noexcept;
+	~Emulator() noexcept;
+
+	static bool IsAvailable() noexcept;
 
 	void SetCallbacks(EmuCallbacks&& cb)
 	{
 		m_cb = std::move(cb);
 	}
+
+	void SetGameDir(const std::string& game_dir) { m_game_dir = game_dir; }
 
 	const auto& GetCallbacks() const
 	{
@@ -215,7 +233,7 @@ public:
 		std::source_location src_loc = std::source_location::current()) const;
 
 	// Blocking call from the GUI thread
-	void BlockingCallFromMainThread(std::function<void()>&& func, std::source_location src_loc = std::source_location::current()) const;
+	void BlockingCallFromMainThread(std::function<void()>&& func, bool track_emu_state = true, std::source_location src_loc = std::source_location::current()) const;
 
 	enum class stop_counter_t : u64
 	{
@@ -251,9 +269,9 @@ public:
 		m_state = system_state::running;
 	}
 
-	void SetState(system_state state)
+	void SetPrecompileCacheOption(emu_precompilation_option_t option)
 	{
-		m_state = state;
+		m_precompilation_option = option;
 	}
 
 	void Init();
@@ -370,6 +388,12 @@ public:
 		return m_config_path;
 	}
 
+	const std::string& GetUsedDatabaseConfig() const
+	{
+		static std::string empty_db_config;
+		return m_db_config ? *m_db_config : empty_db_config;
+	}
+
 	bool IsChildProcess() const
 	{
 		return m_config_mode == cfg_mode::continuous;
@@ -400,7 +424,7 @@ public:
 		{
 			if (active)
 			{
-				_this->m_restrict_emu_state_change--;
+				_this->m_restrict_emu_state_change.try_dec(0);
 			}
 		}
 
@@ -419,7 +443,7 @@ public:
 		return emulation_state_guard_t{this};
 	}
 
-	game_boot_result BootGame(std::string path, const std::string& title_id = "", bool direct = false, cfg_mode config_mode = cfg_mode::custom, const std::string& config_path = "");
+	game_boot_result BootGame(const std::string& path, const std::string& title_id = "", bool direct = false, cfg_mode config_mode = cfg_mode::custom, const std::string& config_path = "", const std::optional<std::string>& db_config = std::nullopt);
 	bool BootRsxCapture(const std::string& path);
 
 	void SetForceBoot(bool force_boot);
@@ -448,41 +472,18 @@ public:
 	void Resume();
 	void GracefulShutdown(bool allow_autoexit = true, bool async_op = false, bool savestate = false, bool continuous_mode = false);
 	void Kill(bool allow_autoexit = true, bool savestate = false, savestate_stage* stage = nullptr);
-	game_boot_result Restart(bool graceful = true);
+	game_boot_result Restart(bool graceful = true, bool reset_path = true);
 	bool Quit(bool force_quit);
 	static void CleanUp();
 
-	bool IsRunning() const
-	{
-		return m_state == system_state::running;
-	}
-	bool IsPaused() const
-	{
-		system_state state = m_state;
-		return state >= system_state::paused && state <= system_state::frozen;
-	}
-	bool IsPausedOrReady() const
-	{
-		return m_state >= system_state::paused;
-	}
-	bool IsStopped(bool test_fully = false) const
-	{
-		return test_fully ? m_state == system_state::stopped : m_state <= system_state::stopping;
-	}
-	bool IsReady() const
-	{
-		return m_state == system_state::ready;
-	}
-	bool IsStarting() const
-	{
-		return m_state == system_state::starting;
-	}
-	auto GetStatus(bool fixup = true) const
-	{
-		system_state state = m_state;
-		return fixup && state == system_state::frozen ? system_state::paused : fixup && state == system_state::stopping ? system_state::stopped :
-		                                                                                                                  state;
-	}
+	bool IsRunning() const { return m_state == system_state::running; }
+	bool IsPaused() const { system_state state = m_state; return state >= system_state::paused && state <= system_state::frozen; }
+	bool IsPausedOrReady() const { return m_state >= system_state::paused; }
+	bool IsStopped(bool test_fully = false) const { return test_fully ? m_state == system_state::stopped : m_state <= system_state::stopping; }
+	bool IsReady()   const { return m_state == system_state::ready; }
+	bool IsStarting() const { return m_state == system_state::starting; }
+	void WaitReady() const { m_state.wait(system_state::ready); }
+	auto GetStatus(bool fixup = true) const { system_state state = m_state; return fixup && state == system_state::frozen ? system_state::paused : fixup && state == system_state::stopping ? system_state::stopped : state; }
 
 	bool HasGui() const
 	{
@@ -493,14 +494,15 @@ public:
 		m_has_gui = has_gui;
 	}
 
-	void SetDefaultRenderer(video_renderer renderer)
-	{
-		m_default_renderer = renderer;
-	}
-	void SetDefaultGraphicsAdapter(std::string adapter)
-	{
-		m_default_graphics_adapter = std::move(adapter);
-	}
+	bool IsHeadless() const { return m_headless; }
+	void SetHeadless(bool headless) { m_headless = headless; }
+
+	const std::set<video_renderer>& GetSupportedRenderers() const { return m_supported_renderers; }
+	void SetSupportedRenderers(std::set<video_renderer> renderers) { m_supported_renderers = std::move(renderers); }
+
+	video_renderer GetDefaultRenderer() const { return m_default_renderer; }
+	void SetDefaultRenderer(video_renderer renderer) { m_default_renderer = renderer; }
+	void SetDefaultGraphicsAdapter(std::string adapter) { m_default_graphics_adapter = std::move(adapter); }
 
 	std::string GetFormattedTitle(double fps) const;
 
@@ -510,6 +512,7 @@ public:
 	u32 AddGamesFromDir(const std::string& path);
 	game_boot_result AddGame(const std::string& path);
 	game_boot_result AddGameToYml(const std::string& path);
+	u32 RemoveGamesFromDir(const std::string& games_dir, const std::vector<std::string>& serials_to_remove_from_yml = {}, bool save_on_disk = true);
 	u32 RemoveGames(const std::vector<std::string>& title_id_list, bool save_on_disk = true);
 	game_boot_result RemoveGameFromYml(const std::string& title_id);
 
@@ -531,7 +534,3 @@ public:
 };
 
 extern Emulator Emu;
-
-extern bool g_use_rtm;
-extern u64 g_rtm_tx_limit1;
-extern u64 g_rtm_tx_limit2;

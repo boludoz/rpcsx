@@ -805,6 +805,8 @@ bool SELFDecrypter::LoadHeaders(bool isElf32, SelfAdditionalInfo* out_info)
 	self_f.seek(0);
 	sce_hdr.Load(self_f);
 
+	const usz self_size = self_f.size();
+
 	if (out_info)
 	{
 		*out_info = {};
@@ -878,8 +880,9 @@ bool SELFDecrypter::LoadHeaders(bool isElf32, SelfAdditionalInfo* out_info)
 
 	for (u32 i = 0; i < (isElf32 ? elf32_hdr.e_phnum : elf64_hdr.e_phnum); ++i)
 	{
-		if (self_f.pos() >= self_f.size())
+		if (self_f.pos() >= self_size)
 		{
+			// Read out of bounds (file is truncated or corrupted)
 			return false;
 		}
 
@@ -889,13 +892,16 @@ bool SELFDecrypter::LoadHeaders(bool isElf32, SelfAdditionalInfo* out_info)
 
 	if (m_ext_hdr.version_hdr_offset == 0 || rx::add_saturate<u64>(m_ext_hdr.version_hdr_offset, sizeof(version_header)) > self_f.size())
 	{
+		// Read out of bounds (file is truncated or corrupted)
 		return false;
 	}
+	else
+	{
+		// Read SCE version info.
+		self_f.seek(m_ext_hdr.version_hdr_offset);
 
-	// Read SCE version info.
-	self_f.seek(m_ext_hdr.version_hdr_offset);
-
-	m_version_hdr.Load(self_f);
+		m_version_hdr.Load(self_f);
+	}
 
 	// Read control info.
 	m_supplemental_hdr_arr.clear();
@@ -903,8 +909,9 @@ bool SELFDecrypter::LoadHeaders(bool isElf32, SelfAdditionalInfo* out_info)
 
 	for (u64 i = 0; i < m_ext_hdr.supplemental_hdr_size;)
 	{
-		if (self_f.pos() >= self_f.size())
+		if (self_f.pos() >= self_size)
 		{
+			// Read out of bounds (file is truncated or corrupted)
 			return false;
 		}
 
@@ -1336,17 +1343,19 @@ static fs::file CheckDebugSelf(const fs::file& s)
 		// Get the real elf offset.
 		s.seek(0x10);
 
-		// Start at the real elf offset.
-		s.seek(key_version == 0x80 ? +s.read<be_t<u64>>() : +s.read<le_t<u64>>());
+		// Read the real elf offset.
+		usz read_pos = key_version == 0x80 ? +s.read<be_t<u64>>() : +s.read<le_t<u64>>();
 
 		// Write the real ELF file back.
 		fs::file e = fs::make_stream<std::vector<u8>>();
 
 		// Copy the data.
-		char buf[2048];
-		while (const u64 size = s.read(buf, 2048))
+		std::vector<u8> buf(std::min<usz>(s.size(), 4096));
+
+		while (const u64 size = s.read_at(read_pos, buf.data(), buf.size()))
 		{
-			e.write(buf, size);
+			e.write(buf.data(), size);
+			read_pos += size;
 		}
 
 		return e;
@@ -1371,7 +1380,10 @@ fs::file decrypt_self(const fs::file& elf_or_self, const u8* klic_key, SelfAddit
 	elf_or_self.seek(0);
 
 	// Check SELF header first. Check for a debug SELF.
-	if (elf_or_self.size() >= 4 && elf_or_self.read<u32>() == "SCE\0"_u32)
+	u32 file_type = umax;
+	elf_or_self.read_at(0, &file_type, sizeof(file_type));
+
+	if (file_type == "SCE\0"_u32)
 	{
 		if (fs::file res = CheckDebugSelf(elf_or_self))
 		{
@@ -1408,6 +1420,23 @@ fs::file decrypt_self(const fs::file& elf_or_self, const u8* klic_key, SelfAddit
 
 		// Make a new ELF file from this SELF.
 		return self_dec.MakeElf(isElf32);
+	}
+	else if (Emu.GetBoot().ends_with(".elf") || Emu.GetBoot().ends_with(".ELF"))
+	{
+		// Write the file back if the main executable is not signed
+		fs::file e = fs::make_stream<std::vector<u8>>();
+
+		// Copy the data.
+		std::vector<u8> buf(std::min<usz>(elf_or_self.size(), 4096));
+
+		usz read_pos = 0;
+		while (const u64 size = elf_or_self.read_at(read_pos, buf.data(), buf.size()))
+		{
+			e.write(buf.data(), size);
+			read_pos += size;
+		}
+
+		return e;
 	}
 
 	return {};

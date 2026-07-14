@@ -525,24 +525,12 @@ namespace ppu_patterns
 	};
 } // namespace ppu_patterns
 
-static constexpr struct const_tag
-{
-} is_const;
-static constexpr struct range_tag
-{
-} is_range;
-static constexpr struct min_value_tag
-{
-} minv;
-static constexpr struct max_value_tag
-{
-} maxv;
-static constexpr struct sign_bit_tag
-{
-} sign_bitv;
-static constexpr struct load_addr_tag
-{
-} load_addrv;
+static constexpr struct const_tag{} is_const;
+/*static constexpr*/ struct range_tag{} /*is_range*/;
+static constexpr struct min_value_tag{} minv;
+static constexpr struct max_value_tag{} maxv;
+static constexpr struct sign_bit_tag{} sign_bitv;
+static constexpr struct load_addr_tag{} load_addrv;
 
 struct reg_state_t
 {
@@ -1205,7 +1193,7 @@ bool ppu_module<lv2_obj>::analyse(u32 lib_toc, u32 entry, const u32 sec_end, con
 			continue;
 		}
 
-		vm::cptr<void> sec_end = vm::cast(sec.addr + sec.size);
+		vm::cptr<u32> sec_end = vm::cast(sec.addr + sec.size);
 
 		// Probe
 		for (vm::cptr<u32> _ptr = vm::cast(sec.addr); _ptr < sec_end;)
@@ -1226,7 +1214,7 @@ bool ppu_module<lv2_obj>::analyse(u32 lib_toc, u32 entry, const u32 sec_end, con
 				break;
 			}
 
-			if (size % 4 || size < 0x10 || _ptr + size / 4 > sec_end)
+			if (size % 4 || size < 0x10 || static_cast<u32>(sec_end - _ptr) < size / 4)
 			{
 				sec_end.set(0);
 				break;
@@ -2389,7 +2377,9 @@ bool ppu_module<lv2_obj>::analyse(u32 lib_toc, u32 entry, const u32 sec_end, con
 				}
 				case ppu_itype::MTSPR:
 				{
-					switch (const u32 n = (op.spr >> 5) | ((op.spr & 0x1f) << 5))
+					const u32 spr_idx = (op.spr >> 5) | ((op.spr & 0x1f) << 5);
+
+					switch (spr_idx)
 					{
 					case 0x001: // MTXER
 					{
@@ -2483,7 +2473,6 @@ bool ppu_module<lv2_obj>::analyse(u32 lib_toc, u32 entry, const u32 sec_end, con
 						const reg_state_t rb = get_reg(op.rb);
 
 						const bool is_ra = ra(is_const) && (ra(minv) >= start && ra(minv) < segs_end);
-						const bool is_rb = rb(is_const) && (rb(minv) >= start && rb(minv) < segs_end);
 
 						if (ra(is_const) == rb(is_const))
 						{
@@ -2558,7 +2547,7 @@ bool ppu_module<lv2_obj>::analyse(u32 lib_toc, u32 entry, const u32 sec_end, con
 						// SLDI mnemonic
 						reg_state_t rs = get_reg(op.rs);
 
-						if (!rs.shift_left(op.sh32, reg_tag_allocator))
+						if (!rs.shift_left(sh, reg_tag_allocator))
 						{
 							unmap_reg(op.ra);
 						}

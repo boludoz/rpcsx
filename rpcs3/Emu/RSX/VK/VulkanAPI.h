@@ -1,14 +1,19 @@
 #pragma once
 
+// Configure vulkan.h
 #ifdef _WIN32
 #define VK_USE_PLATFORM_WIN32_KHR
 #elif defined(__APPLE__)
-#define VK_USE_PLATFORM_MACOS_MVK
+#define VK_USE_PLATFORM_METAL_EXT
 #elif defined(ANDROID)
 #define VK_USE_PLATFORM_ANDROID_KHR
-#define VK_NO_PROTOTYPES
-#elif HAVE_X11
-#define VK_USE_PLATFORM_XLIB_KHR
+#else
+#if defined(HAVE_X11)
+ #define VK_USE_PLATFORM_XLIB_KHR
+#endif
+#if defined(HAVE_WAYLAND)
+ #define VK_USE_PLATFORM_WAYLAND_KHR
+#endif
 #endif
 
 #ifdef _MSC_VER
@@ -21,6 +26,13 @@
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
+
+// Undefine header configuration variables
+#undef VK_USE_PLATFORM_WIN32_KHR
+#undef VK_USE_PLATFORM_METAL_EXT
+#undef VK_USE_PLATFORM_ANDROID_KHR
+#undef VK_USE_PLATFORM_XLIB_KHR
+#undef VK_USE_PLATFORM_WAYLAND_KHR
 
 #include <util/types.hpp>
 

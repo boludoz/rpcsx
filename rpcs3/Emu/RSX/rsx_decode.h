@@ -3098,16 +3098,10 @@ namespace rsx
 				return bf_decoder<1, 1, bool>(value >> (index * 4));
 			}
 
-			bool color_a(int index) const
-			{
-				return bf_decoder<0, 1, bool>(value >> (index * 4));
-			}
-
-			bool color_write_enabled(int index) const
-			{
-				return ((value >> (index * 4)) & 0xF) != 0;
-			}
-		};
+		auto pixel_center() const
+		{
+			return to_window_pixel_center(window_shader_pixel_center_raw());
+		}
 
 		static void dump(std::string& out, const decoded_type& decoded)
 		{
@@ -3128,10 +3122,10 @@ namespace rsx
 	template <>
 	struct registers_decoder<NV4097_SET_SHADER_WINDOW>
 	{
-		struct decoded_type
-		{
-		private:
-			u32 value;
+		fmt::append(out, "Viewport: height: %u origin: %s pixel center: %s", decoded.window_shader_height()
+			, decoded.window_shader_origin(), decoded.pixel_center());
+	}
+};
 
 			u8 window_shader_origin_raw() const
 			{
@@ -3831,10 +3825,10 @@ namespace rsx
 				return blit_engine::to_transfer_destination_format(transfer_destination_fmt());
 			}
 
-			u8 sw_height_log2() const
-			{
-				return bf_decoder<16, 8>(value);
-			}
+		u8 sw_height_log2() const
+		{
+			return bf_decoder<24, 8>(value);
+		}
 
 			u8 sw_width_log2() const
 			{
@@ -3844,8 +3838,7 @@ namespace rsx
 
 		static void dump(std::string& out, const decoded_type& decoded)
 		{
-			fmt::append(out, "NV309E: output fmt: %s log2-width: %u log2-height: %u", decoded.format(),
-				decoded.sw_width_log2(), decoded.sw_height_log2());
+			return bf_decoder<16, 8>(value);
 		}
 	};
 

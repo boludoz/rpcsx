@@ -5,6 +5,7 @@ add_library(rpcs3_emu STATIC
     localized_string.cpp
     savestate_utils.cpp
     scoped_progress_dialog.cpp
+    stb_image.cpp
     System.cpp
     system_config.cpp
     system_config_types.cpp
@@ -25,23 +26,16 @@ if(USE_LTO)
 endif()
 
 if(USE_ASAN)
-    set_source_files_properties(../../Utilities/Thread.cpp PROPERTIES COMPILE_DEFINITIONS USE_ASAN)
+    set_source_files_properties(../util/Thread.cpp PROPERTIES COMPILE_DEFINITIONS USE_ASAN)
+endif()
+
+if(NOT USE_SYSTEM_OPENAL)
+    target_compile_definitions(rpcs3_emu PUBLIC AL_LIBTYPE_STATIC)
 endif()
 
 if(HAS_MEMORY_BREAKPOINTS)
     target_compile_definitions(rpcs3_emu PRIVATE RPCS3_HAS_MEMORY_BREAKPOINTS)
 endif()
-
-target_link_libraries(rpcs3_emu
-    PRIVATE
-        3rdparty::zlib 3rdparty::yaml-cpp 3rdparty::zstd
-    PUBLIC
-        3rdparty::libevdev 3rdparty::flatbuffers)
-
-
-find_package(Threads REQUIRED)
-target_link_libraries(rpcs3_emu
-    PUBLIC Threads::Threads)
 
 # For stdafx.h
 target_include_directories(rpcs3_emu
@@ -55,11 +49,89 @@ target_include_directories(rpcs3_emu
         ${CMAKE_CURRENT_SOURCE_DIR}/../../3rdparty
 )
 
+# Utilities
+target_sources(rpcs3_emu PRIVATE
+    ../util/atomic.cpp
+    ../util/console.cpp
+    ../util/emu_utils.cpp
+    ../util/media_utils.cpp
+    ../util/video_provider.cpp
+    ../util/logs.cpp
+    ../util/yaml.cpp
+    ../util/vm_native.cpp
+    ../util/dyn_lib.cpp
+    ../util/sysinfo.cpp
+    ../util/cpu_stats.cpp
+    ../util/serialization_ext.cpp
+    ../util/bin_patch.cpp
+    ../util/cheat_info.cpp
+    ../util/cond.cpp
+    ../util/Config.cpp
+    ../util/date_time.cpp
+    ../util/File.cpp
+    ../util/JITASM.cpp
+    ../util/JITLLVM.cpp
+    ../util/LUrlParser.cpp
+    ../util/mutex.cpp
+    ../util/rXml.cpp
+    ../util/sema.cpp
+    ../util/simple_ringbuf.cpp
+    ../util/stack_trace.cpp
+    ../util/stereo_config.cpp
+    ../util/StrFmt.cpp
+    ../util/Thread.cpp
+    ../util/version.cpp
+)
+if(APPLE)
+    target_sources(rpcs3_emu PRIVATE
+        ../util/darwin/sysinfo_darwin.mm
+    )
+endif()
+
 target_include_directories(rpcs3_emu PUBLIC "${CMAKE_SOURCE_DIR}")
 
-target_link_libraries(rpcs3_emu
-    PUBLIC
-        3rdparty::pugixml)
+set_source_files_properties("../util/JITLLVM.cpp" "../util/JITASM.cpp" PROPERTIES
+    COMPILE_FLAGS "$<IF:$<CXX_COMPILER_ID:MSVC>,/GR-,-fno-rtti>"
+    SKIP_PRECOMPILE_HEADERS ON
+)
+
+set_source_files_properties("../util/yaml.cpp" PROPERTIES
+    COMPILE_FLAGS "$<IF:$<CXX_COMPILER_ID:MSVC>,/EHsc,-fexceptions>"
+    SKIP_PRECOMPILE_HEADERS ON
+)
+
+# Crypto
+target_sources(rpcs3_emu PRIVATE
+    ../Crypto/aes.cpp
+    ../Crypto/aesni.cpp
+    ../Crypto/decrypt_binaries.cpp
+    ../Crypto/ec.cpp
+    ../Crypto/key_vault.cpp
+    ../Crypto/lz.cpp
+    ../Crypto/md5.cpp
+    ../Crypto/sha1.cpp
+    ../Crypto/sha256.cpp
+    ../Crypto/unedat.cpp
+    ../Crypto/unpkg.cpp
+    ../Crypto/unself.cpp
+    ../Crypto/unzip.cpp
+    ../Crypto/utils.cpp
+)
+
+# Loader
+target_sources(rpcs3_emu PRIVATE
+    ../Loader/disc.cpp
+    ../Loader/ELF.cpp
+    ../Loader/mself.cpp
+    ../Loader/PSF.cpp
+    ../Loader/PUP.cpp
+    ../Loader/TAR.cpp
+    ../Loader/ISO.cpp
+    ../Loader/iso_cache.cpp
+    ../Loader/iso_validation.cpp
+    ../Loader/TROPUSR.cpp
+    ../Loader/TRP.cpp
+)
 
 # Audio
 target_sources(rpcs3_emu PRIVATE
@@ -94,16 +166,8 @@ if(WIN32)
         Audio/XAudio2/xaudio2_enumerator.cpp
     )
     target_compile_definitions(rpcs3_emu PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0A00)
+    target_link_libraries(rpcs3_emu PRIVATE pdh bcrypt dbghelp)
 endif()
-
-target_link_libraries(rpcs3_emu
-    PUBLIC
-        3rdparty::openal
-        3rdparty::cubeb
-        3rdparty::soundtouch
-        3rdparty::miniupnpc
-        3rdparty::json
-)
 
 # Cell
 target_sources(rpcs3_emu PRIVATE
@@ -124,6 +188,199 @@ target_sources(rpcs3_emu PRIVATE
     Cell/SPUCommonRecompiler.cpp
     Cell/SPULLVMRecompiler.cpp
     Cell/SPUThread.cpp
+    Cell/lv2/lv2.cpp
+    Cell/lv2/sys_bdemu.cpp
+    Cell/lv2/sys_btsetting.cpp
+    Cell/lv2/sys_cond.cpp
+    Cell/lv2/sys_console.cpp
+    Cell/lv2/sys_crypto_engine.cpp
+    Cell/lv2/sys_config.cpp
+    Cell/lv2/sys_dbg.cpp
+    Cell/lv2/sys_event.cpp
+    Cell/lv2/sys_event_flag.cpp
+    Cell/lv2/sys_fs.cpp
+    Cell/lv2/sys_game.cpp
+    Cell/lv2/sys_gamepad.cpp
+    Cell/lv2/sys_gpio.cpp
+    Cell/lv2/sys_hid.cpp
+    Cell/lv2/sys_interrupt.cpp
+    Cell/lv2/sys_io.cpp
+    Cell/lv2/sys_lwcond.cpp
+    Cell/lv2/sys_lwmutex.cpp
+    Cell/lv2/sys_memory.cpp
+    Cell/lv2/sys_mmapper.cpp
+    Cell/lv2/sys_mutex.cpp
+    Cell/lv2/sys_net.cpp
+    Cell/lv2/sys_net/lv2_socket.cpp
+    Cell/lv2/sys_net/lv2_socket_native.cpp
+    Cell/lv2/sys_net/lv2_socket_raw.cpp
+    Cell/lv2/sys_net/lv2_socket_p2p.cpp
+    Cell/lv2/sys_net/lv2_socket_p2ps.cpp
+    Cell/lv2/sys_net/network_context.cpp
+    Cell/lv2/sys_net/nt_p2p_port.cpp
+    Cell/lv2/sys_net/sys_net_helpers.cpp
+    Cell/lv2/sys_overlay.cpp
+    Cell/lv2/sys_ppu_thread.cpp
+    Cell/lv2/sys_process.cpp
+    Cell/lv2/sys_prx.cpp
+    Cell/lv2/sys_rsx.cpp
+    Cell/lv2/sys_rsxaudio.cpp
+    Cell/lv2/sys_rwlock.cpp
+    Cell/lv2/sys_semaphore.cpp
+    Cell/lv2/sys_spu.cpp
+    Cell/lv2/sys_sm.cpp
+    Cell/lv2/sys_ss.cpp
+    Cell/lv2/sys_storage.cpp
+    Cell/lv2/sys_time.cpp
+    Cell/lv2/sys_timer.cpp
+    Cell/lv2/sys_trace.cpp
+    Cell/lv2/sys_tty.cpp
+    Cell/lv2/sys_uart.cpp
+    Cell/lv2/sys_usbd.cpp
+    Cell/lv2/sys_vm.cpp
+    Cell/Modules/cellAdec.cpp
+    Cell/Modules/cellAtrac.cpp
+    Cell/Modules/cellAtracMulti.cpp
+    Cell/Modules/cellAtracXdec.cpp
+    Cell/Modules/cellAudio.cpp
+    Cell/Modules/cellAudioOut.cpp
+    Cell/Modules/cellAuthDialog.cpp
+    Cell/Modules/cellAvconfExt.cpp
+    Cell/Modules/cellBgdl.cpp
+    Cell/Modules/cellCamera.cpp
+    Cell/Modules/cellCelp8Enc.cpp
+    Cell/Modules/cellCelpEnc.cpp
+    Cell/Modules/cellCrossController.cpp
+    Cell/Modules/cellDaisy.cpp
+    Cell/Modules/cellDmux.cpp
+    Cell/Modules/cellDmuxPamf.cpp
+    Cell/Modules/cellDtcpIpUtility.cpp
+    Cell/Modules/cellFiber.cpp
+    Cell/Modules/cellFont.cpp
+    Cell/Modules/cellFontFT.cpp
+    Cell/Modules/cell_FreeType2.cpp
+    Cell/Modules/cellFs.cpp
+    Cell/Modules/cellGame.cpp
+    Cell/Modules/cellGameExec.cpp
+    Cell/Modules/cellGcmSys.cpp
+    Cell/Modules/cellGem.cpp
+    Cell/Modules/cellGifDec.cpp
+    Cell/Modules/cellHttp.cpp
+    Cell/Modules/cellHttpUtil.cpp
+    Cell/Modules/cellImeJp.cpp
+    Cell/Modules/cellJpgDec.cpp
+    Cell/Modules/cellJpgEnc.cpp
+    Cell/Modules/cellKb.cpp
+    Cell/Modules/cellKey2char.cpp
+    Cell/Modules/cellL10n.cpp
+    Cell/Modules/cellLibprof.cpp
+    Cell/Modules/cellMic.cpp
+    Cell/Modules/cellMouse.cpp
+    Cell/Modules/cellMsgDialog.cpp
+    Cell/Modules/cellMusic.cpp
+    Cell/Modules/cellMusicDecode.cpp
+    Cell/Modules/cellMusicSelectionContext.cpp
+    Cell/Modules/cellMusicExport.cpp
+    Cell/Modules/cellNetAoi.cpp
+    Cell/Modules/cellNetCtl.cpp
+    Cell/Modules/cellOskDialog.cpp
+    Cell/Modules/cellOvis.cpp
+    Cell/Modules/cellPad.cpp
+    Cell/Modules/cellPamf.cpp
+    Cell/Modules/cellPesmUtility.cpp
+    Cell/Modules/cellPhotoDecode.cpp
+    Cell/Modules/cellPhotoExport.cpp
+    Cell/Modules/cellPhotoImport.cpp
+    Cell/Modules/cellPngDec.cpp
+    Cell/Modules/cellPngEnc.cpp
+    Cell/Modules/cellPrint.cpp
+    Cell/Modules/cellRec.cpp
+    Cell/Modules/cellRemotePlay.cpp
+    Cell/Modules/cellResc.cpp
+    Cell/Modules/cellRtcAlarm.cpp
+    Cell/Modules/cellRtc.cpp
+    Cell/Modules/cellRudp.cpp
+    Cell/Modules/cellSail.cpp
+    Cell/Modules/cellSailRec.cpp
+    Cell/Modules/cellSaveData.cpp
+    Cell/Modules/cellScreenshot.cpp
+    Cell/Modules/cellSearch.cpp
+    Cell/Modules/cellSheap.cpp
+    Cell/Modules/cellSpudll.cpp
+    Cell/Modules/cellSpurs.cpp
+    Cell/Modules/cellSpursJq.cpp
+    Cell/Modules/cellSpursSpu.cpp
+    Cell/Modules/cellSsl.cpp
+    Cell/Modules/cellStorage.cpp
+    Cell/Modules/cellSubDisplay.cpp
+    Cell/Modules/cellSync2.cpp
+    Cell/Modules/cellSync.cpp
+    Cell/Modules/cellSysconf.cpp
+    Cell/Modules/cellSysCache.cpp
+    Cell/Modules/cellSysmodule.cpp
+    Cell/Modules/cellSysutilAp.cpp
+    Cell/Modules/cellSysutilAvc2.cpp
+    Cell/Modules/cellSysutilAvc.cpp
+    Cell/Modules/cellSysutilAvcExt.cpp
+    Cell/Modules/cellSysutil.cpp
+    Cell/Modules/cellSysutilMisc.cpp
+    Cell/Modules/cellSysutilNpEula.cpp
+    Cell/Modules/cellUsbd.cpp
+    Cell/Modules/cellUsbpspcm.cpp
+    Cell/Modules/cellUserInfo.cpp
+    Cell/Modules/cellVdec.cpp
+    Cell/Modules/cellVideoExport.cpp
+    Cell/Modules/cellVideoOut.cpp
+    Cell/Modules/cellVideoPlayerUtility.cpp
+    Cell/Modules/cellVideoUpload.cpp
+    Cell/Modules/cellVoice.cpp
+    Cell/Modules/cellVpost.cpp
+    Cell/Modules/cellWebBrowser.cpp
+    Cell/Modules/HLE_PATCHES.cpp
+    Cell/Modules/libad_async.cpp
+    Cell/Modules/libad_core.cpp
+    Cell/Modules/libavcdec.cpp
+    Cell/Modules/libdivx311dec.cpp
+    Cell/Modules/libdivxdec.cpp
+    Cell/Modules/libmedi.cpp
+    Cell/Modules/libmixer.cpp
+    Cell/Modules/libmvcdec.cpp
+    Cell/Modules/libsjvtd.cpp
+    Cell/Modules/libsmvd2.cpp
+    Cell/Modules/libsmvd4.cpp
+    Cell/Modules/libsnd3.cpp
+    Cell/Modules/libsvc1d.cpp
+    Cell/Modules/libsynth2.cpp
+    Cell/Modules/sceNp2.cpp
+    Cell/Modules/sceNpClans.cpp
+    Cell/Modules/sceNpCommerce2.cpp
+    Cell/Modules/sceNp.cpp
+    Cell/Modules/sceNpMatchingInt.cpp
+    Cell/Modules/sceNpPlus.cpp
+    Cell/Modules/sceNpSns.cpp
+    Cell/Modules/sceNpTrophy.cpp
+    Cell/Modules/sceNpTus.cpp
+    Cell/Modules/sceNpUtil.cpp
+    Cell/Modules/StaticHLE.cpp
+    Cell/Modules/sys_crashdump.cpp
+    Cell/Modules/sys_game_.cpp
+    Cell/Modules/sys_heap.cpp
+    Cell/Modules/sys_io_.cpp
+    Cell/Modules/sys_libc_.cpp
+    Cell/Modules/sys_libc.cpp
+    Cell/Modules/sys_lv2dbg.cpp
+    Cell/Modules/sys_lwcond_.cpp
+    Cell/Modules/sys_lwmutex_.cpp
+    Cell/Modules/sys_mempool.cpp
+    Cell/Modules/sys_mmapper_.cpp
+    Cell/Modules/sys_net_.cpp
+    Cell/Modules/sys_ppu_thread_.cpp
+    Cell/Modules/sys_prx_.cpp
+    Cell/Modules/sysPrxForUser.cpp
+    Cell/Modules/sys_rsxaudio_.cpp
+    Cell/Modules/sys_spinlock.cpp
+    Cell/Modules/sys_spu_.cpp
+    Cell/Modules/libfs_utility_init.cpp
 )
 
 if(NOT MSVC)
@@ -132,12 +389,6 @@ if(NOT MSVC)
         SKIP_PRECOMPILE_HEADERS ON
     )
 endif()
-
-target_link_libraries(rpcs3_emu
-    PRIVATE
-        3rdparty::stblib 3rdparty::libpng
-)
-
 
 # CPU
 target_sources(rpcs3_emu PRIVATE
@@ -154,21 +405,20 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|arm64|aarch64")
     )
 endif()
 
-target_link_libraries(rpcs3_emu
-    PUBLIC 3rdparty::llvm 3rdparty::asmjit cellos-kernel
-)
-
 
 # Io
 target_sources(rpcs3_emu PRIVATE
     Io/Buzz.cpp
     Io/camera_config.cpp
     Io/Dimensions.cpp
+    Io/evdev_gun_handler.cpp
     Io/GameTablet.cpp
+    Io/gem_config.cpp
     Io/GHLtar.cpp
     Io/GunCon3.cpp
     Io/Infinity.cpp
     Io/interception.cpp
+    Io/KamenRider.cpp
     Io/KeyboardHandler.cpp
     Io/midi_config_types.cpp
     Io/mouse_config.cpp
@@ -177,6 +427,7 @@ target_sources(rpcs3_emu PRIVATE
     Io/pad_config_types.cpp
     Io/pad_types.cpp
     Io/PadHandler.cpp
+    Io/ps_move_data.cpp
     Io/rb3drums_config.cpp
     Io/RB3MidiDrums.cpp
     Io/RB3MidiGuitar.cpp
@@ -187,17 +438,16 @@ target_sources(rpcs3_emu PRIVATE
     Io/TopShotFearmaster.cpp
     Io/Turntable.cpp
     Io/usb_device.cpp
+    Io/usb_microphone.cpp
     Io/usb_vfs.cpp
     Io/usio.cpp
-)
-
-target_link_libraries(rpcs3_emu PRIVATE
-    3rdparty::rtmidi
+    Io/LogitechG27.cpp
+    Io/LogitechG27Config.cpp
 )
 
 # Np
 target_sources(rpcs3_emu PRIVATE
-    NP/fb_helpers.cpp
+    NP/pb_helpers.cpp
     NP/np_cache.cpp
     NP/np_gui_cache.cpp
     NP/np_contexts.cpp
@@ -209,12 +459,15 @@ target_sources(rpcs3_emu PRIVATE
     NP/np_requests.cpp
     NP/signaling_handler.cpp
     NP/np_structs_extra.cpp
+    NP/clans_client.cpp
+    NP/clans_config.cpp
     NP/rpcn_client.cpp
     NP/rpcn_config.cpp
     NP/rpcn_countries.cpp
     NP/upnp_config.cpp
     NP/upnp_handler.cpp
     NP/ip_address.cpp
+    NP/generated/np2_structs.pb.cc
 )
 
 # Memory
@@ -249,6 +502,7 @@ target_sources(rpcs3_emu PRIVATE
     RSX/NV47/HW/nv406e.cpp
     RSX/NV47/HW/nv4097.cpp
     RSX/Overlays/FriendsList/overlay_friends_list_dialog.cpp
+    RSX/Overlays/HomeMenu/overlay_home_icons.cpp
     RSX/Overlays/HomeMenu/overlay_home_menu.cpp
     RSX/Overlays/HomeMenu/overlay_home_menu_components.cpp
     RSX/Overlays/HomeMenu/overlay_home_menu_main_menu.cpp
@@ -262,6 +516,8 @@ target_sources(rpcs3_emu PRIVATE
     RSX/Overlays/overlays.cpp
     RSX/Overlays/overlay_animated_icon.cpp
     RSX/Overlays/overlay_animation.cpp
+    RSX/Overlays/overlay_audio.cpp
+    RSX/Overlays/overlay_checkbox.cpp
     RSX/Overlays/overlay_compile_notification.cpp
     RSX/Overlays/overlay_controls.cpp
     RSX/Overlays/overlay_cursor.cpp
@@ -278,19 +534,28 @@ target_sources(rpcs3_emu PRIVATE
     RSX/Overlays/overlay_perf_metrics.cpp
     RSX/Overlays/overlay_progress_bar.cpp
     RSX/Overlays/overlay_save_dialog.cpp
+    RSX/Overlays/overlay_select.cpp
+    RSX/Overlays/overlay_slider.cpp
+    RSX/Overlays/overlay_tabs.cpp
     RSX/Overlays/overlay_trophy_notification.cpp
     RSX/Overlays/overlay_user_list_dialog.cpp
     RSX/Overlays/overlay_utils.cpp
     RSX/Overlays/overlay_video.cpp
     RSX/Overlays/Shaders/shader_loading_dialog.cpp
     RSX/Overlays/Shaders/shader_loading_dialog_native.cpp
+    RSX/Program/Assembler/FPASM.cpp
+    RSX/Program/Assembler/FPOpcodes.cpp
+    RSX/Program/Assembler/FPToCFG.cpp
+    RSX/Program/Assembler/Passes/FP/RegisterAnnotationPass.cpp
+    RSX/Program/Assembler/Passes/FP/RegisterDependencyPass.cpp
+    RSX/Program/CgBinaryProgram.cpp
     RSX/Program/CgBinaryFragmentProgram.cpp
     RSX/Program/CgBinaryVertexProgram.cpp
     RSX/Program/FragmentProgramDecompiler.cpp
-    RSX/Program/FragmentProgramRegister.cpp
     RSX/Program/GLSLCommon.cpp
     RSX/Program/ProgramStateCache.cpp
     RSX/Program/program_util.cpp
+    RSX/Program/ShaderInterpreter.cpp
     RSX/Program/SPIRVCommon.cpp
     RSX/Program/VertexProgramDecompiler.cpp
     RSX/GSFrameBase.cpp
@@ -305,7 +570,7 @@ target_sources(rpcs3_emu PRIVATE
     RSX/rsx_vertex_data.cpp
 )
 
-if(NOT ANDROID)
+if(NOT ANDROID AND NOT APPLE)
     target_sources(rpcs3_emu PRIVATE
         RSX/GL/GLCommonDecompiler.cpp
         RSX/GL/GLCompute.cpp
@@ -345,6 +610,7 @@ if(TARGET 3rdparty_vulkan)
         RSX/VK/vkutils/buffer_object.cpp
         RSX/VK/vkutils/chip_class.cpp
         RSX/VK/vkutils/commands.cpp
+        RSX/VK/vkutils/ex.cpp
         RSX/VK/vkutils/data_heap.cpp
         RSX/VK/vkutils/descriptors.cpp
         RSX/VK/vkutils/image.cpp
@@ -357,11 +623,13 @@ if(TARGET 3rdparty_vulkan)
         RSX/VK/vkutils/device.cpp
         RSX/VK/vkutils/sampler.cpp
         RSX/VK/vkutils/shared.cpp
+        RSX/VK/vkutils/unique_resource.cpp
         RSX/VK/VKAsyncScheduler.cpp
         RSX/VK/VKCommandStream.cpp
         RSX/VK/VKCommonDecompiler.cpp
         RSX/VK/VKCommonPipelineLayout.cpp
         RSX/VK/VKCompute.cpp
+        RSX/VK/VKDataHeapManager.cpp
         RSX/VK/VKDMA.cpp
         RSX/VK/VKDraw.cpp
         RSX/VK/VKFormats.cpp
@@ -384,23 +652,49 @@ if(TARGET 3rdparty_vulkan)
         RSX/VK/VKVertexBuffers.cpp
         RSX/VK/VKVertexProgram.cpp
         RSX/VK/VKTextureCache.cpp
+        RSX/VK/VulkanAPI.cpp
     )
+    if(APPLE)
+        target_sources(rpcs3_emu PRIVATE
+            RSX/VK/vkutils/metal_layer.mm
+        )
+    endif()
 endif()
+
+if(NOT WIN32)
+    set(THREADS_PREFER_PTHREAD_FLAG ON)
+endif()
+find_package(Threads REQUIRED)
 
 target_link_libraries(rpcs3_emu
     PUBLIC
-        3rdparty::ffmpeg 3rdparty::sdl3
-        3rdparty::opengl 3rdparty::stblib
-        3rdparty::vulkan 3rdparty::glew
-        3rdparty::libusb 3rdparty::wolfssl
-        Vulkan::Headers
-        rpcsx::fw::ps3::api
-        rpcsx::cpu::cell::ppu
-        rpcsx::cpu::cell::ppu::semantic
-        cellos-kernel
-
+        3rdparty::llvm
+        3rdparty::asmjit
+        3rdparty::ffmpeg
+        3rdparty::sdl3
+        3rdparty::opengl
+        3rdparty::stblib
+        3rdparty::vulkan
+        3rdparty::glew
+        3rdparty::libusb
+        3rdparty::wolfssl
+        3rdparty::openal
+        3rdparty::cubeb
+        3rdparty::soundtouch
+        3rdparty::miniupnpc
+        3rdparty::libevdev
+        3rdparty::protobuf
+        3rdparty::pugixml
+        3rdparty::vulkanmemoryallocator
+        Threads::Threads
     PRIVATE
         3rdparty::glslang
+        3rdparty::libpng
+        3rdparty::rtmidi
+        3rdparty::yaml-cpp
+        3rdparty::zlib
+        3rdparty::zstd
+        3rdparty::libcurl
 )
 
 if(APPLE)

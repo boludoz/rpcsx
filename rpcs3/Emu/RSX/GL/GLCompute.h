@@ -262,8 +262,6 @@ namespace gl
 
 		cs_deswizzle_3d()
 		{
-			ensure((sizeof(_BlockType) & 3) == 0); // "Unsupported block type"
-
 			initialize();
 
 			m_src =
@@ -288,13 +286,16 @@ namespace gl
 			}
 
 			const std::pair<std::string_view, std::string> syntax_replace[] =
-				{
-					{"%set, ", ""},
-					{"%loc", std::to_string(GL_COMPUTE_BUFFER_SLOT(0))},
-					{"%push_block", fmt::format("binding=%d, std140", GL_COMPUTE_BUFFER_SLOT(2))},
-					{"%ws", std::to_string(optimal_group_size)},
-					{"%_wordcount", std::to_string(sizeof(_BlockType) / 4)},
-					{"%f", transform}};
+			{
+				{ "%set, ", ""},
+				{ "%loc", std::to_string(GL_COMPUTE_BUFFER_SLOT(0))},
+				{ "%push_block", fmt::format("binding=%d, std140", GL_COMPUTE_BUFFER_SLOT(2)) },
+				{ "%ws", std::to_string(optimal_group_size) },
+				{ "%_wordcount", std::to_string(std::max<u32>(sizeof(_BlockType) / 4u, 1u)) },
+				{ "%f", transform },
+				{ "%_8bit", sizeof(_BlockType) == 1 ? "1" : "0" },
+				{ "%_16bit", sizeof(_BlockType) == 2 ? "1" : "0" },
+			};
 
 			m_src = fmt::replace_all(m_src, syntax_replace);
 

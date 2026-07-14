@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "ProgramStateCache.h"
+#include "FragmentProgramDecompiler.h"
 #include "Emu/system_config.h"
 #include "Emu/RSX/Core/RSXDriverState.h"
 #include "util/sysinfo.hpp"
@@ -35,8 +36,8 @@ using namespace program_hash_util;
 AVX512_ICL_FUNC usz get_vertex_program_ucode_hash_512(const RSXVertexProgram& program)
 {
 	// Load all elements of the instruction_mask bitset
-	const __m512i* instMask512 = reinterpret_cast<const __m512i*>(&program.instruction_mask);
-	const __m128i* instMask128 = reinterpret_cast<const __m128i*>(&program.instruction_mask);
+	const __m512i* instMask512 = utils::bless<const __m512i>(&program.instruction_mask);
+	const __m128i* instMask128 = utils::bless<const __m128i>(&program.instruction_mask);
 
 	const __m512i lowerMask = _mm512_loadu_si512(instMask512);
 	const __m128i upper128 = _mm_loadu_si128(instMask128 + 4);
@@ -138,8 +139,8 @@ vertex_program_utils::vertex_program_metadata vertex_program_utils::analyse_vert
 	// u32 last_instruction_address = 0;
 	// u32 first_instruction_address = entry;
 
-	std::bitset<rsx::max_vertex_program_instructions> instructions_to_patch;
-	std::pair<u32, u32> instruction_range{umax, 0};
+	bit_set<rsx::max_vertex_program_instructions> instructions_to_patch;
+	std::pair<u32, u32> instruction_range{ umax, 0 };
 	bool has_branch_instruction = false;
 	std::stack<u32> call_stack;
 
@@ -176,7 +177,7 @@ vertex_program_utils::vertex_program_metadata vertex_program_utils::analyse_vert
 			d3.HEX = instruction._u32[3];
 
 			// Touch current instruction
-			result.instruction_mask[current_instruction] = true;
+			result.instruction_mask.set(current_instruction, true);
 			instruction_range.first = std::min(current_instruction, instruction_range.first);
 			instruction_range.second = std::max(current_instruction, instruction_range.second);
 
@@ -256,7 +257,7 @@ vertex_program_utils::vertex_program_metadata vertex_program_utils::analyse_vert
 			case RSX_SCA_OPCODE_CLB:
 			{
 				// Need to patch the jump address to be consistent wherever the program is located
-				instructions_to_patch[current_instruction] = true;
+				instructions_to_patch.set(current_instruction, true);
 				has_branch_instruction = true;
 
 				d0.HEX = instruction._u32[0];
@@ -449,21 +450,21 @@ usz vertex_program_storage_hash::operator()(const RSXVertexProgram& program) con
 }
 
 #ifdef ARCH_X64
-AVX512_ICL_FUNC bool vertex_program_compare_512(const RSXVertexProgram& binary1, const RSXVertexProgram& binary2)
-{
-	// Load all elements of the instruction_mask bitset
-	const __m512i* instMask512 = reinterpret_cast<const __m512i*>(&binary1.instruction_mask);
-	const __m128i* instMask128 = reinterpret_cast<const __m128i*>(&binary1.instruction_mask);
+AVX512_ICL_FUNC bool vertex_program_compare_512(const RSXVertexProgram &binary1, const RSXVertexProgram &binary2)
+	{
+		// Load all elements of the instruction_mask bitset
+		const __m512i* instMask512 = utils::bless<const __m512i>(&binary1.instruction_mask);
+		const __m128i* instMask128 = utils::bless<const __m128i>(&binary1.instruction_mask);
 
-	const __m512i lowerMask = _mm512_loadu_si512(instMask512);
-	const __m128i upper128 = _mm_loadu_si128(instMask128 + 4);
-	const __m512i upperMask = _mm512_zextsi128_si512(upper128);
+		const __m512i lowerMask = _mm512_loadu_si512(instMask512);
+		const __m128i upper128 = _mm_loadu_si128(instMask128 + 4);
+		const __m512i upperMask = _mm512_zextsi128_si512(upper128);
+		
+		__m512i maskIndex = _mm512_setzero_si512();
+		const __m512i negativeOnes = _mm512_set1_epi64(-1);
 
-	__m512i maskIndex = _mm512_setzero_si512();
-	const __m512i negativeOnes = _mm512_set1_epi64(-1);
-
-	// Special masks to test against bitset
-	const __m512i testMask0 = _mm512_set_epi64(
+		// Special masks to test against bitset 
+		const __m512i testMask0 = _mm512_set_epi64(
 		0x0808080808080808,
 		0x0808080808080808,
 		0x0404040404040404,
@@ -636,58 +637,52 @@ fragment_program_utils::fragment_program_metadata fragment_program_utils::analys
 	while (true)
 	{
 		const auto inst = v128::loadu(instBuffer, index);
+		const auto d0 = OPDEST::from_be32(inst._u32[0]);
+		const auto opcode = static_cast<rsx::assembler::FP_opcode>(d0.opcode);
 
-		// Check for opcode high bit which indicates a branch instructions (opcode 0x40...0x45)
-		if (inst._u32[2] & (1 << 23))
+		switch (opcode)
 		{
+		case RSX_FP_OPCODE_TEX:
+		case RSX_FP_OPCODE_TEXBEM:
+		case RSX_FP_OPCODE_TXP:
+		case RSX_FP_OPCODE_TXPBEM:
+		case RSX_FP_OPCODE_TXD:
+		case RSX_FP_OPCODE_TXB:
+		case RSX_FP_OPCODE_TXL:
+			result.referenced_textures_mask |= (1 << d0.tex_num);
+			result.bx2_texture_reads_mask |= ((d0.exp_tex ? 1u : 0u) << d0.tex_num);
+			break;
+		case RSX_FP_OPCODE_PK4:
+		case RSX_FP_OPCODE_UP4:
+		case RSX_FP_OPCODE_PK2:
+		case RSX_FP_OPCODE_UP2:
+		case RSX_FP_OPCODE_PKB:
+		case RSX_FP_OPCODE_UPB:
+		case RSX_FP_OPCODE_PK16:
+		case RSX_FP_OPCODE_UP16:
+		case RSX_FP_OPCODE_PKG:
+		case RSX_FP_OPCODE_UPG:
+			result.has_pack_instructions = true;
+			break;
+		case RSX_FP_OPCODE_BRK:
+		case RSX_FP_OPCODE_CAL:
+		case RSX_FP_OPCODE_IFE:
+		case RSX_FP_OPCODE_LOOP:
+		case RSX_FP_OPCODE_REP:
+		case RSX_FP_OPCODE_RET:
 			// NOTE: Jump instructions are not yet proved to work outside of loops and if/else blocks
 			// Otherwise we would need to follow the execution chain
 			result.has_branch_instructions = true;
+			break;
+		default:
+			break;
 		}
-		else
-		{
-			const u32 opcode = (inst._u32[0] >> 16) & 0x3F;
-			if (opcode)
-			{
-				switch (opcode)
-				{
-				case RSX_FP_OPCODE_TEX:
-				case RSX_FP_OPCODE_TEXBEM:
-				case RSX_FP_OPCODE_TXP:
-				case RSX_FP_OPCODE_TXPBEM:
-				case RSX_FP_OPCODE_TXD:
-				case RSX_FP_OPCODE_TXB:
-				case RSX_FP_OPCODE_TXL:
-				{
-					// Bits 17-20 of word 1, swapped within u16 sections
-					// Bits 16-23 are swapped into the upper 8 bits (24-31)
-					const u32 tex_num = (inst._u32[0] >> 25) & 15;
-					result.referenced_textures_mask |= (1 << tex_num);
-					break;
-				}
-				case RSX_FP_OPCODE_PK4:
-				case RSX_FP_OPCODE_UP4:
-				case RSX_FP_OPCODE_PK2:
-				case RSX_FP_OPCODE_UP2:
-				case RSX_FP_OPCODE_PKB:
-				case RSX_FP_OPCODE_UPB:
-				case RSX_FP_OPCODE_PK16:
-				case RSX_FP_OPCODE_UP16:
-				case RSX_FP_OPCODE_PKG:
-				case RSX_FP_OPCODE_UPG:
-				{
-					result.has_pack_instructions = true;
-					break;
-				}
-				}
-			}
 
-			if (is_any_src_constant(inst))
-			{
-				// Instruction references constant, skip one slot occupied by data
-				index++;
-				result.program_constants_buffer_length += 16;
-			}
+		if (is_any_src_constant(inst))
+		{
+			// Instruction references constant, skip one slot occupied by data
+			index++;
+			result.program_constants_buffer_length += 16;
 		}
 
 		index++;
@@ -779,10 +774,10 @@ bool fragment_program_compare::compare_properties(const RSXFragmentProgram& bina
 namespace rsx
 {
 #if defined(ARCH_X64) || defined(ARCH_ARM64)
-	static inline void write_fragment_constants_to_buffer_sse2(const std::span<f32>& buffer, const RSXFragmentProgram& rsx_prog, const std::vector<usz>& offsets_cache, bool sanitize)
+	static inline void write_fragment_constants_to_buffer_sse2(const std::span<f32>& buffer, const RSXFragmentProgram& rsx_prog, const std::vector<u32>& offsets_cache, bool sanitize)
 	{
 		f32* dst = buffer.data();
-		for (usz offset_in_fragment_program : offsets_cache)
+		for (u32 offset_in_fragment_program : offsets_cache)
 		{
 			const char* data = static_cast<const char*>(rsx_prog.get_data()) + offset_in_fragment_program;
 
@@ -806,7 +801,7 @@ namespace rsx
 		}
 	}
 #else
-	static inline void write_fragment_constants_to_buffer_fallback(const std::span<f32>& buffer, const RSXFragmentProgram& rsx_prog, const std::vector<usz>& offsets_cache, bool sanitize)
+	static inline void write_fragment_constants_to_buffer_fallback(const std::span<f32>& buffer, const RSXFragmentProgram& rsx_prog, const std::vector<u32>& offsets_cache, bool sanitize)
 	{
 		f32* dst = buffer.data();
 
@@ -834,7 +829,7 @@ namespace rsx
 	}
 #endif
 
-	void write_fragment_constants_to_buffer(const std::span<f32>& buffer, const RSXFragmentProgram& rsx_prog, const std::vector<usz>& offsets_cache, bool sanitize)
+	void write_fragment_constants_to_buffer(const std::span<f32>& buffer, const RSXFragmentProgram& rsx_prog, const std::vector<u32>& offsets_cache, bool sanitize)
 	{
 #if defined(ARCH_X64) || defined(ARCH_ARM64)
 		write_fragment_constants_to_buffer_sse2(buffer, rsx_prog, offsets_cache, sanitize);

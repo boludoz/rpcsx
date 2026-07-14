@@ -31,7 +31,7 @@ namespace rsx
 
 			if (fs::exists(icon_path))
 			{
-				icon_data = std::make_unique<image_info>(icon_path, details.hidden || locked);
+				icon_data = std::make_unique<image_info>(icon_path, locked);
 				static_cast<image_view*>(image.get())->set_raw_image(icon_data.get());
 			}
 			else
@@ -51,10 +51,10 @@ namespace rsx
 			default: trophy_type = "?"; break;
 			}
 
-			std::unique_ptr<overlay_element> text_stack = std::make_unique<vertical_layout>();
-			std::unique_ptr<overlay_element> padding = std::make_unique<spacer>();
-			std::unique_ptr<overlay_element> header_text = std::make_unique<label>(fmt::format("%s (%s%s)", (locked && !details.hidden) ? get_localized_string(localized_string_id::HOME_MENU_TROPHY_LOCKED_TITLE, details.name) : details.name, trophy_type, platinum_relevant ? " - " + get_localized_string(localized_string_id::HOME_MENU_TROPHY_PLATINUM_RELEVANT) : ""));
-			std::unique_ptr<overlay_element> subtext = std::make_unique<label>(details.description);
+			std::unique_ptr<overlay_element> text_stack  = std::make_unique<vertical_layout>();
+			std::unique_ptr<overlay_element> padding     = std::make_unique<spacer>();
+			std::unique_ptr<overlay_element> header_text = std::make_unique<label>(fmt::format("%s (%s%s)", locked ? get_localized_string(localized_string_id::HOME_MENU_TROPHY_LOCKED_TITLE, details.name) : details.name, trophy_type, platinum_relevant ? " - " + get_localized_string(localized_string_id::HOME_MENU_TROPHY_PLATINUM_RELEVANT) : ""));
+			std::unique_ptr<overlay_element> subtext     = std::make_unique<label>(details.description);
 
 			padding->set_size(1, 1);
 			header_text->set_size(800, 40);
@@ -133,7 +133,7 @@ namespace rsx
 			switch (button_press)
 			{
 			case pad_button::circle:
-				Emu.GetCallbacks().play_sound(fs::get_config_dir() + "sounds/snd_cancel.wav");
+				play_sound(sound_effect::cancel);
 				close_dialog = true;
 				break;
 			case pad_button::square:
@@ -173,7 +173,7 @@ namespace rsx
 			// Play a sound unless this is a fast auto repeat which would induce a nasty noise
 			else if (!is_auto_repeat || m_auto_repeat_ms_interval >= m_auto_repeat_ms_interval_default)
 			{
-				Emu.GetCallbacks().play_sound(fs::get_config_dir() + "sounds/snd_cursor.wav");
+				play_sound(sound_effect::cursor);
 			}
 		}
 
@@ -348,7 +348,8 @@ namespace rsx
 				details.trophyId = atoi(n->GetAttribute("id").c_str());
 				details.hidden = n->GetAttribute("hidden")[0] == 'y';
 
-				const bool hide_trophy = details.hidden && !m_show_hidden_trophies;
+				const bool unlocked = m_trophy_data->trop_usr->GetTrophyUnlockState(details.trophyId);
+				const bool hide_trophy = details.hidden && !unlocked && !m_show_hidden_trophies;
 
 				if (details.trophyId == old_trophy_id)
 				{
@@ -377,7 +378,7 @@ namespace rsx
 				}
 
 				// Get name and detail
-				if (details.hidden)
+				if (details.hidden && !unlocked)
 				{
 					strcpy_trunc(details.name, hidden_title);
 					strcpy_trunc(details.description, hidden_description);
@@ -398,7 +399,6 @@ namespace rsx
 					}
 				}
 
-				const bool unlocked = m_trophy_data->trop_usr->GetTrophyUnlockState(details.trophyId);
 				const auto icon_path_it = m_trophy_data->trophy_image_paths.find(details.trophyId);
 
 				std::unique_ptr<overlay_element> entry = std::make_unique<trophy_list_entry>(details, icon_path_it != m_trophy_data->trophy_image_paths.cend() ? icon_path_it->second : "", !unlocked, platinum_relevant);
@@ -425,7 +425,7 @@ namespace rsx
 				m_list->select_entry(selected_index);
 			}
 
-			m_description->set_text(get_localized_string(localized_string_id::HOME_MENU_TROPHY_LIST_TITLE, fmt::format("%d%% (%d/%d)", percentage, unlocked_trophies, all_trophies).c_str()));
+			m_description->set_text(get_localized_string(localized_string_id::HOME_MENU_TROPHY_LIST_TITLE, "%d%% (%d/%d)", percentage, unlocked_trophies, all_trophies));
 			m_description->auto_resize();
 		}
 	} // namespace overlays

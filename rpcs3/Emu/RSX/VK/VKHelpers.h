@@ -74,10 +74,11 @@ namespace vk
 
 	enum image_upload_options
 	{
-		upload_contents_async = 1,
-		initialize_image_layout = 2,
-		preserve_image_layout = 4,
-		source_is_gpu_resident = 8,
+		upload_contents_async   = 0x0001,
+		initialize_image_layout = 0x0002,
+		preserve_image_layout   = 0x0004,
+		source_is_gpu_resident  = 0x0008,
+		source_is_userptr       = 0x0010,
 
 		// meta-flags
 		upload_contents_inline = 0,
@@ -89,7 +90,7 @@ namespace vk
 		VkImageAspectFlags flags, vk::data_heap& upload_heap, u32 heap_align, rsx::flags32_t image_setup_flags);
 
 	std::pair<buffer*, u32> detile_memory_block(
-		const vk::command_buffer& cmd, const rsx::GCM_tile_reference& tiled_region, const utils::address_range& range,
+		const vk::command_buffer& cmd, const rsx::GCM_tile_reference& tiled_region, const utils::address_range32& range,
 		u16 width, u16 height, u8 bpp);
 
 	// Other texture management helpers

@@ -2,6 +2,7 @@
 #include "capabilities.h"
 
 #include "util/StrUtil.h"
+#include "Emu/system_config.h"
 
 #include <unordered_set>
 
@@ -43,15 +44,15 @@ namespace gl
 			all_extensions.emplace(reinterpret_cast<const char*>(glGetStringi(GL_EXTENSIONS, i)));
 		}
 
-#define CHECK_EXTENSION_SUPPORT(extension_short_name)                  \
-	do                                                                 \
-	{                                                                  \
-		if (all_extensions.contains("GL_" #extension_short_name))      \
-		{                                                              \
-			extension_short_name##_supported = true;                   \
-			rsx_log.success("[CAPS] Using GL_" #extension_short_name); \
-			continue;                                                  \
-		}                                                              \
+		RENDERDOC_debug = !!g_cfg.video.renderdoc_compatiblity;
+
+#define CHECK_EXTENSION_SUPPORT(extension_short_name)\
+	do {\
+		if (all_extensions.contains("GL_"#extension_short_name)) {\
+			extension_short_name##_supported = true;\
+			rsx_log.success("[CAPS] Using GL_"#extension_short_name);\
+			continue;\
+		} \
 	} while (0)
 
 		CHECK_EXTENSION_SUPPORT(ARB_shader_draw_parameters);
