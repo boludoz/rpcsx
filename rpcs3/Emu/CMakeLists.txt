@@ -26,7 +26,7 @@ if(USE_LTO)
 endif()
 
 if(USE_ASAN)
-    set_source_files_properties(../../Utilities/Thread.cpp PROPERTIES COMPILE_DEFINITIONS USE_ASAN)
+    set_source_files_properties(../util/Thread.cpp PROPERTIES COMPILE_DEFINITIONS USE_ASAN)
 endif()
 
 if(NOT USE_SYSTEM_OPENAL)
@@ -63,34 +63,33 @@ target_sources(rpcs3_emu PRIVATE
     ../util/sysinfo.cpp
     ../util/cpu_stats.cpp
     ../util/serialization_ext.cpp
-    ../../Utilities/bin_patch.cpp
-    ../../Utilities/cheat_info.cpp
-    ../../Utilities/cond.cpp
-    ../../Utilities/Config.cpp
-    ../../Utilities/date_time.cpp
-    ../../Utilities/File.cpp
-    ../../Utilities/JITASM.cpp
-    ../../Utilities/JITLLVM.cpp
-    ../../Utilities/LUrlParser.cpp
-    ../../Utilities/mutex.cpp
-    ../../Utilities/rXml.cpp
-    ../../Utilities/sema.cpp
-    ../../Utilities/simple_ringbuf.cpp
-    ../../Utilities/stack_trace.cpp
-    ../../Utilities/stereo_config.cpp
-    ../../Utilities/StrFmt.cpp
-    ../../Utilities/Thread.cpp
-    ../../Utilities/version.cpp
+    ../util/bin_patch.cpp
+    ../util/cheat_info.cpp
+    ../util/cond.cpp
+    ../util/Config.cpp
+    ../util/date_time.cpp
+    ../util/File.cpp
+    ../util/JITASM.cpp
+    ../util/JITLLVM.cpp
+    ../util/LUrlParser.cpp
+    ../util/mutex.cpp
+    ../util/rXml.cpp
+    ../util/sema.cpp
+    ../util/simple_ringbuf.cpp
+    ../util/stack_trace.cpp
+    ../util/StrFmt.cpp
+    ../util/Thread.cpp
+    ../util/version.cpp
 )
 if(APPLE)
     target_sources(rpcs3_emu PRIVATE
-        ../../darwin/util/sysinfo_darwin.mm
+        ../util/darwin/sysinfo_darwin.mm
     )
 endif()
 
 target_include_directories(rpcs3_emu PUBLIC "${CMAKE_SOURCE_DIR}")
 
-set_source_files_properties("../../Utilities/JITLLVM.cpp" "../../Utilities/JITASM.cpp" PROPERTIES
+set_source_files_properties("../util/JITLLVM.cpp" "../util/JITASM.cpp" PROPERTIES
     COMPILE_FLAGS "$<IF:$<CXX_COMPILER_ID:MSVC>,/GR-,-fno-rtti>"
     SKIP_PRECOMPILE_HEADERS ON
 )

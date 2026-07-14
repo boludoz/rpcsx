@@ -159,7 +159,6 @@ add_library(rpcs3 STATIC
     Input/ds4_pad_handler.cpp
     Input/dualsense_pad_handler.cpp
     Input/evdev_joystick_handler.cpp
-    Input/evdev_gun_handler.cpp
     Input/hid_pad_handler.cpp
     Input/mm_joystick_handler.cpp
     Input/pad_thread.cpp
