@@ -262,8 +262,13 @@ if(APPLE)
 	endif()
 endif()
 
+add_library(3rdparty_vulkanmemoryallocator INTERFACE)
+target_include_directories(3rdparty_vulkanmemoryallocator INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/GPUOpen/VulkanMemoryAllocator/src")
+add_library(3rdparty::vulkanmemoryallocator ALIAS 3rdparty_vulkanmemoryallocator)
+
 add_library(3rdparty_vulkan INTERFACE)
 target_compile_definitions(3rdparty_vulkan INTERFACE -DHAVE_VULKAN)
+target_link_libraries(3rdparty_vulkan INTERFACE 3rdparty::vulkanmemoryallocator)
 
 if (NOT COMPILE_VULKAN_LOADER OR ANDROID OR APPLE)
 	find_package(Vulkan 1.3 GLOBAL)
