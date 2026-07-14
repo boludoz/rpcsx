@@ -1,8 +1,8 @@
 #include "stdafx.h"
 #include "RSXDMAWriter.h"
 
-#include "util//Thread.h"
-#include <rx/asm.hpp>
+#include "Utilities//Thread.h"
+#include <util/asm.hpp>
 
 namespace rsx
 {
@@ -56,7 +56,7 @@ namespace rsx
 		// FIXME: This is a busy wait, consider yield to improve responsiveness on weak devices.
 		while (!m_host_context_ptr->in_flight_commands_completed())
 		{
-			rx::pause();
+			utils::pause();
 
 			if (thread_ctrl::state() == thread_state::aborting)
 			{
@@ -64,4 +64,4 @@ namespace rsx
 			}
 		}
 	}
-} // namespace rsx
+}

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "util/Config.h"
-#include "util/mutex.h"
+#include "Utilities/Config.h"
+#include "Utilities/mutex.h"
 #include "pad_types.h"
 #include "MouseHandler.h"
 
@@ -17,7 +17,9 @@ class cfg_pad_btn : public cfg::_enum<pad_button>
 {
 public:
 	cfg_pad_btn(cfg::node* owner, const std::string& name, T id, pad_button value, bool dynamic = false)
-		: cfg::_enum<pad_button>(owner, name, value, dynamic), m_btn_id(id) {};
+		: cfg::_enum<pad_button>(owner, name, value, dynamic)
+		, m_btn_id(id)
+	{};
 
 	T btn_id() const
 	{
@@ -88,10 +90,10 @@ public:
 
 	void handle_input(std::shared_ptr<Pad> pad, bool press_only, const std::function<void(T, pad_button, u16, bool, bool&)>& func) const
 	{
-		if (!pad)
+		if (!pad || pad->is_copilot())
 			return;
 
-		for (const Button& button : pad->m_buttons)
+		for (const ButtonExternal& button : pad->m_buttons_external)
 		{
 			if (button.m_pressed || !press_only)
 			{
@@ -102,7 +104,7 @@ public:
 			}
 		}
 
-		for (const AnalogStick& stick : pad->m_sticks)
+		for (const AnalogStickExternal& stick : pad->m_sticks_external)
 		{
 			if (handle_input(func, stick.m_offset, get_axis_keycode(stick.m_offset, stick.m_value), stick.m_value, true, true))
 			{
@@ -150,8 +152,7 @@ protected:
 
 	void init_button(cfg_pad_btn<T>* pbtn)
 	{
-		if (!pbtn)
-			return;
+		if (!pbtn) return;
 		const u32 offset = pad_button_offset(pbtn->get());
 		const u32 keycode = pad_button_keycode(pbtn->get());
 		button_map[offset][keycode].insert(std::as_const(pbtn));
@@ -205,8 +206,7 @@ protected:
 			if (btn && func)
 			{
 				func(btn->btn_id(), btn->get(), value, pressed, abort);
-				if (abort)
-					break;
+				if (abort) break;
 			}
 		}
 
@@ -245,7 +245,7 @@ struct emulated_pads_config : cfg::node
 			player->clear_buttons();
 		}
 
-		if (fs::file cfg_file{cfg_name, fs::read})
+		if (fs::file cfg_file{ cfg_name, fs::read })
 		{
 			if (const std::string content = cfg_file.to_string(); !content.empty())
 			{

@@ -19,87 +19,88 @@ namespace
 	// This tries to convert axis to give us the max even in the corners,
 	// this actually might work 'too' well, we end up actually getting diagonals of actual max/min, we need the corners still a bit rounded to match ds3
 	// im leaving it here for now, and future reference as it probably can be used later
-	// taken from http://theinstructionlimit.com/squaring-the-thumbsticks
+	//taken from http://theinstructionlimit.com/squaring-the-thumbsticks
 	/*std::tuple<u16, u16> ConvertToSquarePoint(u16 inX, u16 inY, u32 innerRoundness = 0) {
-	    // convert inX and Y to a (-1, 1) vector;
-	    const f32 x = (inX - 127) / 127.f;
-	    const f32 y = ((inY - 127) / 127.f) * -1;
+		// convert inX and Y to a (-1, 1) vector;
+		const f32 x = (inX - 127) / 127.f;
+		const f32 y = ((inY - 127) / 127.f) * -1;
 
-	    f32 outX, outY;
-	    const f32 piOver4 = M_PI / 4;
-	    const f32 angle = std::atan2(y, x) + M_PI;
-	    // x+ wall
-	    if (angle <= piOver4 || angle > 7 * piOver4) {
-	        outX = x * (f32)(1 / std::cos(angle));
-	        outY = y * (f32)(1 / std::cos(angle));
-	    }
-	    // y+ wall
-	    else if (angle > piOver4 && angle <= 3 * piOver4) {
-	        outX = x * (f32)(1 / std::sin(angle));
-	        outY = y * (f32)(1 / std::sin(angle));
-	    }
-	    // x- wall
-	    else if (angle > 3 * piOver4 && angle <= 5 * piOver4) {
-	        outX = x * (f32)(-1 / std::cos(angle));
-	        outY = y * (f32)(-1 / std::cos(angle));
-	    }
-	    // y- wall
-	    else if (angle > 5 * piOver4 && angle <= 7 * piOver4) {
-	        outX = x * (f32)(-1 / std::sin(angle));
-	        outY = y * (f32)(-1 / std::sin(angle));
-	    }
-	    else fmt::throw_exception("invalid angle in convertToSquarePoint");
+		f32 outX, outY;
+		const f32 piOver4 = M_PI / 4;
+		const f32 angle = std::atan2(y, x) + M_PI;
+		// x+ wall
+		if (angle <= piOver4 || angle > 7 * piOver4) {
+			outX = x * (f32)(1 / std::cos(angle));
+			outY = y * (f32)(1 / std::cos(angle));
+		}
+		// y+ wall
+		else if (angle > piOver4 && angle <= 3 * piOver4) {
+			outX = x * (f32)(1 / std::sin(angle));
+			outY = y * (f32)(1 / std::sin(angle));
+		}
+		// x- wall
+		else if (angle > 3 * piOver4 && angle <= 5 * piOver4) {
+			outX = x * (f32)(-1 / std::cos(angle));
+			outY = y * (f32)(-1 / std::cos(angle));
+		}
+		// y- wall
+		else if (angle > 5 * piOver4 && angle <= 7 * piOver4) {
+			outX = x * (f32)(-1 / std::sin(angle));
+			outY = y * (f32)(-1 / std::sin(angle));
+		}
+		else fmt::throw_exception("invalid angle in convertToSquarePoint");
 
-	    if (innerRoundness == 0)
-	        return std::tuple<u16, u16>(Clamp0To255((outX + 1) * 127.f), Clamp0To255(((outY * -1) + 1) * 127.f));
+		if (innerRoundness == 0)
+			return std::tuple<u16, u16>(Clamp0To255((outX + 1) * 127.f), Clamp0To255(((outY * -1) + 1) * 127.f));
 
-	    const f32 len = std::sqrt(std::pow(x, 2) + std::pow(y, 2));
-	    const f32 factor = std::pow(len, innerRoundness);
+		const f32 len = std::sqrt(std::pow(x, 2) + std::pow(y, 2));
+		const f32 factor = std::pow(len, innerRoundness);
 
-	    outX = (1 - factor) * x + factor * outX;
-	    outY = (1 - factor) * y + factor * outY;
+		outX = (1 - factor) * x + factor * outX;
+		outY = (1 - factor) * y + factor * outY;
 
-	    return std::tuple<u16, u16>(Clamp0To255((outX + 1) * 127.f), Clamp0To255(((outY * -1) + 1) * 127.f));
+		return std::tuple<u16, u16>(Clamp0To255((outX + 1) * 127.f), Clamp0To255(((outY * -1) + 1) * 127.f));
 	}*/
-} // namespace
+}
 
 ds4_pad_handler::ds4_pad_handler()
-	: hid_pad_handler<DS4Device>(pad_handler::ds4, {SONY_DS4_ID_0, SONY_DS4_ID_1, SONY_DS4_ID_2, ZEROPLUS_ID_0})
+    : hid_pad_handler<DS4Device>(pad_handler::ds4, {SONY_DS4_ID_0, SONY_DS4_ID_1, SONY_DS4_ID_2, ZEROPLUS_ID_0})
 {
 	// Unique names for the config files and our pad settings dialog
 	button_list =
-		{
-			{DS4KeyCodes::None, ""},
-			{DS4KeyCodes::Triangle, "Triangle"},
-			{DS4KeyCodes::Circle, "Circle"},
-			{DS4KeyCodes::Cross, "Cross"},
-			{DS4KeyCodes::Square, "Square"},
-			{DS4KeyCodes::Left, "Left"},
-			{DS4KeyCodes::Right, "Right"},
-			{DS4KeyCodes::Up, "Up"},
-			{DS4KeyCodes::Down, "Down"},
-			{DS4KeyCodes::R1, "R1"},
-			{DS4KeyCodes::R2, "R2"},
-			{DS4KeyCodes::R3, "R3"},
-			{DS4KeyCodes::Options, "Options"},
-			{DS4KeyCodes::Share, "Share"},
-			{DS4KeyCodes::PSButton, "PS Button"},
-			{DS4KeyCodes::TouchPad, "Touch Pad"},
-			{DS4KeyCodes::Touch_L, "Touch Left"},
-			{DS4KeyCodes::Touch_R, "Touch Right"},
-			{DS4KeyCodes::Touch_U, "Touch Up"},
-			{DS4KeyCodes::Touch_D, "Touch Down"},
-			{DS4KeyCodes::L1, "L1"},
-			{DS4KeyCodes::L2, "L2"},
-			{DS4KeyCodes::L3, "L3"},
-			{DS4KeyCodes::LSXNeg, "LS X-"},
-			{DS4KeyCodes::LSXPos, "LS X+"},
-			{DS4KeyCodes::LSYPos, "LS Y+"},
-			{DS4KeyCodes::LSYNeg, "LS Y-"},
-			{DS4KeyCodes::RSXNeg, "RS X-"},
-			{DS4KeyCodes::RSXPos, "RS X+"},
-			{DS4KeyCodes::RSYPos, "RS Y+"},
-			{DS4KeyCodes::RSYNeg, "RS Y-"}};
+	{
+		{ DS4KeyCodes::None,     "" },
+		{ DS4KeyCodes::Triangle, "Triangle" },
+		{ DS4KeyCodes::Circle,   "Circle" },
+		{ DS4KeyCodes::Cross,    "Cross" },
+		{ DS4KeyCodes::Square,   "Square" },
+		{ DS4KeyCodes::Left,     "Left" },
+		{ DS4KeyCodes::Right,    "Right" },
+		{ DS4KeyCodes::Up,       "Up" },
+		{ DS4KeyCodes::Down,     "Down" },
+		{ DS4KeyCodes::R1,       "R1" },
+		{ DS4KeyCodes::R2,       "R2" },
+		{ DS4KeyCodes::R3,       "R3" },
+		{ DS4KeyCodes::Options,  "Options" },
+		{ DS4KeyCodes::Share,    "Share" },
+		{ DS4KeyCodes::PSButton, "PS Button" },
+		{ DS4KeyCodes::TouchPad, "Touch Pad" },
+		{ DS4KeyCodes::Touch_L,  "Touch Left" },
+		{ DS4KeyCodes::Touch_R,  "Touch Right" },
+		{ DS4KeyCodes::Touch_U,  "Touch Up" },
+		{ DS4KeyCodes::Touch_D,  "Touch Down" },
+		{ DS4KeyCodes::L1,       "L1" },
+		{ DS4KeyCodes::L2,       "L2" },
+		{ DS4KeyCodes::L3,       "L3" },
+		{ DS4KeyCodes::LSXNeg,   "LS X-" },
+		{ DS4KeyCodes::LSXPos,   "LS X+" },
+		{ DS4KeyCodes::LSYPos,   "LS Y+" },
+		{ DS4KeyCodes::LSYNeg,   "LS Y-" },
+		{ DS4KeyCodes::RSXNeg,   "RS X-" },
+		{ DS4KeyCodes::RSXPos,   "RS X+" },
+		{ DS4KeyCodes::RSYPos,   "RS Y+" },
+		{ DS4KeyCodes::RSYNeg,   "RS Y-" }
+	};
 
 	init_configs();
 
@@ -148,35 +149,34 @@ ds4_pad_handler::~ds4_pad_handler()
 
 void ds4_pad_handler::init_config(cfg_pad* cfg)
 {
-	if (!cfg)
-		return;
+	if (!cfg) return;
 
 	// Set default button mapping
-	cfg->ls_left.def = ::at32(button_list, DS4KeyCodes::LSXNeg);
-	cfg->ls_down.def = ::at32(button_list, DS4KeyCodes::LSYNeg);
+	cfg->ls_left.def  = ::at32(button_list, DS4KeyCodes::LSXNeg);
+	cfg->ls_down.def  = ::at32(button_list, DS4KeyCodes::LSYNeg);
 	cfg->ls_right.def = ::at32(button_list, DS4KeyCodes::LSXPos);
-	cfg->ls_up.def = ::at32(button_list, DS4KeyCodes::LSYPos);
-	cfg->rs_left.def = ::at32(button_list, DS4KeyCodes::RSXNeg);
-	cfg->rs_down.def = ::at32(button_list, DS4KeyCodes::RSYNeg);
+	cfg->ls_up.def    = ::at32(button_list, DS4KeyCodes::LSYPos);
+	cfg->rs_left.def  = ::at32(button_list, DS4KeyCodes::RSXNeg);
+	cfg->rs_down.def  = ::at32(button_list, DS4KeyCodes::RSYNeg);
 	cfg->rs_right.def = ::at32(button_list, DS4KeyCodes::RSXPos);
-	cfg->rs_up.def = ::at32(button_list, DS4KeyCodes::RSYPos);
-	cfg->start.def = ::at32(button_list, DS4KeyCodes::Options);
-	cfg->select.def = ::at32(button_list, DS4KeyCodes::Share);
-	cfg->ps.def = ::at32(button_list, DS4KeyCodes::PSButton);
-	cfg->square.def = ::at32(button_list, DS4KeyCodes::Square);
-	cfg->cross.def = ::at32(button_list, DS4KeyCodes::Cross);
-	cfg->circle.def = ::at32(button_list, DS4KeyCodes::Circle);
+	cfg->rs_up.def    = ::at32(button_list, DS4KeyCodes::RSYPos);
+	cfg->start.def    = ::at32(button_list, DS4KeyCodes::Options);
+	cfg->select.def   = ::at32(button_list, DS4KeyCodes::Share);
+	cfg->ps.def       = cfg_pad::make_button_string(button_list, {{DS4KeyCodes::PSButton}, {DS4KeyCodes::Options, DS4KeyCodes::Share}});
+	cfg->square.def   = ::at32(button_list, DS4KeyCodes::Square);
+	cfg->cross.def    = ::at32(button_list, DS4KeyCodes::Cross);
+	cfg->circle.def   = ::at32(button_list, DS4KeyCodes::Circle);
 	cfg->triangle.def = ::at32(button_list, DS4KeyCodes::Triangle);
-	cfg->left.def = ::at32(button_list, DS4KeyCodes::Left);
-	cfg->down.def = ::at32(button_list, DS4KeyCodes::Down);
-	cfg->right.def = ::at32(button_list, DS4KeyCodes::Right);
-	cfg->up.def = ::at32(button_list, DS4KeyCodes::Up);
-	cfg->r1.def = ::at32(button_list, DS4KeyCodes::R1);
-	cfg->r2.def = ::at32(button_list, DS4KeyCodes::R2);
-	cfg->r3.def = ::at32(button_list, DS4KeyCodes::R3);
-	cfg->l1.def = ::at32(button_list, DS4KeyCodes::L1);
-	cfg->l2.def = ::at32(button_list, DS4KeyCodes::L2);
-	cfg->l3.def = ::at32(button_list, DS4KeyCodes::L3);
+	cfg->left.def     = ::at32(button_list, DS4KeyCodes::Left);
+	cfg->down.def     = ::at32(button_list, DS4KeyCodes::Down);
+	cfg->right.def    = ::at32(button_list, DS4KeyCodes::Right);
+	cfg->up.def       = ::at32(button_list, DS4KeyCodes::Up);
+	cfg->r1.def       = ::at32(button_list, DS4KeyCodes::R1);
+	cfg->r2.def       = ::at32(button_list, DS4KeyCodes::R2);
+	cfg->r3.def       = ::at32(button_list, DS4KeyCodes::R3);
+	cfg->l1.def       = ::at32(button_list, DS4KeyCodes::L1);
+	cfg->l2.def       = ::at32(button_list, DS4KeyCodes::L2);
+	cfg->l3.def       = ::at32(button_list, DS4KeyCodes::L3);
 
 	cfg->pressure_intensity_button.def = ::at32(button_list, DS4KeyCodes::None);
 	cfg->analog_limiter_button.def = ::at32(button_list, DS4KeyCodes::None);
@@ -185,12 +185,10 @@ void ds4_pad_handler::init_config(cfg_pad* cfg)
 	// Set default misc variables
 	cfg->lstick_anti_deadzone.def = static_cast<u32>(0.13 * thumb_max); // 13%
 	cfg->rstick_anti_deadzone.def = static_cast<u32>(0.13 * thumb_max); // 13%
-	cfg->lstickdeadzone.def = 40;                                       // between 0 and 255
-	cfg->rstickdeadzone.def = 40;                                       // between 0 and 255
-	cfg->ltriggerthreshold.def = 0;                                     // between 0 and 255
-	cfg->rtriggerthreshold.def = 0;                                     // between 0 and 255
-	cfg->lpadsquircling.def = 8000;
-	cfg->rpadsquircling.def = 8000;
+	cfg->lstickdeadzone.def    = 40; // between 0 and 255
+	cfg->rstickdeadzone.def    = 40; // between 0 and 255
+	cfg->ltriggerthreshold.def = 0;  // between 0 and 255
+	cfg->rtriggerthreshold.def = 0;  // between 0 and 255
 
 	// Set default color value
 	cfg->colorR.def = 0;
@@ -252,9 +250,9 @@ void ds4_pad_handler::SetPadData(const std::string& padId, u8 player_id, u8 larg
 	}
 }
 
-std::unordered_map<u64, u16> ds4_pad_handler::get_button_values(const std::shared_ptr<PadDevice>& device)
+std::unordered_map<u32, u16> ds4_pad_handler::get_button_values(const std::shared_ptr<PadDevice>& device)
 {
-	std::unordered_map<u64, u16> keyBuffer;
+	std::unordered_map<u32, u16> keyBuffer;
 	DS4Device* dev = static_cast<DS4Device*>(device.get());
 	if (!dev)
 		return keyBuffer;
@@ -336,24 +334,29 @@ std::unordered_map<u64, u16> ds4_pad_handler::get_button_values(const std::share
 		keyBuffer[DS4KeyCodes::Right] = 0;
 		break;
 	default:
-		fmt::throw_exception("ds4 dpad state encountered unexpected input");
+		keyBuffer[DS4KeyCodes::Up] = 0;
+		keyBuffer[DS4KeyCodes::Down] = 0;
+		keyBuffer[DS4KeyCodes::Left] = 0;
+		keyBuffer[DS4KeyCodes::Right] = 0;
+		ds4_log.warning("dpad state encountered unexpected input: 0x%x", dpadState);
+		break;
 	}
 
 	// square, cross, circle, triangle
-	keyBuffer[DS4KeyCodes::Square] = ((input.buttons[0] & (1 << 4)) != 0) ? 255 : 0;
-	keyBuffer[DS4KeyCodes::Cross] = ((input.buttons[0] & (1 << 5)) != 0) ? 255 : 0;
-	keyBuffer[DS4KeyCodes::Circle] = ((input.buttons[0] & (1 << 6)) != 0) ? 255 : 0;
+	keyBuffer[DS4KeyCodes::Square] =   ((input.buttons[0] & (1 << 4)) != 0) ? 255 : 0;
+	keyBuffer[DS4KeyCodes::Cross] =    ((input.buttons[0] & (1 << 5)) != 0) ? 255 : 0;
+	keyBuffer[DS4KeyCodes::Circle] =   ((input.buttons[0] & (1 << 6)) != 0) ? 255 : 0;
 	keyBuffer[DS4KeyCodes::Triangle] = ((input.buttons[0] & (1 << 7)) != 0) ? 255 : 0;
 
 	// L1, R1, L2, L3, select, start, L3, L3
-	keyBuffer[DS4KeyCodes::L1] = ((input.buttons[1] & (1 << 0)) != 0) ? 255 : 0;
-	keyBuffer[DS4KeyCodes::R1] = ((input.buttons[1] & (1 << 1)) != 0) ? 255 : 0;
-	// keyBuffer[DS4KeyCodes::L2But]   = ((input.buttons[1] & (1 << 2)) != 0) ? 255 : 0;
-	// keyBuffer[DS4KeyCodes::R2But]   = ((input.buttons[1] & (1 << 3)) != 0) ? 255 : 0;
-	keyBuffer[DS4KeyCodes::Share] = ((input.buttons[1] & (1 << 4)) != 0) ? 255 : 0;
+	keyBuffer[DS4KeyCodes::L1]      = ((input.buttons[1] & (1 << 0)) != 0) ? 255 : 0;
+	keyBuffer[DS4KeyCodes::R1]      = ((input.buttons[1] & (1 << 1)) != 0) ? 255 : 0;
+	//keyBuffer[DS4KeyCodes::L2But]   = ((input.buttons[1] & (1 << 2)) != 0) ? 255 : 0;
+	//keyBuffer[DS4KeyCodes::R2But]   = ((input.buttons[1] & (1 << 3)) != 0) ? 255 : 0;
+	keyBuffer[DS4KeyCodes::Share]   = ((input.buttons[1] & (1 << 4)) != 0) ? 255 : 0;
 	keyBuffer[DS4KeyCodes::Options] = ((input.buttons[1] & (1 << 5)) != 0) ? 255 : 0;
-	keyBuffer[DS4KeyCodes::L3] = ((input.buttons[1] & (1 << 6)) != 0) ? 255 : 0;
-	keyBuffer[DS4KeyCodes::R3] = ((input.buttons[1] & (1 << 7)) != 0) ? 255 : 0;
+	keyBuffer[DS4KeyCodes::L3]      = ((input.buttons[1] & (1 << 6)) != 0) ? 255 : 0;
+	keyBuffer[DS4KeyCodes::R3]      = ((input.buttons[1] & (1 << 7)) != 0) ? 255 : 0;
 
 	// PS Button, Touch Button
 	keyBuffer[DS4KeyCodes::PSButton] = ((input.buttons[2] & (1 << 0)) != 0) ? 255 : 0;
@@ -407,7 +410,7 @@ std::unordered_map<u64, u16> ds4_pad_handler::get_button_values(const std::share
 	return keyBuffer;
 }
 
-pad_preview_values ds4_pad_handler::get_preview_values(const std::unordered_map<u64, u16>& data)
+pad_preview_values ds4_pad_handler::get_preview_values(const std::unordered_map<u32, u16>& data, const std::vector<std::string>& /*buttons*/)
 {
 	return {
 		::at32(data, L2),
@@ -415,7 +418,8 @@ pad_preview_values ds4_pad_handler::get_preview_values(const std::unordered_map<
 		::at32(data, LSXPos) - ::at32(data, LSXNeg),
 		::at32(data, LSYPos) - ::at32(data, LSYNeg),
 		::at32(data, RSXPos) - ::at32(data, RSXNeg),
-		::at32(data, RSYPos) - ::at32(data, RSYNeg)};
+		::at32(data, RSYPos) - ::at32(data, RSYNeg)
+	};
 }
 
 bool ds4_pad_handler::GetCalibrationData(DS4Device* ds4Dev) const
@@ -469,8 +473,8 @@ bool ds4_pad_handler::GetCalibrationData(DS4Device* ds4Dev) const
 	}
 
 	ds4Dev->calib_data[CalibIndex::PITCH].bias = read_s16(&buf[1]);
-	ds4Dev->calib_data[CalibIndex::YAW].bias = read_s16(&buf[3]);
-	ds4Dev->calib_data[CalibIndex::ROLL].bias = read_s16(&buf[5]);
+	ds4Dev->calib_data[CalibIndex::YAW].bias   = read_s16(&buf[3]);
+	ds4Dev->calib_data[CalibIndex::ROLL].bias  = read_s16(&buf[5]);
 
 	s16 pitchPlus, pitchNeg, rollPlus, rollNeg, yawPlus, yawNeg;
 
@@ -480,21 +484,21 @@ bool ds4_pad_handler::GetCalibrationData(DS4Device* ds4Dev) const
 	{
 		// Wired mode for OEM controllers
 		pitchPlus = read_s16(&buf[7]);
-		pitchNeg = read_s16(&buf[9]);
-		yawPlus = read_s16(&buf[11]);
-		yawNeg = read_s16(&buf[13]);
-		rollPlus = read_s16(&buf[15]);
-		rollNeg = read_s16(&buf[17]);
+		pitchNeg  = read_s16(&buf[9]);
+		yawPlus   = read_s16(&buf[11]);
+		yawNeg    = read_s16(&buf[13]);
+		rollPlus  = read_s16(&buf[15]);
+		rollNeg   = read_s16(&buf[17]);
 	}
 	else
 	{
 		// Bluetooth mode and wired mode for some 3rd party controllers
 		pitchPlus = read_s16(&buf[7]);
-		yawPlus = read_s16(&buf[9]);
-		rollPlus = read_s16(&buf[11]);
-		pitchNeg = read_s16(&buf[13]);
-		yawNeg = read_s16(&buf[15]);
-		rollNeg = read_s16(&buf[17]);
+		yawPlus   = read_s16(&buf[9]);
+		rollPlus  = read_s16(&buf[11]);
+		pitchNeg  = read_s16(&buf[13]);
+		yawNeg    = read_s16(&buf[15]);
+		rollNeg   = read_s16(&buf[17]);
 	}
 
 	// Confirm correctness. Need confirmation with dongle with no active controller
@@ -516,24 +520,24 @@ bool ds4_pad_handler::GetCalibrationData(DS4Device* ds4Dev) const
 	ds4Dev->calib_data[CalibIndex::ROLL].sens_denom = rollPlus - rollNeg;
 
 	const s16 accelXPlus = read_s16(&buf[23]);
-	const s16 accelXNeg = read_s16(&buf[25]);
+	const s16 accelXNeg  = read_s16(&buf[25]);
 	const s16 accelYPlus = read_s16(&buf[27]);
-	const s16 accelYNeg = read_s16(&buf[29]);
+	const s16 accelYNeg  = read_s16(&buf[29]);
 	const s16 accelZPlus = read_s16(&buf[31]);
-	const s16 accelZNeg = read_s16(&buf[33]);
+	const s16 accelZNeg  = read_s16(&buf[33]);
 
 	const s32 accelXRange = accelXPlus - accelXNeg;
-	ds4Dev->calib_data[CalibIndex::X].bias = accelXPlus - accelXRange / 2;
+	ds4Dev->calib_data[CalibIndex::X].bias       = accelXPlus - accelXRange / 2;
 	ds4Dev->calib_data[CalibIndex::X].sens_numer = 2 * DS4_ACC_RES_PER_G;
 	ds4Dev->calib_data[CalibIndex::X].sens_denom = accelXRange;
 
 	const s32 accelYRange = accelYPlus - accelYNeg;
-	ds4Dev->calib_data[CalibIndex::Y].bias = accelYPlus - accelYRange / 2;
+	ds4Dev->calib_data[CalibIndex::Y].bias       = accelYPlus - accelYRange / 2;
 	ds4Dev->calib_data[CalibIndex::Y].sens_numer = 2 * DS4_ACC_RES_PER_G;
 	ds4Dev->calib_data[CalibIndex::Y].sens_denom = accelYRange;
 
 	const s32 accelZRange = accelZPlus - accelZNeg;
-	ds4Dev->calib_data[CalibIndex::Z].bias = accelZPlus - accelZRange / 2;
+	ds4Dev->calib_data[CalibIndex::Z].bias       = accelZPlus - accelZRange / 2;
 	ds4Dev->calib_data[CalibIndex::Z].sens_numer = 2 * DS4_ACC_RES_PER_G;
 	ds4Dev->calib_data[CalibIndex::Z].sens_denom = accelZRange;
 
@@ -588,7 +592,7 @@ void ds4_pad_handler::check_add_device(hid_device* hidDevice, hid_enumerated_dev
 	if (!devinfo)
 	{
 		ds4_log.error("check_add_device: hid_get_device_info failed! error=%s", hid_error(hidDevice));
-		hid_close(hidDevice);
+		HidDevice::close(hidDevice);
 		return;
 	}
 
@@ -628,7 +632,7 @@ void ds4_pad_handler::check_add_device(hid_device* hidDevice, hid_enumerated_dev
 	}
 
 	device->has_calib_data = true;
-	device->path = path;
+	device->path           = path;
 
 	if (send_output_report(device) == -1)
 	{
@@ -645,7 +649,7 @@ int ds4_pad_handler::send_output_report(DS4Device* device)
 
 	const auto config = device->config;
 	if (config == nullptr)
-		return -2; // hid_write and hid_write_control return -1 on error
+		return -2; // hid_write returns -1 on error
 
 	// write rumble state
 	ds4_output_report_common common{};
@@ -775,17 +779,17 @@ ds4_pad_handler::DataStatus ds4_pad_handler::get_data(DS4Device* device)
 	return DataStatus::NewData;
 }
 
-bool ds4_pad_handler::get_is_left_trigger(const std::shared_ptr<PadDevice>& /*device*/, u64 keyCode)
+bool ds4_pad_handler::get_is_left_trigger(const std::shared_ptr<PadDevice>& /*device*/, u32 keyCode)
 {
 	return keyCode == DS4KeyCodes::L2;
 }
 
-bool ds4_pad_handler::get_is_right_trigger(const std::shared_ptr<PadDevice>& /*device*/, u64 keyCode)
+bool ds4_pad_handler::get_is_right_trigger(const std::shared_ptr<PadDevice>& /*device*/, u32 keyCode)
 {
 	return keyCode == DS4KeyCodes::R2;
 }
 
-bool ds4_pad_handler::get_is_left_stick(const std::shared_ptr<PadDevice>& /*device*/, u64 keyCode)
+bool ds4_pad_handler::get_is_left_stick(const std::shared_ptr<PadDevice>& /*device*/, u32 keyCode)
 {
 	switch (keyCode)
 	{
@@ -799,7 +803,7 @@ bool ds4_pad_handler::get_is_left_stick(const std::shared_ptr<PadDevice>& /*devi
 	}
 }
 
-bool ds4_pad_handler::get_is_right_stick(const std::shared_ptr<PadDevice>& /*device*/, u64 keyCode)
+bool ds4_pad_handler::get_is_right_stick(const std::shared_ptr<PadDevice>& /*device*/, u32 keyCode)
 {
 	switch (keyCode)
 	{
@@ -813,7 +817,7 @@ bool ds4_pad_handler::get_is_right_stick(const std::shared_ptr<PadDevice>& /*dev
 	}
 }
 
-bool ds4_pad_handler::get_is_touch_pad_motion(const std::shared_ptr<PadDevice>& /*device*/, u64 keyCode)
+bool ds4_pad_handler::get_is_touch_pad_motion(const std::shared_ptr<PadDevice>& /*device*/, u32 keyCode)
 {
 	switch (keyCode)
 	{
@@ -836,18 +840,12 @@ PadHandlerBase::connection ds4_pad_handler::update_connection(const std::shared_
 	if (dev->hidDevice == nullptr)
 	{
 		// try to reconnect
-#ifdef ANDROID
-		if (hid_device* hid_dev = hid_libusb_wrap_sys_device(dev->path, -1))
-#else
-		if (hid_device* hid_dev = hid_open_path(dev->path.c_str()))
-#endif
+		if (hid_device* hid_dev = dev->open())
 		{
 			if (hid_set_nonblocking(hid_dev, 1) == -1)
 			{
 				ds4_log.error("Reconnecting Device %s: hid_set_nonblocking failed with error %s", dev->path, hid_error(hid_dev));
 			}
-
-			dev->hidDevice = hid_dev;
 
 			if (!dev->has_calib_data)
 			{
@@ -884,7 +882,7 @@ void ds4_pad_handler::get_extended_info(const pad_ensemble& binding)
 	const ds4_input_report_common& input = dev->bt_controller ? dev->report_bt.common : dev->report_usb.common;
 
 	pad->m_battery_level = dev->battery_level;
-	pad->m_cable_state = dev->cable_state;
+	pad->m_cable_state   = dev->cable_state;
 
 	// these values come already calibrated, all we need to do is convert to ds3 range
 
@@ -923,10 +921,10 @@ void ds4_pad_handler::apply_pad_data(const pad_ensemble& binding)
 	cfg_pad* config = dev->config;
 
 	// Attempt to send rumble no matter what
-	const u8 speed_large = config->get_large_motor_speed(pad->m_vibrateMotors);
-	const u8 speed_small = config->get_small_motor_speed(pad->m_vibrateMotors);
+	const u8 speed_large = config->get_large_motor_speed(pad->m_vibrate_motors);
+	const u8 speed_small = config->get_small_motor_speed(pad->m_vibrate_motors);
 
-	const bool wireless = dev->cable_state == 0;
+	const bool wireless    = dev->cable_state == 0;
 	const bool low_battery = dev->battery_level < 2;
 	const bool is_blinking = dev->led_delay_on > 0 || dev->led_delay_off > 0;
 

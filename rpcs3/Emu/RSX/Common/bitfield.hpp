@@ -1,13 +1,13 @@
 #pragma once
 
 #include "util/atomic.hpp"
+#include "util/bit_set.hpp"
 #include <util/types.hpp>
-#include <bitset>
 
 namespace rsx
 {
 	template <int N>
-	void unpack_bitset(const std::bitset<N>& block, u64* values)
+	void unpack_bitset(const bit_set<N>& block, u64* values)
 	{
 		for (int bit = 0, n = -1, shift = 0; bit < N; ++bit, ++shift)
 		{
@@ -25,22 +25,22 @@ namespace rsx
 	}
 
 	template <int N>
-	void pack_bitset(std::bitset<N>& block, u64* values)
+	void pack_bitset(bit_set<N>& block, u64* values)
 	{
 		for (int n = 0, shift = 0; shift < N; ++n, shift += 64)
 		{
-			std::bitset<N> tmp = values[n];
+			bit_set<N> tmp = values[n];
 			tmp <<= shift;
 			block |= tmp;
 		}
 	}
 
 	template <typename T, typename bitmask_type = u32>
-		requires std::is_integral_v<bitmask_type> && std::is_enum_v<T>
+		requires std::is_integral_v<bitmask_type>&& std::is_enum_v<T>
 	class atomic_bitmask_t
 	{
 	private:
-		atomic_t<bitmask_type> m_data{0};
+		atomic_t<bitmask_type> m_data{ 0 };
 
 	public:
 		atomic_bitmask_t() = default;
@@ -55,22 +55,22 @@ namespace rsx
 			m_data.store(static_cast<bitmask_type>(value));
 		}
 
-		bool operator&(T mask) const
+		bool operator & (T mask) const
 		{
 			return ((m_data.load() & static_cast<bitmask_type>(mask)) != 0);
 		}
 
-		T operator|(T mask) const
+		T operator | (T mask) const
 		{
 			return static_cast<T>(m_data.load() | static_cast<bitmask_type>(mask));
 		}
 
-		void operator&=(T mask)
+		void operator &= (T mask)
 		{
 			m_data.fetch_and(static_cast<bitmask_type>(mask));
 		}
 
-		void operator|=(T mask)
+		void operator |= (T mask)
 		{
 			m_data.fetch_or(static_cast<bitmask_type>(mask));
 		}
@@ -92,7 +92,7 @@ namespace rsx
 			m_data.release(0);
 		}
 
-		operator bool() const
+		operator bool () const
 		{
 			return m_data.observe() != 0;
 		}
@@ -113,22 +113,22 @@ namespace rsx
 			return m_data;
 		}
 
-		bool operator&(bitmask_type mask) const
+		bool operator & (bitmask_type mask) const
 		{
 			return !!(m_data & mask);
 		}
 
-		bitmask_type operator|(bitmask_type mask) const
+		bitmask_type operator | (bitmask_type mask) const
 		{
 			return m_data | mask;
 		}
 
-		void operator&=(bitmask_type mask)
+		void operator &= (bitmask_type mask)
 		{
 			m_data &= mask;
 		}
 
-		void operator|=(bitmask_type mask)
+		void operator |= (bitmask_type mask)
 		{
 			m_data |= mask;
 		}
@@ -168,4 +168,4 @@ namespace rsx
 			return !!m_data;
 		}
 	};
-} // namespace rsx
+}

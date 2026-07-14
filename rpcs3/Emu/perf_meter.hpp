@@ -2,7 +2,7 @@
 
 #include "util/types.hpp"
 #include "util/logs.hpp"
-#include "rx/tsc.hpp"
+#include "util/tsc.hpp"
 #include "system_config.h"
 #include <array>
 #include <cmath>
@@ -44,7 +44,7 @@ public:
 
 	perf_stat_base(const perf_stat_base&) = delete;
 
-	perf_stat_base& operator=(const perf_stat_base&) = delete;
+	perf_stat_base& operator =(const perf_stat_base&) = delete;
 
 	~perf_stat_base() {}
 
@@ -74,9 +74,11 @@ class perf_stat final : public perf_stat_base
 	} g_tls_perf_stat;
 
 public:
-	static FORCE_INLINE SAFE_BUFFERS(void) push(u64 start_time) noexcept
+	static FORCE_INLINE SAFE_BUFFERS(void) push([[maybe_unused]] u64 start_time) noexcept
 	{
+#if !defined(_WIN32) || defined(_MSC_VER) // Windows clang LTO doesn't seem to like this template
 		perf_stat_base::push(g_tls_perf_stat.m_log, start_time, perf_name<ShortName>.data());
+#endif
 	}
 };
 
@@ -98,7 +100,7 @@ public:
 		std::fill(std::begin(m_timestamps), std::end(m_timestamps), 0);
 	}
 
-	FORCE_INLINE SAFE_BUFFERS(operator bool)() const noexcept
+	FORCE_INLINE SAFE_BUFFERS(operator bool) () const noexcept
 	{
 		return m_timestamps[0] != 0;
 	}
@@ -112,8 +114,7 @@ public:
 	}
 
 	template <auto SN, auto... S>
-	SAFE_BUFFERS()
-	perf_meter(perf_meter<SN, S...>&& r) noexcept
+	SAFE_BUFFERS() perf_meter(perf_meter<SN, S...>&& r) noexcept
 	{
 		m_timestamps[0] = r.get();
 		r.reset();
@@ -121,16 +122,14 @@ public:
 
 	// Copy first timestamp
 	template <auto SN, auto... S>
-	SAFE_BUFFERS(perf_meter&)
-	operator=(const perf_meter<SN, S...>& r) noexcept
+	SAFE_BUFFERS(perf_meter&) operator =(const perf_meter<SN, S...>& r) noexcept
 	{
 		m_timestamps[0] = r.get();
 		return *this;
 	}
 
 	template <auto SN, auto... S>
-	SAFE_BUFFERS(perf_meter&)
-	operator=(perf_meter<SN, S...>& r) noexcept
+	SAFE_BUFFERS(perf_meter&) operator =(perf_meter<SN, S...>& r) noexcept
 	{
 		m_timestamps[0] = r.get();
 		r.reset();
@@ -139,14 +138,13 @@ public:
 
 	// Push subevent data in array
 	template <auto Event, usz Index = 0>
-	SAFE_BUFFERS(void)
-	push() noexcept
+	SAFE_BUFFERS(void) push() noexcept
 	{
 		// TODO: should use more efficient search with type comparison, then value comparison, or pattern matching
 		if constexpr (std::array<bool, sizeof...(SubEvents)>{(SubEvents == Event)...}[Index])
 		{
 			// Push actual timestamp into an array
-			m_timestamps[Index + 1] = rx::get_tsc();
+			m_timestamps[Index + 1] = utils::get_tsc();
 		}
 		else if constexpr (Index < sizeof...(SubEvents))
 		{
@@ -170,12 +168,11 @@ public:
 	// Re-initialize first timestamp
 	FORCE_INLINE SAFE_BUFFERS(void) restart() noexcept
 	{
-		m_timestamps[0] = rx::get_tsc();
+		m_timestamps[0] = utils::get_tsc();
 		std::memset(m_timestamps + 1, 0, sizeof(m_timestamps) - sizeof(u64));
 	}
 
-	SAFE_BUFFERS()
-	~perf_meter()
+	SAFE_BUFFERS() ~perf_meter()
 	{
 		// Disabled counter
 		if (!m_timestamps[0]) [[unlikely]]

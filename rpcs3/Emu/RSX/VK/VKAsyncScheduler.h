@@ -2,7 +2,7 @@
 
 #include "vkutils/commands.h"
 #include "vkutils/sync.h"
-#include "util/mutex.h"
+#include "Utilities/mutex.h"
 
 #define VK_MAX_ASYNC_COMPUTE_QUEUES 256
 
@@ -55,13 +55,7 @@ namespace vk
 		void destroy();
 
 		// Inline getters
-		inline bool is_recording() const
-		{
-			return m_current_cb != nullptr;
-		}
-		inline bool is_host_mode() const
-		{
-			return m_use_host_scheduler;
-		}
+		inline bool is_recording() const { return m_current_cb != nullptr; }
+		inline bool is_host_mode() const { return m_use_host_scheduler; }
 	};
-} // namespace vk
+}

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <util/types.hpp>
-#include "util/address_range.h"
+#include "Utilities/address_range.h"
 
 namespace rsx
 {
@@ -30,23 +30,11 @@ namespace rsx
 			u64 memory_tag = 0;
 			u32 base_address = 0;
 
-			inline buffer_object_type get()
-			{
-				return Traits::get(bo);
-			}
-			inline operator bool() const
-			{
-				return base_address != 0;
-			}
+			inline buffer_object_type get() { return Traits::get(bo); }
+			inline operator bool () const { return base_address != 0; }
 
-			inline void release()
-			{
-				bo.release();
-			}
-			inline void acquire(buffer_object_type b)
-			{
-				bo = b;
-			}
+			inline void release() { bo.release(); }
+			inline void acquire(buffer_object_type b) { bo = b; }
 		};
 
 		using buffer_block_array = typename std::array<memory_buffer_entry_t, 0x100000000ull / BlockSize>;
@@ -61,7 +49,7 @@ namespace rsx
 			}
 		}
 
-		surface_cache_dma& with_range(command_list_type cmd, const utils::address_range& range)
+		surface_cache_dma& with_range(command_list_type cmd, const utils::address_range32& range)
 		{
 			// Prepare underlying memory so that the range specified is provisioned and contiguous
 			// 1. Check if we have a pre-existing bo layer
@@ -69,7 +57,7 @@ namespace rsx
 			if (this_entry)
 			{
 				const auto bo = this_entry.get();
-				const auto buffer_range = utils::address_range::start_length(bo.base_address, ::size32(*bo));
+				const auto buffer_range = utils::address_range32::start_length(bo.base_address, ::size32(*bo));
 
 				if (range.inside(buffer_range))
 				{
@@ -106,20 +94,20 @@ namespace rsx
 			return *this;
 		}
 
-		utils::address_range to_block_range(const utils::address_range& range)
+		utils::address_range32 to_block_range(const utils::address_range32& range)
 		{
 			u32 start = block_address(block_for(range.start));
 			u32 end = block_address(block_for(range.end + BlockSize - 1));
-			return utils::address_range::start_end(start, end - 1);
+			return utils::address_range32::start_end(start, end - 1);
 		}
 
 		std::tuple<buffer_object_type, u32, u64> get(u32 address)
 		{
 			const auto& block = m_buffer_list[block_for(address)];
-			return {block.get(), block.base_address - address};
+			return { block.get(), block.base_address - address };
 		}
 
-		void touch(const utils::address_range& range)
+		void touch(const utils::address_range32& range)
 		{
 			const u64 stamp = rsx::get_shared_tag();
 			for (usz i = block_for(range.start); i <= block_for(range.end); i++)
@@ -128,4 +116,4 @@ namespace rsx
 			}
 		}
 	};
-} // namespace rsx
+}

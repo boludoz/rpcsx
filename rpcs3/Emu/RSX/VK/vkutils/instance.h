@@ -3,6 +3,7 @@
 #include "../VulkanAPI.h"
 #include "swapchain.h"
 
+#include <algorithm>
 #include <vector>
 
 #ifdef __APPLE__
@@ -21,7 +22,7 @@ namespace vk
 		enum enumeration_class
 		{
 			instance = 0,
-			device = 1
+			device   = 1
 		};
 
 		supported_extensions(enumeration_class _class, const char* layer_name = nullptr, VkPhysicalDevice pdev = VK_NULL_HANDLE);
@@ -40,21 +41,10 @@ namespace vk
 		PFN_vkCreateDebugReportCallbackEXT _vkCreateDebugReportCallback = nullptr;
 		VkDebugReportCallbackEXT m_debugger = nullptr;
 
-#ifdef ANDROID
-		bool owns_loader = false;
-#endif
-
 		bool extensions_loaded = false;
 
 	public:
-#ifdef ANDROID
-		static void* g_vk_loader;
 
-		static void* get_vk_loader()
-		{
-			return g_vk_loader;
-		}
-#endif
 		instance() = default;
 
 		~instance();
@@ -71,4 +61,4 @@ namespace vk
 
 		swapchain_base* create_swapchain(display_handle_t window_handle, vk::physical_device& dev);
 	};
-} // namespace vk
+}

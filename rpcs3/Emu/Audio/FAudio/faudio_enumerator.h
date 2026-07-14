@@ -10,11 +10,13 @@
 class faudio_enumerator final : public audio_device_enumerator
 {
 public:
+
 	faudio_enumerator();
 	~faudio_enumerator() override;
 
 	std::vector<audio_device> get_output_devices() override;
 
 private:
+
 	FAudio* instance{};
 };

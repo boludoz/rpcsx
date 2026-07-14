@@ -1,7 +1,7 @@
 #pragma once
 
 #include <util/types.hpp>
-#include "util/address_range.h"
+#include "Utilities/address_range.h"
 
 #include <unordered_map>
 
@@ -13,8 +13,8 @@ namespace rsx
 	protected:
 		struct block_metadata_t
 		{
-			u32 id = umax;         // ID of the matadata blob
-			u32 head_block = umax; // Earliest block that may have an object that intersects with the data at the block with ID 'id'
+			u32 id = umax;             // ID of the matadata blob
+			u32 head_block = umax;     // Earliest block that may have an object that intersects with the data at the block with ID 'id'
 		};
 
 	public:
@@ -36,7 +36,7 @@ namespace rsx
 			return block_id * BlockSize;
 		}
 
-		void broadcast_insert(const utils::address_range& range)
+		void broadcast_insert(const utils::address_range32& range)
 		{
 			const auto head_block = block_for(range.start);
 			for (auto meta = &m_metadata[head_block]; meta <= &m_metadata[block_for(range.end)]; ++meta)
@@ -65,7 +65,7 @@ namespace rsx
 				while (m_current < m_end)
 				{
 					m_it = (++m_current)->begin();
-					if (m_it != m_current->end()) [[likely]]
+					if (m_it != m_current->end()) [[ likely ]]
 					{
 						return;
 					}
@@ -83,7 +83,7 @@ namespace rsx
 					return;
 				}
 
-				if (++m_it != m_current->end()) [[likely]]
+				if (++m_it != m_current->end()) [[ likely ]]
 				{
 					return;
 				}
@@ -98,7 +98,7 @@ namespace rsx
 				m_it = where;
 			}
 
-			void begin_range(const utils::address_range& range)
+			void begin_range(const utils::address_range32& range)
 			{
 				const auto start_block_id = range.start / BlockSize;
 				const auto& metadata = m_metadata_ptr[start_block_id];
@@ -120,49 +120,49 @@ namespace rsx
 				forward_scan();
 			}
 
-			iterator(super* parent) : m_data_ptr(parent->m_data.data()),
-									  m_metadata_ptr(parent->m_metadata.data())
-			{
-			}
+			iterator(super* parent):
+				m_data_ptr(parent->m_data.data()),
+				m_metadata_ptr(parent->m_metadata.data())
+			{}
 
 		public:
-			bool operator==(const iterator& other) const
+			bool operator == (const iterator& other) const
 			{
 				return m_current == other.m_current && m_it == other.m_it;
 			}
 
-			auto* operator->()
+			auto* operator -> ()
 			{
 				ensure(m_current);
 				return m_it.operator->();
 			}
 
-			auto& operator*()
+			auto& operator * ()
 			{
 				ensure(m_current);
 				return m_it.operator*();
 			}
 
-			auto* operator->() const
+			auto* operator -> () const
 			{
 				ensure(m_current);
 				return m_it.operator->();
 			}
 
-			auto& operator*() const
+			auto& operator * () const
 			{
 				ensure(m_current);
 				return m_it.operator*();
 			}
 
-			iterator& operator++()
+			iterator& operator ++ ()
 			{
 				ensure(m_current);
 				next();
 				return *this;
 			}
 
-			T& operator++(int)
+			T& operator ++ (int)
 			{
 				ensure(m_current);
 				auto old = *this;
@@ -174,13 +174,10 @@ namespace rsx
 	public:
 		ranged_map()
 		{
-			std::for_each(m_metadata.begin(), m_metadata.end(), [&](auto& meta)
-				{
-					meta.id = static_cast<u32>(&meta - m_metadata.data());
-				});
+			std::for_each(m_metadata.begin(), m_metadata.end(), [&](auto& meta) { meta.id = static_cast<u32>(&meta - m_metadata.data()); });
 		}
 
-		void emplace(const utils::address_range& range, T&& value)
+		void emplace(const utils::address_range32& range, T&& value)
 		{
 			broadcast_insert(range);
 			m_data[block_for(range.start)].insert_or_assign(range.start, std::forward<T>(value));
@@ -201,7 +198,7 @@ namespace rsx
 		iterator find(const u32 key)
 		{
 			auto& block = m_data[block_for(key)];
-			iterator ret = {this};
+			iterator ret = { this };
 
 			if (auto found = block.find(key);
 				found != block.end())
@@ -223,16 +220,16 @@ namespace rsx
 			m_data[block_for(address)].erase(address);
 		}
 
-		iterator begin_range(const utils::address_range& range)
+		iterator begin_range(const utils::address_range32& range)
 		{
-			iterator ret = {this};
+			iterator ret = { this };
 			ret.begin_range(range);
 			return ret;
 		}
 
 		iterator end()
 		{
-			iterator ret = {this};
+			iterator ret = { this };
 			return ret;
 		}
 
@@ -244,4 +241,4 @@ namespace rsx
 			}
 		}
 	};
-} // namespace rsx
+}

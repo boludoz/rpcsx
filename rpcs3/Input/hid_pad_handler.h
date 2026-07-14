@@ -1,10 +1,10 @@
 #pragma once
 
 #include "Emu/Io/PadHandler.h"
-#include "util/CRC.h"
-#include "util/Thread.h"
+#include "Utilities/CRC.h"
+#include "Utilities/Thread.h"
 
-#include "hidapi.h"
+#include <hidapi.h>
 
 #ifdef ANDROID
 #include "hidapi_libusb.h"
@@ -29,7 +29,7 @@ extern std::mutex g_android_usb_devices_mutex;
 #else
 using hid_enumerated_device_type = std::string;
 using hid_enumerated_device_view = std::string_view;
-inline constexpr auto hid_enumerated_device_default = std::string();
+inline const auto hid_enumerated_device_default = std::string();
 #endif
 
 struct CalibData
@@ -56,6 +56,8 @@ enum CalibIndex
 class HidDevice : public PadDevice
 {
 public:
+	hid_device* open();
+	static void close(hid_device* dev);
 	void close();
 
 	hid_device* hidDevice{nullptr};
@@ -86,7 +88,6 @@ public:
 	bool Init() override;
 	void process() override;
 	std::vector<pad_list_entry> list_devices() override;
-	std::vector<pad_list_entry> list_connected_devices();
 
 protected:
 	enum class DataStatus
@@ -103,9 +104,10 @@ protected:
 	// pseudo 'controller id' to keep track of unique controllers
 	std::map<std::string, std::shared_ptr<Device>> m_controllers;
 
-	std::set<hid_enumerated_device_type> m_last_enumerated_devices;
+	std::set<hid_enumerated_device_type> m_enumerated_devices;
 	std::set<hid_enumerated_device_type> m_new_enumerated_devices;
 	std::map<hid_enumerated_device_type, std::wstring> m_enumerated_serials;
+	std::map<hid_enumerated_device_type, std::wstring> m_new_enumerated_serials;
 	std::mutex m_enumeration_mutex;
 	std::unique_ptr<named_thread<std::function<void()>>> m_enumeration_thread;
 
@@ -120,8 +122,8 @@ protected:
 	static s16 apply_calibration(s32 raw_value, const CalibData& calib_data)
 	{
 		const s32 biased = raw_value - calib_data.bias;
-		const s32 quot = calib_data.sens_numer / calib_data.sens_denom;
-		const s32 rem = calib_data.sens_numer % calib_data.sens_denom;
+		const s32 quot   = calib_data.sens_numer / calib_data.sens_denom;
+		const s32 rem    = calib_data.sens_numer % calib_data.sens_denom;
 		const s32 output = (quot * biased) + ((rem * biased) / calib_data.sens_denom);
 
 		return static_cast<s16>(std::clamp<s32>(output, s16{smin}, s16{smax}));

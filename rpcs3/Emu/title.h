@@ -11,8 +11,8 @@ namespace rpcs3
 		std::string title_id;
 		std::string renderer;
 		std::string vulkan_adapter;
-		double fps = .0;
+		double fps = 0.0;
 	};
 
 	std::string get_formatted_title(const title_format_data& title_data);
-} // namespace rpcs3
+}

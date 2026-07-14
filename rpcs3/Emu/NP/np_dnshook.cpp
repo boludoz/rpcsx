@@ -2,7 +2,7 @@
 #include "Emu/NP/np_dnshook.h"
 
 #include "Emu/system_config.h"
-#include "util/StrUtil.h"
+#include "Utilities/StrUtil.h"
 #include "util/logs.hpp"
 
 #include <regex>
@@ -28,7 +28,8 @@ namespace np
 	dnshook::dnshook()
 	{
 		// Init switch map for dns
-		auto swaps = fmt::split(g_cfg.net.swap_list.to_string(), {"&&"});
+		const std::string swap_list = g_cfg.net.swap_list.to_string();
+		const auto swaps = fmt::split_sv(swap_list, {"&&"});
 		for (usz i = 0; i < swaps.size(); i++)
 		{
 			auto host_and_ip = fmt::split(swaps[i], {"="});
@@ -163,9 +164,9 @@ namespace np
 			std::vector<u8> fake(len);
 			memcpy(fake.data(), buf, len);
 			dns_header* fake_header = reinterpret_cast<dns_header*>(fake.data());
-			fake_header->qr = 1;
-			fake_header->ra = 1;
-			fake_header->ans_count = 1;
+			fake_header->qr         = 1;
+			fake_header->ra         = 1;
+			fake_header->ans_count  = 1;
 			fake.insert(fake.end(), {0xC0, 0x0C});             // Ref to name in header
 			fake.insert(fake.end(), {0x00, 0x01});             // IPv4
 			fake.insert(fake.end(), {0x00, 0x01});             // Class?

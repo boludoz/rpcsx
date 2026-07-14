@@ -2,27 +2,28 @@
 
 #include "capabilities.h"
 
-#include "util/geometry.h"
+#include "Utilities/geometry.h"
 #include <unordered_map>
 
 namespace gl
 {
 	class driver_state
 	{
-		const u32 DEPTH_BOUNDS = 0xFFFF0001;
-		const u32 CLIP_PLANES = 0xFFFF0002;
-		const u32 DEPTH_RANGE = 0xFFFF0004;
+		const u32 DEPTH_BOUNDS       = 0xFFFF0001;
+		const u32 CLIP_PLANES        = 0xFFFF0002;
+		const u32 DEPTH_RANGE        = 0xFFFF0004;
 		const u32 STENCIL_FRONT_FUNC = 0xFFFF0005;
-		const u32 STENCIL_BACK_FUNC = 0xFFFF0006;
-		const u32 STENCIL_FRONT_OP = 0xFFFF0007;
-		const u32 STENCIL_BACK_OP = 0xFFFF0008;
-		const u32 STENCIL_BACK_MASK = 0xFFFF0009;
+		const u32 STENCIL_BACK_FUNC  = 0xFFFF0006;
+		const u32 STENCIL_FRONT_OP   = 0xFFFF0007;
+		const u32 STENCIL_BACK_OP    = 0xFFFF0008;
+		const u32 STENCIL_BACK_MASK  = 0xFFFF0009;
+		const u32 POLYGON_MODE       = 0xFFFF000A;
 
 		std::unordered_map<GLenum, u64> properties = {};
 		std::unordered_map<GLenum, std::array<u64, 4>> indexed_properties = {};
 
 		GLuint current_program = GL_NONE;
-		std::array<std::unordered_map<GLenum, GLuint>, 48> bound_textures{{}};
+		std::array<std::unordered_map<GLenum, GLuint>, 48> bound_textures{ {} };
 
 		bool test_and_set_property(GLenum property, u64 test)
 		{
@@ -53,6 +54,7 @@ namespace gl
 		}
 
 	public:
+
 		bool enable(u32 test, GLenum cap)
 		{
 			auto found = properties.find(cap);
@@ -212,21 +214,17 @@ namespace gl
 		void color_maski(GLint index, bool r, bool g, bool b, bool a)
 		{
 			u32 mask = 0;
-			if (r)
-				mask |= 0x10;
-			if (g)
-				mask |= 0x20;
-			if (b)
-				mask |= 0x40;
-			if (a)
-				mask |= 0x80;
+			if (r) mask |= 0x10;
+			if (g) mask |= 0x20;
+			if (b) mask |= 0x40;
+			if (a) mask |= 0x80;
 
 			color_maski(index, mask);
 		}
 
 		void clear_color(u8 r, u8 g, u8 b, u8 a)
 		{
-			const u32 value = u32{r} | u32{g} << 8 | u32{b} << 16 | u32{a} << 24;
+			const u32 value = u32{ r } | u32{ g } << 8 | u32{ b } << 16 | u32{ a } << 24;
 			if (!test_and_set_property(GL_COLOR_CLEAR_VALUE, value))
 			{
 				glClearColor(r / 255.f, g / 255.f, b / 255.f, a / 255.f);
@@ -356,6 +354,15 @@ namespace gl
 			}
 		}
 
+		void polygon_mode(GLenum mode)
+		{
+			if (!test_and_set_property(POLYGON_MODE, mode))
+			{
+				// Note: GL4+ does not support separate polygon mode per-face-type
+				glPolygonMode(GL_FRONT_AND_BACK, mode);
+			}
+		}
+
 		void use_program(GLuint program)
 		{
 			if (current_program == program)
@@ -369,15 +376,12 @@ namespace gl
 
 		GLuint get_bound_texture(GLuint layer, GLenum target)
 		{
-			ensure(layer < 48);
-			return bound_textures[layer][target];
+			return ::at32(bound_textures, layer)[target];
 		}
 
 		void bind_texture(GLuint layer, GLenum target, GLuint name, GLboolean force = GL_FALSE)
 		{
-			ensure(layer < 48);
-
-			auto& bound = bound_textures[layer][target];
+			auto& bound = ::at32(bound_textures, layer)[target];
 			if (bound != name || force)
 			{
 				glActiveTexture(GL_TEXTURE0 + layer);
@@ -417,16 +421,13 @@ namespace gl
 	public:
 		command_context()
 			: drv(nullptr)
-		{
-		}
+		{}
 
 		command_context(driver_state& drv_)
 			: drv(&drv_)
-		{
-		}
+		{}
 
-		driver_state* operator->()
-		{
+		driver_state* operator -> () {
 			return drv;
 		}
 	};
@@ -440,4 +441,4 @@ namespace gl
 
 	class fence;
 	void flush_command_queue(fence& fence_obj);
-} // namespace gl
+}

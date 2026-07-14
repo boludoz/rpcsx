@@ -4,6 +4,7 @@
 #include "IPC_socket.h"
 #include "rpcs3_version.h"
 
+
 namespace IPC_socket
 {
 	const u8& IPC_impl::read8(u32 addr)
@@ -118,4 +119,4 @@ namespace IPC_socket
 			m_ipc_server.reset();
 		}
 	}
-} // namespace IPC_socket
+}

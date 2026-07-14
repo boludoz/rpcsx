@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "overlay_manager.h"
 #include "Emu/System.h"
-#include <rx/asm.hpp>
+#include <util/asm.hpp>
 
 namespace rsx
 {
@@ -11,9 +11,9 @@ namespace rsx
 		{
 			m_input_thread = std::make_shared<named_thread<overlay_input_thread>>();
 			(*m_input_thread)([this]()
-				{
-					input_thread_loop();
-				});
+			{
+				input_thread_loop();
+			});
 		}
 
 		display_manager::~display_manager()
@@ -25,19 +25,20 @@ namespace rsx
 
 				// Wake it if it is asleep
 				const input_thread_context_t wakeup_node =
-					{
-						"stop_node",
-						nullptr,
-						nullptr,
-						nullptr,
-						nullptr};
+				{
+					"stop_node",
+					nullptr,
+					nullptr,
+					nullptr,
+					nullptr
+				};
 				m_input_token_stack.push(wakeup_node);
 
 				// Wait for join
 				*m_input_thread = thread_state::aborting;
 				while (*m_input_thread <= thread_state::aborting)
 				{
-					rx::pause();
+					utils::pause();
 				}
 			}
 		}
@@ -67,7 +68,7 @@ namespace rsx
 			m_list_mutex.unlock_shared();
 		}
 
-		std::shared_ptr<overlay> display_manager::get(u32 uid)
+		std::shared_ptr<overlay> display_manager::get(u32 uid) const
 		{
 			reader_lock lock(m_list_mutex);
 
@@ -103,12 +104,14 @@ namespace rsx
 				cleanup_internal();
 			}
 
-			m_dirty_list.erase(
+			m_dirty_list.erase
+			(
 				std::remove_if(m_dirty_list.begin(), m_dirty_list.end(), [&uids](std::shared_ptr<overlay>& e)
-					{
-						return std::find(uids.begin(), uids.end(), e->uid) != uids.end();
-					}),
-				m_dirty_list.end());
+				{
+					return std::find(uids.begin(), uids.end(), e->uid) != uids.end();
+				}),
+				m_dirty_list.end()
+			);
 		}
 
 		bool display_manager::remove_type(u32 type_id)
@@ -162,6 +165,23 @@ namespace rsx
 				remove_type(type_id);
 				m_pending_removals_count--;
 			}
+		}
+
+		void display_manager::start_audio(const std::string& audio_path)
+		{
+			if (audio_path.empty())
+			{
+				m_audio_player.reset();
+				return;
+			}
+
+			m_audio_player = std::make_unique<audio_player>(audio_path);
+			m_audio_player->set_active(true);
+		}
+
+		void display_manager::stop_audio()
+		{
+			m_audio_player.reset();
 		}
 
 		void display_manager::on_overlay_activated(const std::shared_ptr<overlay>& /*item*/)
@@ -245,13 +265,13 @@ namespace rsx
 
 					s32 result = 0;
 
-					if (!input_context.input_loop_override) [[likely]]
+					if (!input_context.input_loop_override) [[ likely ]]
 					{
 						result = input_context.target->run_input_loop([this]()
-							{
-								// Stop if interrupt status is set or input stack is empty
-								return !m_input_thread_interrupted || !m_input_token_stack;
-							});
+						{
+							// Stop if interrupt status is set or input stack is empty
+							return !m_input_thread_interrupted || !m_input_token_stack;
+						});
 					}
 					else
 					{
@@ -305,5 +325,5 @@ namespace rsx
 				}
 			}
 		}
-	} // namespace overlays
-} // namespace rsx
+	}
+}

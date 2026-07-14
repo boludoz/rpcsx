@@ -2,7 +2,7 @@
 
 #include "util/types.hpp"
 #include "util/atomic.hpp"
-#include "util/StrFmt.h"
+#include "Utilities/StrFmt.h"
 
 // Pessimistic mutex for slow operation, does not spin wait, occupies only one byte
 class slow_mutex
@@ -18,12 +18,12 @@ public:
 		while (true)
 		{
 			const u8 prev = m_value.fetch_op([](u8& val)
-				{
-					if ((val & 0x7f) == 0x7f) [[unlikely]]
-						return;
+			{
+				if ((val & 0x7f) == 0x7f) [[unlikely]]
+					return;
 
-					val++;
-				});
+				val++;
+			});
 
 			if ((prev & 0x7f) == 0x7f) [[unlikely]]
 			{
@@ -55,10 +55,10 @@ public:
 	void unlock() noexcept
 	{
 		const u8 prev = m_value.fetch_op([](u8& val)
-			{
-				if (val) [[likely]]
-					val--;
-			});
+		{
+			if (val) [[likely]]
+				val--;
+		});
 
 		if (prev == 0) [[unlikely]]
 		{

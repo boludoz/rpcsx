@@ -1,48 +1,19 @@
 #include "stdafx.h"
 #include "overlay_save_dialog.h"
 #include "overlay_video.h"
-#include "util/date_time.h"
-#include "Emu/System.h"
+#include "Utilities/date_time.h"
 
 namespace rsx
 {
 	namespace overlays
 	{
-		save_dialog::save_dialog_entry::save_dialog_entry(const std::string& text1, const std::string& text2, const std::string& text3, u8 resource_id, const std::vector<u8>& icon_buf, [[maybe_unused]] const std::string& video_path)
+		save_dialog::save_dialog_entry::save_dialog_entry(const std::string& text1, const std::string& text2, const std::string& text3, u8 resource_id, const std::vector<u8>& icon_buf, const std::string& video_path)
 		{
-			std::unique_ptr<overlay_element> image;
-#ifndef ANDROID
-			if (resource_id != image_resource_id::raw_image)
-			{
-				image = std::make_unique<video_view>(video_path, resource_id);
-			}
-			else if (!icon_buf.empty())
-			{
-				image = std::make_unique<video_view>(video_path, icon_buf);
-			}
-			else
-			{
-				image = std::make_unique<video_view>(video_path, resource_config::standard_image_resource::save); // Fallback
-			}
-#else
-			image = std::make_unique<image_view>();
-
-			if (resource_id != image_resource_id::raw_image)
-			{
-				static_cast<image_view*>(image.get())->set_image_resource(resource_id);
-			}
-			else if (!icon_buf.empty())
-			{
-				image->set_padding(0, 0, 11, 11); // Half sized icon, 320x176->160x88
-				icon_data = std::make_unique<image_info>(icon_buf);
-				static_cast<image_view*>(image.get())->set_raw_image(icon_data.get());
-			}
-			else
-			{
-				static_cast<image_view*>(image.get())->set_image_resource(resource_config::standard_image_resource::save);
-			}
-#endif
-
+			const std::string audio_path; // no audio here
+			std::unique_ptr<overlay_element> image = resource_id != image_resource_id::raw_image
+				? std::make_unique<video_view>(video_path, audio_path, resource_id)
+				: !icon_buf.empty() ? std::make_unique<video_view>(video_path, audio_path, icon_buf)
+				                    : std::make_unique<video_view>(video_path, audio_path, resource_config::standard_image_resource::save); // Fallback
 			image->set_size(160, 110);
 			image->set_padding(36, 36, 11, 11); // Square image, 88x88
 
@@ -51,10 +22,10 @@ namespace rsx
 				image->set_padding(0, 0, 11, 11); // Half sized icon, 320x176->160x88
 			}
 
-			std::unique_ptr<overlay_element> text_stack = std::make_unique<vertical_layout>();
-			std::unique_ptr<overlay_element> padding = std::make_unique<spacer>();
+			std::unique_ptr<overlay_element> text_stack  = std::make_unique<vertical_layout>();
+			std::unique_ptr<overlay_element> padding     = std::make_unique<spacer>();
 			std::unique_ptr<overlay_element> header_text = std::make_unique<label>(text1);
-			std::unique_ptr<overlay_element> subtext = std::make_unique<label>(text2);
+			std::unique_ptr<overlay_element> subtext     = std::make_unique<label>(text2);
 
 			padding->set_size(1, 1);
 			header_text->set_size(800, 40);
@@ -68,7 +39,7 @@ namespace rsx
 
 			// Make back color transparent for text
 			header_text->back_color.a = 0.f;
-			subtext->back_color.a = 0.f;
+			subtext->back_color.a     = 0.f;
 
 			static_cast<vertical_layout*>(text_stack.get())->pack_padding = 5;
 			static_cast<vertical_layout*>(text_stack.get())->add_element(padding);
@@ -100,14 +71,12 @@ namespace rsx
 			add_element(text_stack);
 		}
 
-		void save_dialog::save_dialog_entry::set_selected([[maybe_unused]] bool selected)
+		void save_dialog::save_dialog_entry::set_selected(bool selected)
 		{
-#ifndef ANDROID
 			if (m_image)
 			{
 				static_cast<video_view*>(m_image)->set_active(selected);
 			}
-#endif
 		}
 
 		save_dialog::save_dialog()
@@ -115,7 +84,7 @@ namespace rsx
 			m_dim_background = std::make_unique<overlay_element>();
 			m_dim_background->set_size(virtual_width, virtual_height);
 
-			m_list = std::make_unique<list_view>(virtual_width - 2 * 20, 540);
+			m_list        = std::make_unique<list_view>(virtual_width - 2 * 20, 540);
 			m_description = std::make_unique<label>();
 			m_time_thingy = std::make_unique<label>();
 
@@ -133,8 +102,8 @@ namespace rsx
 			m_time_thingy->auto_resize();
 
 			m_dim_background->back_color.a = 0.5f;
-			m_description->back_color.a = 0.f;
-			m_time_thingy->back_color.a = 0.f;
+			m_description->back_color.a    = 0.f;
+			m_time_thingy->back_color.a    = 0.f;
 
 			fade_animation.duration_sec = 0.15f;
 
@@ -154,8 +123,7 @@ namespace rsx
 
 		void save_dialog::on_button_pressed(pad_button button_press, bool is_auto_repeat)
 		{
-			if (fade_animation.active)
-				return;
+			if (fade_animation.active) return;
 
 			bool close_dialog = false;
 
@@ -165,11 +133,11 @@ namespace rsx
 				if (m_no_saves)
 					break;
 				return_code = m_list->get_selected_index();
-				Emu.GetCallbacks().play_sound(fs::get_config_dir() + "sounds/snd_decide.wav");
+				play_sound(sound_effect::accept);
 				close_dialog = true;
 				break;
 			case pad_button::circle:
-				Emu.GetCallbacks().play_sound(fs::get_config_dir() + "sounds/snd_cancel.wav");
+				play_sound(sound_effect::cancel);
 				close_dialog = true;
 				break;
 			case pad_button::dpad_up:
@@ -205,7 +173,7 @@ namespace rsx
 			// Play a sound unless this is a fast auto repeat which would induce a nasty noise
 			else if (!is_auto_repeat || m_auto_repeat_ms_interval >= m_auto_repeat_ms_interval_default)
 			{
-				Emu.GetCallbacks().play_sound(fs::get_config_dir() + "sounds/snd_cursor.wav");
+				play_sound(sound_effect::cursor);
 			}
 		}
 
@@ -366,4 +334,4 @@ namespace rsx
 			return return_code;
 		}
 	} // namespace overlays
-} // namespace rsx
+} // namespace RSX

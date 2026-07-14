@@ -1,5 +1,4 @@
 #include "stdafx.h"
-#include "rx/cpu/cell/ppu/Decoder.hpp"
 #include "PPUInterpreter.h"
 
 #include "Emu/Memory/vm_reservation.h"
@@ -15,11 +14,11 @@
 #include <cmath>
 #include <climits>
 
-#include "rx/asm.hpp"
+#include "util/asm.hpp"
 #include "util/v128.hpp"
 #include "util/simd.hpp"
 #include "util/sysinfo.hpp"
-#include "util/JIT.h"
+#include "Utilities/JIT.h"
 
 #if !defined(_MSC_VER)
 #pragma GCC diagnostic push
@@ -39,11 +38,13 @@ void ppubreak(ppu_thread& ppu)
 	}
 }
 
+#define PPU_WRITE(type, addr, value) vm::write<type>(addr, value, &ppu);
 #define PPU_WRITE_8(addr, value) vm::write8(addr, value, &ppu);
 #define PPU_WRITE_16(addr, value) vm::write16(addr, value, &ppu);
 #define PPU_WRITE_32(addr, value) vm::write32(addr, value, &ppu);
 #define PPU_WRITE_64(addr, value) vm::write64(addr, value, &ppu);
 #else
+#define PPU_WRITE(type, addr, value) vm::write<type>(addr, value);
 #define PPU_WRITE_8(addr, value) vm::write8(addr, value);
 #define PPU_WRITE_16(addr, value) vm::write16(addr, value);
 #define PPU_WRITE_32(addr, value) vm::write32(addr, value);
@@ -70,7 +71,7 @@ enum class ppu_exec_bit : u64
 	set_call_history,
 	use_feed_data,
 
-	bitset_last = use_feed_data,
+	__bitset_enum_max
 };
 
 using enum ppu_exec_bit;
@@ -80,7 +81,7 @@ template <ppu_exec_bit... Flags0>
 struct ppu_exec_select
 {
 	template <ppu_exec_bit Flag, ppu_exec_bit... Flags, typename F>
-	static ppu_intrp_func_t select(rx::EnumBitSet<ppu_exec_bit> selected, F func)
+	static ppu_intrp_func_t select(bs_t<ppu_exec_bit> selected, F func)
 	{
 		// Make sure there is no flag duplication, otherwise skip flag
 		if constexpr (((Flags0 != Flag) && ...))
@@ -97,7 +98,7 @@ struct ppu_exec_select
 	}
 
 	template <typename F>
-	static ppu_intrp_func_t select(rx::EnumBitSet<ppu_exec_bit>, F func)
+	static ppu_intrp_func_t select(bs_t<ppu_exec_bit>, F func)
 	{
 		// Instantiate interpreter function with required set of flags
 		return func.template operator()<Flags0...>();
@@ -107,7 +108,7 @@ struct ppu_exec_select
 	static auto select()
 	{
 #ifndef __INTELLISENSE__
-		return [](rx::EnumBitSet<ppu_exec_bit> selected, auto func)
+		return [](bs_t<ppu_exec_bit> selected, auto func)
 		{
 			return ppu_exec_select::select<Flags1...>(selected, func);
 		};
@@ -117,44 +118,40 @@ struct ppu_exec_select
 
 // Switch between inlined interpreter invocation (exec) and builder function
 #if defined(ARCH_X64)
-#define RETURN(...)                                                                                                                                                 \
-	if constexpr (Build == 0)                                                                                                                                       \
-	{                                                                                                                                                               \
-		static_cast<void>(exec);                                                                                                                                    \
+#define RETURN(...) \
+	if constexpr (Build == 0) { \
+		static_cast<void>(exec); \
 		static const ppu_intrp_func_t f = build_function_asm<ppu_intrp_func_t, asmjit::ppu_builder>("ppu_"s + __func__, [&](asmjit::ppu_builder& c, native_args&) { \
-			static ppu_opcode_t op{};                                                                                                                               \
-			static ppu_abstract_t ppu;                                                                                                                              \
-			exec(__VA_ARGS__);                                                                                                                                      \
-			c.ppu_ret();                                                                                                                                            \
-			return !c.fail_flag;                                                                                                                                    \
-		});                                                                                                                                                         \
-		if (f)                                                                                                                                                      \
-			return f;                                                                                                                                               \
-		ppu_log.error("Can't build instruction %s", __func__);                                                                                                      \
-		RETURN_(__VA_ARGS__);                                                                                                                                       \
+			static ppu_opcode_t op{}; \
+			static ppu_abstract_t ppu; \
+			exec(__VA_ARGS__); \
+			c.ppu_ret(); \
+			return !c.fail_flag; \
+		}); \
+		if (f) return f; \
+		ppu_log.error("Can't build instruction %s", __func__); \
+		RETURN_(__VA_ARGS__); \
 	}
 #else
 #define RETURN RETURN_
 #endif
 
-#define RETURN_(...)                                                                                    \
-	if constexpr (Build == 0)                                                                           \
-	{                                                                                                   \
-		static_cast<void>(exec);                                                                        \
-		if (is_debugger_present())                                                                      \
-			return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func* next_fn) { \
-				exec(__VA_ARGS__);                                                                      \
-				const auto next_op = this_op + 1;                                                       \
-				const auto fn = atomic_storage<ppu_intrp_func_t>::load(next_fn->fn);                    \
-				ppu.cia = vm::get_addr(next_op);                                                        \
-				return fn(ppu, {*next_op}, next_op, next_fn + 1);                                       \
-			};                                                                                          \
-		return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func* next_fn) {     \
-			exec(__VA_ARGS__);                                                                          \
-			const auto next_op = this_op + 1;                                                           \
-			const auto fn = atomic_storage<ppu_intrp_func_t>::observe(next_fn->fn);                     \
-			return fn(ppu, {*next_op}, next_op, next_fn + 1);                                           \
-		};                                                                                              \
+#define RETURN_(...) \
+	if constexpr (Build == 0) { \
+		static_cast<void>(exec); \
+		if (is_debugger_present() || g_cfg.core.ppu_debug) return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func* next_fn) { \
+			exec(__VA_ARGS__); \
+			const auto next_op = this_op + 1; \
+			const auto fn = atomic_storage<ppu_intrp_func_t>::load(next_fn->fn); \
+			ppu.cia = vm::get_addr(next_op); \
+			return fn(ppu, {*next_op}, next_op, next_fn + 1); \
+		}; \
+		return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func* next_fn) { \
+			exec(__VA_ARGS__); \
+			const auto next_op = this_op + 1; \
+			const auto fn = atomic_storage<ppu_intrp_func_t>::observe(next_fn->fn); \
+			return fn(ppu, {*next_op}, next_op, next_fn + 1); \
+		}; \
 	}
 
 #ifdef ARCH_X64
@@ -190,11 +187,13 @@ namespace asmjit
 		}
 
 		// Indexed offset to ppu.member
-		template <uint I, uint N>
-		x86::Mem ppu_mem(const bf_t<u32, I, N>&, std::size_t offset, std::size_t size, std::size_t elemSize, bool last = false)
+		template <auto MPtr, u32 Size = sizeof((std::declval<ppu_thread&>().*MPtr)[0]), uint I, uint N>
+		x86::Mem ppu_mem(const bf_t<u32, I, N>&, bool last = false)
 		{
 			// Required index shift for array indexing
-			u32 Shift = std::countr_zero(elemSize);
+			constexpr u32 Shift = std::countr_zero(sizeof((std::declval<ppu_thread&>().*MPtr)[0]));
+
+			const u32 offset = ::offset32(MPtr);
 
 			auto tmp_r32 = x86::eax;
 			auto reg_ppu = arg_ppu;
@@ -221,13 +220,13 @@ namespace asmjit
 			}
 
 			// Use max possible index shift
-			u32 X86Shift = Shift > 3 ? 3 : Shift;
-			u32 AddShift = Shift - X86Shift;
-			u32 AndMask = (1u << N) - 1;
+			constexpr u32 X86Shift = Shift > 3 ? 3 : Shift;
+			constexpr u32 AddShift = Shift - X86Shift;
+			constexpr u32 AndMask = (1u << N) - 1;
 
-			if (I >= AddShift)
+			if constexpr (I >= AddShift)
 			{
-				if (I != AddShift)
+				if constexpr (I != AddShift)
 					base::shr(tmp_r32, I - AddShift);
 				base::and_(tmp_r32, AndMask << AddShift);
 			}
@@ -237,24 +236,25 @@ namespace asmjit
 				base::shl(tmp_r32, I + AddShift);
 			}
 
-			return x86::ptr(reg_ppu, tmp_r32.r64(), X86Shift, static_cast<s32>(offset - ppu_base), size);
+			return x86::ptr(reg_ppu, tmp_r32.r64(), X86Shift, static_cast<s32>(offset - ppu_base), Size);
 		}
 
 		// Generic offset to ppu.member
-		x86::Mem ppu_mem(std::uint32_t offset, std::size_t size)
+		template <auto MPtr, u32 Size = sizeof(std::declval<ppu_thread&>().*MPtr)>
+		x86::Mem ppu_mem()
 		{
-			return x86::ptr(arg_ppu, offset, size);
+			return x86::ptr(arg_ppu, static_cast<s32>(::offset32(MPtr)), Size);
 		}
 
 		template <u32 Size = 16, uint I, uint N>
 		x86::Mem ppu_vr(const bf_t<u32, I, N>& bf, bool last = false)
 		{
-			return ppu_mem(bf, OFFSET_OF(ppu_thread, vr), Size, sizeof(ppu_thread::vr[0]), last);
+			return ppu_mem<&ppu_thread::vr, Size>(bf, last);
 		}
 
 		x86::Mem ppu_sat()
 		{
-			return ppu_mem(OFFSET_OF(ppu_thread, sat), sizeof(ppu_thread::sat));
+			return ppu_mem<&ppu_thread::sat>();
 		}
 
 		void ppu_ret(bool last = true)
@@ -263,7 +263,7 @@ namespace asmjit
 			base::mov(x86::rax, x86::qword_ptr(arg_next_fn));
 			base::add(arg_this_op, 4);
 			if (is_debugger_present())
-				base::mov(ppu_mem(OFFSET_OF(ppu_thread, cia), sizeof(ppu_thread::cia)), arg_this_op.r32());
+				base::mov(ppu_mem<&ppu_thread::cia>(), arg_this_op.r32());
 			base::mov(arg_op, x86::dword_ptr(arg_this_op));
 			base::bswap(arg_op);
 			base::add(arg_next_fn, 8);
@@ -283,7 +283,7 @@ namespace asmjit
 	{
 	};
 #endif
-} // namespace asmjit
+}
 
 struct ppu_abstract_t
 {
@@ -297,9 +297,9 @@ struct ppu_abstract_t
 				if (is_lv && !this->isReg())
 				{
 					Operand::operator=(g_vc->vec_alloc());
-#if defined(ARCH_X64)
+				#if defined(ARCH_X64)
 					g_vc->emit(asmjit::x86::Inst::kIdMovaps, *this, static_cast<asmjit::ppu_builder*>(g_vc)->ppu_vr(bf_t<u32, I, N>{}, false));
-#endif
+				#endif
 				}
 
 				if (!is_lv)
@@ -310,9 +310,9 @@ struct ppu_abstract_t
 					}
 					else
 					{
-#if defined(ARCH_X64)
+					#if defined(ARCH_X64)
 						Operand::operator=(static_cast<asmjit::ppu_builder*>(g_vc)->ppu_vr(bf_t<u32, I, N>{}, false));
-#endif
+					#endif
 					}
 				}
 
@@ -336,9 +336,9 @@ struct ppu_abstract_t
 	struct abstract_sat : asmjit::mem_type
 	{
 		abstract_sat()
-#if defined(ARCH_X64)
+		#if defined(ARCH_X64)
 			: asmjit::mem_type(static_cast<asmjit::ppu_builder*>(g_vc)->ppu_sat())
-#endif
+		#endif
 		{
 		}
 
@@ -352,10 +352,7 @@ struct ppu_abstract_t
 
 extern void do_cell_atomic_128_store(u32 addr, const void* to_write);
 
-inline u64 dup32(u32 x)
-{
-	return x | static_cast<u64>(x) << 32;
-}
+inline u64 dup32(u32 x) { return x | static_cast<u64>(x) << 32; }
 
 // Write values to CR field
 inline void ppu_cr_set(ppu_thread& ppu, u32 field, bool le, bool gt, bool eq, bool so)
@@ -372,10 +369,10 @@ inline void ppu_cr_set(ppu_thread& ppu, u32 field, bool le, bool gt, bool eq, bo
 }
 
 // Write comparison results to CR field
-template <typename T>
+template<typename T>
 inline void ppu_cr_set(ppu_thread& ppu, u32 field, const T& a, const T& b)
 {
-	ppu_cr_set(ppu, field, (a < b), (a > b), a == b, ppu.xer_so);
+	ppu_cr_set(ppu, field, a < b, a > b, a == b, ppu.xer.so);
 }
 
 // TODO
@@ -396,8 +393,8 @@ void ppu_set_cr(ppu_thread& ppu, u32 field, bool le, bool gt, bool eq, bool so)
 // Set XER.OV bit (overflow)
 inline void ppu_ov_set(ppu_thread& ppu, bool bit)
 {
-	ppu.xer_ov = bit;
-	ppu.xer_so |= bit;
+	ppu.xer.ov = bit;
+	ppu.xer.so |= bit;
 }
 
 // Write comparison results to FPCC field with optional CR field update
@@ -411,8 +408,12 @@ void ppu_set_fpcc(ppu_thread& ppu, f64 a, f64 b, u64 cr_field = 1)
 		bool fpcc[4];
 #if defined(ARCH_X64) && !defined(_M_X64)
 		__asm__("comisd %[b], %[a]\n"
-			: "=@ccb"(fpcc[0]), "=@cca"(fpcc[1]), "=@ccz"(fpcc[2]), "=@ccp"(fpcc[3])
-			: [a] "x"(a), [b] "x"(b)
+			: "=@ccb" (fpcc[0])
+			, "=@cca" (fpcc[1])
+			, "=@ccz" (fpcc[2])
+			, "=@ccp" (fpcc[3])
+			: [a] "x" (a)
+			, [b] "x" (b)
 			: "cc");
 		if (fpcc[3]) [[unlikely]]
 		{
@@ -426,7 +427,7 @@ void ppu_set_fpcc(ppu_thread& ppu, f64 a, f64 b, u64 cr_field = 1)
 		fpcc[3] = cmp == std::partial_ordering::unordered;
 #endif
 
-		auto data = std::bit_cast<CrField>(fpcc);
+		const u32 data = std::bit_cast<u32>(fpcc);
 
 		// Write FPCC
 		ppu.fpscr.fields[4] = data;
@@ -438,7 +439,7 @@ void ppu_set_fpcc(ppu_thread& ppu, f64 a, f64 b, u64 cr_field = 1)
 
 			if (g_cfg.core.ppu_debug) [[unlikely]]
 			{
-				*reinterpret_cast<u32*>(vm::g_stat_addr + ppu.cia) |= std::bit_cast<u32>(data);
+				*reinterpret_cast<u32*>(vm::g_stat_addr + ppu.cia) |= data;
 			}
 		}
 	}
@@ -500,7 +501,7 @@ auto ppu_feed_data(ppu_thread& ppu, u64 addr)
 		if (raddr / 128 == addr / 128)
 			src = &ppu.rdata[addr & 127], size = std::min<u32>(128 - (addr % 128), sizeof(T));
 		else
-			src = &ppu.rdata[0], size = (addr + u32{sizeof(T)}) % 127, offs = sizeof(T) - size;
+			src = &ppu.rdata[0], size = (addr + u32{sizeof(T)}) % 128, offs = sizeof(T) - size;
 
 		if (std::memcmp(buffer + offs, src, size))
 		{
@@ -551,7 +552,7 @@ u32 ppu_record_call(ppu_thread& ppu, u32 new_cia, ppu_opcode_t op, bool indirect
 	return new_cia;
 }
 
-template <typename T>
+template<typename T>
 struct add_flags_result_t
 {
 	T result;
@@ -561,7 +562,8 @@ struct add_flags_result_t
 
 	// Straighforward ADD with flags
 	add_flags_result_t(T a, T b)
-		: result(a + b), carry(result < a)
+		: result(a + b)
+		, carry(result < a)
 	{
 	}
 
@@ -577,12 +579,12 @@ struct add_flags_result_t
 
 static add_flags_result_t<u64> add64_flags(u64 a, u64 b)
 {
-	return {a, b};
+	return{ a, b };
 }
 
 static add_flags_result_t<u64> add64_flags(u64 a, u64 b, bool c)
 {
-	return {a, b, c};
+	return{ a, b, c };
 }
 
 extern void ppu_execute_syscall(ppu_thread& ppu, u64 code);
@@ -606,7 +608,7 @@ inline v128 ppu_select_vnan(v128 a, v128 b)
 	return gv_selectfs(gv_eqfs(a, a), b, a | gv_bcst32(0x7fc00000u));
 }
 
-inline v128 ppu_select_vnan(v128 a, v128 b, rx::Vector128 auto... args)
+inline v128 ppu_select_vnan(v128 a, v128 b, Vector128 auto... args)
 {
 	return ppu_select_vnan(a, ppu_select_vnan(b, args...));
 }
@@ -631,7 +633,7 @@ inline v128 ppu_fix_vnan(v128 r)
 }
 
 template <ppu_exec_bit... Flags>
-inline v128 ppu_set_vnan(v128 r, rx::Vector128 auto... args)
+inline v128 ppu_set_vnan(v128 r, Vector128 auto... args)
 {
 	if constexpr (((Flags == set_vnan) || ...) && sizeof...(args) > 0)
 	{
@@ -710,7 +712,7 @@ auto VADDFP()
 
 	static const auto exec = [](auto&& d, auto&& a_, auto&& b_, auto&& jm_mask)
 	{
-		auto m = gv_bcst32(jm_mask);
+		auto m = gv_bcst32(jm_mask, &ppu_thread::jm_mask);
 		auto a = ppu_flush_denormal<false, Flags...>(m, std::move(a_));
 		auto b = ppu_flush_denormal<false, Flags...>(m, std::move(b_));
 		d = ppu_flush_denormal<true, Flags...>(std::move(m), ppu_set_vnan<Flags...>(gv_addfs(a, b), a, b));
@@ -1357,7 +1359,7 @@ auto VMADDFP()
 
 	static const auto exec = [](auto&& d, auto&& a_, auto&& b_, auto&& c_, auto&& jm_mask)
 	{
-		auto m = gv_bcst32(jm_mask);
+		auto m = gv_bcst32(jm_mask, &ppu_thread::jm_mask);
 		auto a = ppu_flush_denormal<false, Flags...>(m, std::move(a_));
 		auto b = ppu_flush_denormal<false, Flags...>(m, std::move(b_));
 		auto c = ppu_flush_denormal<false, Flags...>(m, std::move(c_));
@@ -1375,7 +1377,7 @@ auto VMAXFP()
 
 	static const auto exec = [](auto&& d, auto&& a, auto&& b, auto&& jm_mask)
 	{
-		d = ppu_flush_denormal<true, Flags...>(gv_bcst32(jm_mask), ppu_set_vnan<Flags...>(gv_maxfs(a, b), a, b));
+		d = ppu_flush_denormal<true, Flags...>(gv_bcst32(jm_mask, &ppu_thread::jm_mask), ppu_set_vnan<Flags...>(gv_maxfs(a, b), a, b));
 	};
 
 	RETURN_(ppu.vr[op.vd], ppu.vr[op.va], ppu.vr[op.vb], ppu.jm_mask);
@@ -1522,7 +1524,7 @@ auto VMINFP()
 
 	static const auto exec = [](auto&& d, auto&& a, auto&& b, auto&& jm_mask)
 	{
-		d = ppu_flush_denormal<true, Flags...>(gv_bcst32(jm_mask), ppu_set_vnan<Flags...>(gv_minfs(a, b), a, b));
+		d = ppu_flush_denormal<true, Flags...>(gv_bcst32(jm_mask, &ppu_thread::jm_mask), ppu_set_vnan<Flags...>(gv_minfs(a, b), a, b));
 	};
 
 	RETURN_(ppu.vr[op.vd], ppu.vr[op.va], ppu.vr[op.vb], ppu.jm_mask);
@@ -1929,7 +1931,7 @@ auto VNMSUBFP()
 	{
 		// An odd case with (FLT_MIN, FLT_MIN, FLT_MIN) produces FLT_MIN instead of 0
 		auto s = gv_bcstfs(-0.0f);
-		auto m = gv_bcst32(jm_mask);
+		auto m = gv_bcst32(jm_mask, &ppu_thread::jm_mask);
 		auto a = ppu_flush_denormal<false, Flags...>(m, std::move(a_));
 		auto b = ppu_flush_denormal<false, Flags...>(m, std::move(b_));
 		auto c = ppu_flush_denormal<false, Flags...>(m, std::move(c_));
@@ -1974,26 +1976,26 @@ auto VPERM()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-#if defined(ARCH_X64)
+#if defined (ARCH_X64)
 	if constexpr (Build == 0)
 	{
 		static const ppu_intrp_func_t f = build_function_asm<ppu_intrp_func_t, asmjit::ppu_builder>("ppu_VPERM", [&](asmjit::ppu_builder& c, native_args&)
-			{
-				const auto [v0, v1, v2, v3] = c.vec_alloc<4>();
-				c.movdqa(v0, c.ppu_vr(s_op.vc));
-				c.pandn(v0, c.get_const(v128::from8p(0x1f)));
-				c.movdqa(v1, v0);
-				c.pcmpgtb(v1, c.get_const(v128::from8p(0xf)));
-				c.movdqa(v2, c.ppu_vr(s_op.va));
-				c.movdqa(v3, c.ppu_vr(s_op.vb));
-				c.pshufb(v2, v0);
-				c.pshufb(v3, v0);
-				c.pand(v2, v1);
-				c.pandn(v1, v3);
-				c.por(v1, v2);
-				c.movdqa(c.ppu_vr(s_op.vd), v1);
-				c.ppu_ret();
-			});
+		{
+			const auto [v0, v1, v2, v3] = c.vec_alloc<4>();
+			c.movdqa(v0, c.ppu_vr(s_op.vc));
+			c.pandn(v0, c.get_const(v128::from8p(0x1f)));
+			c.movdqa(v1, v0);
+			c.pcmpgtb(v1, c.get_const(v128::from8p(0xf)));
+			c.movdqa(v2, c.ppu_vr(s_op.va));
+			c.movdqa(v3, c.ppu_vr(s_op.vb));
+			c.pshufb(v2, v0);
+			c.pshufb(v3, v0);
+			c.pand(v2, v1);
+			c.pandn(v1, v3);
+			c.por(v1, v2);
+			c.movdqa(c.ppu_vr(s_op.vd), v1);
+			c.ppu_ret();
+		});
 
 		if (utils::has_ssse3())
 		{
@@ -2004,12 +2006,12 @@ auto VPERM()
 
 	static const auto exec = [](auto&& d, auto&& a, auto&& b, auto&& c)
 	{
-#if defined(ARCH_ARM64)
+	#if defined(ARCH_ARM64)
 		uint8x16x2_t ab;
 		ab.val[0] = b;
 		ab.val[1] = a;
 		d = vqtbl2q_u8(ab, vbicq_u8(vdupq_n_u8(0x1f), c));
-#else
+	#else
 		u8 ab[32];
 		std::memcpy(ab + 0, &b, 16);
 		std::memcpy(ab + 16, &a, 16);
@@ -2018,7 +2020,7 @@ auto VPERM()
 		{
 			d._u8[i] = ab[~c._u8[i] & 0x1f];
 		}
-#endif
+	#endif
 	};
 
 	RETURN_(ppu.vr[op.vd], ppu.vr[op.va], ppu.vr[op.vb], ppu.vr[op.vc]);
@@ -2175,7 +2177,7 @@ auto VREFP()
 
 	static const auto exec = [](auto&& d, auto&& b_, auto&& jm_mask)
 	{
-		auto m = gv_bcst32(jm_mask);
+		auto m = gv_bcst32(jm_mask, &ppu_thread::jm_mask);
 		auto b = ppu_flush_denormal<false, Flags...>(m, std::move(b_));
 		d = ppu_flush_denormal<true, Flags...>(std::move(m), ppu_set_vnan<Flags...>(gv_divfs(gv_bcstfs(1.0f), b), b));
 	};
@@ -2191,7 +2193,7 @@ auto VRFIM()
 
 	static const auto exec = [](auto&& d, auto&& b_, auto&& jm_mask)
 	{
-		auto m = gv_bcst32(jm_mask);
+		auto m = gv_bcst32(jm_mask, &ppu_thread::jm_mask);
 		auto b = ppu_flush_denormal<false, Flags...>(m, std::move(b_));
 		d = ppu_flush_denormal<true, Flags...>(std::move(m), ppu_set_vnan<Flags...>(gv_roundfs_floor(b), b));
 	};
@@ -2207,7 +2209,7 @@ auto VRFIN()
 
 	static const auto exec = [](auto&& d, auto&& b, auto&& jm_mask)
 	{
-		auto m = gv_bcst32(jm_mask);
+		auto m = gv_bcst32(jm_mask, &ppu_thread::jm_mask);
 		d = ppu_flush_denormal<true, Flags...>(std::move(m), ppu_set_vnan<Flags...>(gv_roundfs_even(b), b));
 	};
 
@@ -2222,7 +2224,7 @@ auto VRFIP()
 
 	static const auto exec = [](auto&& d, auto&& b_, auto&& jm_mask)
 	{
-		auto m = gv_bcst32(jm_mask);
+		auto m = gv_bcst32(jm_mask, &ppu_thread::jm_mask);
 		auto b = ppu_flush_denormal<false, Flags...>(m, std::move(b_));
 		d = ppu_flush_denormal<true, Flags...>(std::move(m), ppu_set_vnan<Flags...>(gv_roundfs_ceil(b), b));
 	};
@@ -2238,7 +2240,7 @@ auto VRFIZ()
 
 	static const auto exec = [](auto&& d, auto&& b, auto&& jm_mask)
 	{
-		auto m = gv_bcst32(jm_mask);
+		auto m = gv_bcst32(jm_mask, &ppu_thread::jm_mask);
 		d = ppu_flush_denormal<true, Flags...>(std::move(m), ppu_set_vnan<Flags...>(gv_roundfs_trunc(b), b));
 	};
 
@@ -2295,7 +2297,7 @@ auto VRSQRTEFP()
 
 	static const auto exec = [](auto&& d, auto&& b_, auto&& jm_mask)
 	{
-		auto m = gv_bcst32(jm_mask);
+		auto m = gv_bcst32(jm_mask, &ppu_thread::jm_mask);
 		auto b = ppu_flush_denormal<false, Flags...>(m, std::move(b_));
 		d = ppu_flush_denormal<true, Flags...>(std::move(m), ppu_set_vnan<Flags...>(gv_divfs(gv_bcstfs(1.0f), gv_sqrtfs(b)), b));
 	};
@@ -2350,7 +2352,7 @@ template <u32 Count>
 struct VSLDOI
 {
 	template <ppu_exec_bit... Flags>
-	static auto select(rx::EnumBitSet<ppu_exec_bit> selected, auto func)
+	static auto select(bs_t<ppu_exec_bit> selected, auto func)
 	{
 		return ppu_exec_select<>::select<Flags...>(selected, func);
 	}
@@ -2366,6 +2368,7 @@ struct VSLDOI
 		RETURN_(ppu.vr[op.vd], ppu.vr[op.va], ppu.vr[op.vb]);
 	}
 };
+
 
 template <u32 Build, ppu_exec_bit... Flags>
 auto VSLH()
@@ -2627,7 +2630,7 @@ auto VSUBFP()
 
 	static const auto exec = [](auto&& d, auto&& a_, auto&& b_, auto&& jm_mask)
 	{
-		auto m = gv_bcst32(jm_mask);
+		auto m = gv_bcst32(jm_mask, &ppu_thread::jm_mask);
 		auto a = ppu_flush_denormal<false, Flags...>(m, std::move(a_));
 		auto b = ppu_flush_denormal<false, Flags...>(m, std::move(b_));
 		d = ppu_flush_denormal<true, Flags...>(std::move(m), ppu_set_vnan<Flags...>(gv_subfs(a, b), a, b));
@@ -2869,10 +2872,8 @@ auto VSUM2SWS()
 		y._s64[0] = s64{a._s32[0]} + a._s32[1] + b._s32[0];
 		y._s64[1] = s64{a._s32[2]} + a._s32[3] + b._s32[2];
 		v128 r{};
-		r._u64[0] = y._s64[0] > INT32_MAX ? INT32_MAX : y._s64[0] < INT32_MIN ? u32(INT32_MIN) :
-		                                                                        static_cast<u32>(y._s64[0]);
-		r._u64[1] = y._s64[1] > INT32_MAX ? INT32_MAX : y._s64[1] < INT32_MIN ? u32(INT32_MIN) :
-		                                                                        static_cast<u32>(y._s64[1]);
+		r._u64[0] = y._s64[0] > INT32_MAX ? INT32_MAX : y._s64[0] < INT32_MIN ? u32(INT32_MIN) : static_cast<u32>(y._s64[0]);
+		r._u64[1] = y._s64[1] > INT32_MAX ? INT32_MAX : y._s64[1] < INT32_MIN ? u32(INT32_MIN) : static_cast<u32>(y._s64[1]);
 #endif
 		if constexpr (((Flags == set_sat) || ...))
 			sat = gv_or32(gv_shr64(gv_add64(y, gv_bcst64(0x80000000u)), 32), std::move(sat));
@@ -3042,23 +3043,23 @@ auto TDI()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	if constexpr (Build == 0)
-		return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func* next_fn)
-		{
-			const s64 a = ppu.gpr[op.ra], b = op.simm16;
-			const u64 a_ = a, b_ = b;
+	if constexpr (Build == 0) return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func* next_fn)
+	{
+	const s64 a = ppu.gpr[op.ra], b = op.simm16;
+	const u64 a_ = a, b_ = b;
 
-			if (((op.bo & 0x10) && a < b) ||
-				((op.bo & 0x8) && a > b) ||
-				((op.bo & 0x4) && a == b) ||
-				((op.bo & 0x2) && a_ < b_) ||
-				((op.bo & 0x1) && a_ > b_))
-			{
-				[[unlikely]] ppu_trap(ppu, vm::get_addr(this_op));
-				return;
-			}
-			return next_fn->fn(ppu, {this_op[1]}, this_op + 1, next_fn + 1);
-		};
+	if (((op.bo & 0x10) && a < b) ||
+		((op.bo & 0x8) && a > b) ||
+		((op.bo & 0x4) && a == b) ||
+		((op.bo & 0x2) && a_ < b_) ||
+		((op.bo & 0x1) && a_ > b_))
+	{
+		[[unlikely]]
+		ppu_trap(ppu, vm::get_addr(this_op));
+		return;
+	}
+	return next_fn->fn(ppu, {this_op[1]}, this_op + 1, next_fn + 1);
+	};
 }
 
 template <u32 Build, ppu_exec_bit... Flags>
@@ -3067,23 +3068,23 @@ auto TWI()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	if constexpr (Build == 0)
-		return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func* next_fn)
-		{
-			const s32 a = static_cast<u32>(ppu.gpr[op.ra]), b = op.simm16;
-			const u32 a_ = a, b_ = b;
+	if constexpr (Build == 0) return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func* next_fn)
+	{
+	const s32 a = static_cast<u32>(ppu.gpr[op.ra]), b = op.simm16;
+	const u32 a_ = a, b_ = b;
 
-			if (((op.bo & 0x10) && a < b) ||
-				((op.bo & 0x8) && a > b) ||
-				((op.bo & 0x4) && a == b) ||
-				((op.bo & 0x2) && a_ < b_) ||
-				((op.bo & 0x1) && a_ > b_))
-			{
-				[[unlikely]] ppu_trap(ppu, vm::get_addr(this_op));
-				return;
-			}
-			return next_fn->fn(ppu, {this_op[1]}, this_op + 1, next_fn + 1);
-		};
+	if (((op.bo & 0x10) && a < b) ||
+		((op.bo & 0x8) && a > b) ||
+		((op.bo & 0x4) && a == b) ||
+		((op.bo & 0x2) && a_ < b_) ||
+		((op.bo & 0x1) && a_ > b_))
+	{
+		[[unlikely]]
+		ppu_trap(ppu, vm::get_addr(this_op));
+		return;
+	}
+	return next_fn->fn(ppu, {this_op[1]}, this_op + 1, next_fn + 1);
+	};
 }
 
 template <u32 Build, ppu_exec_bit... Flags>
@@ -3092,9 +3093,8 @@ auto MULLI()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.rd] = static_cast<s64>(ppu.gpr[op.ra]) * op.simm16;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.rd] = static_cast<s64>(ppu.gpr[op.ra]) * op.simm16;
 	};
 	RETURN_(ppu, op);
 }
@@ -3105,13 +3105,12 @@ auto SUBFIC()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 a = ppu.gpr[op.ra];
-		const s64 i = op.simm16;
-		const auto r = add64_flags(~a, i, 1);
-		ppu.gpr[op.rd] = r.result;
-		ppu.xer_ca = r.carry;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 a = ppu.gpr[op.ra];
+	const s64 i = op.simm16;
+	const auto r = add64_flags(~a, i, 1);
+	ppu.gpr[op.rd] = r.result;
+	ppu.xer.ca = r.carry;
 	};
 	RETURN_(ppu, op);
 }
@@ -3122,16 +3121,15 @@ auto CMPLI()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	if (op.l10)
 	{
-		if (op.l10)
-		{
-			ppu_cr_set<u64>(ppu, op.crfd, ppu.gpr[op.ra], op.uimm16);
-		}
-		else
-		{
-			ppu_cr_set<u32>(ppu, op.crfd, static_cast<u32>(ppu.gpr[op.ra]), op.uimm16);
-		}
+		ppu_cr_set<u64>(ppu, op.crfd, ppu.gpr[op.ra], op.uimm16);
+	}
+	else
+	{
+		ppu_cr_set<u32>(ppu, op.crfd, static_cast<u32>(ppu.gpr[op.ra]), op.uimm16);
+	}
 	};
 	RETURN_(ppu, op);
 }
@@ -3142,16 +3140,15 @@ auto CMPI()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	if (op.l10)
 	{
-		if (op.l10)
-		{
-			ppu_cr_set<s64>(ppu, op.crfd, ppu.gpr[op.ra], op.simm16);
-		}
-		else
-		{
-			ppu_cr_set<s32>(ppu, op.crfd, static_cast<u32>(ppu.gpr[op.ra]), op.simm16);
-		}
+		ppu_cr_set<s64>(ppu, op.crfd, ppu.gpr[op.ra], op.simm16);
+	}
+	else
+	{
+		ppu_cr_set<s32>(ppu, op.crfd, static_cast<u32>(ppu.gpr[op.ra]), op.simm16);
+	}
 	};
 	RETURN_(ppu, op);
 }
@@ -3162,15 +3159,13 @@ auto ADDIC()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const s64 a = ppu.gpr[op.ra];
-		const s64 i = op.simm16;
-		const auto r = add64_flags(a, i);
-		ppu.gpr[op.rd] = r.result;
-		ppu.xer_ca = r.carry;
-		if (op.main & 1) [[unlikely]]
-			ppu_cr_set<s64>(ppu, 0, r.result, 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const s64 a = ppu.gpr[op.ra];
+	const s64 i = op.simm16;
+	const auto r = add64_flags(a, i);
+	ppu.gpr[op.rd] = r.result;
+	ppu.xer.ca = r.carry;
+	if (op.main & 1) [[unlikely]] ppu_cr_set<s64>(ppu, 0, r.result, 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -3181,9 +3176,8 @@ auto ADDI()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.rd] = op.ra ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.rd] = op.ra ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
 	};
 	RETURN_(ppu, op);
 }
@@ -3194,9 +3188,8 @@ auto ADDIS()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.rd] = op.ra ? ppu.gpr[op.ra] + (op.simm16 * 65536) : (op.simm16 * 65536);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.rd] = op.ra ? ppu.gpr[op.ra] + (op.simm16 * 65536) : (op.simm16 * 65536);
 	};
 	RETURN_(ppu, op);
 }
@@ -3207,44 +3200,42 @@ auto BC()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_call_history>();
 
-	if constexpr (Build == 0)
-		return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func* next_fn)
-		{
-			const bool bo0 = (op.bo & 0x10) != 0;
-			const bool bo1 = (op.bo & 0x08) != 0;
-			const bool bo2 = (op.bo & 0x04) != 0;
-			const bool bo3 = (op.bo & 0x02) != 0;
+	if constexpr (Build == 0) return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func* next_fn)
+	{
+	const bool bo0 = (op.bo & 0x10) != 0;
+	const bool bo1 = (op.bo & 0x08) != 0;
+	const bool bo2 = (op.bo & 0x04) != 0;
+	const bool bo3 = (op.bo & 0x02) != 0;
 
-			ppu.ctr -= (bo2 ^ true);
-			const u32 link = vm::get_addr(this_op) + 4;
-			if (op.lk)
-				ppu.lr = link;
+	ppu.ctr -= (bo2 ^ true);
+	const u32 link = vm::get_addr(this_op) + 4;
+	if (op.lk) ppu.lr = link;
 
-			const bool ctr_ok = bo2 | ((ppu.ctr != 0) ^ bo3);
-			const bool cond_ok = bo0 | (!!(ppu.cr[op.bi]) ^ (bo1 ^ true));
+	const bool ctr_ok = bo2 | ((ppu.ctr != 0) ^ bo3);
+	const bool cond_ok = bo0 | (!!(ppu.cr[op.bi]) ^ (bo1 ^ true));
 
-			const u32 old_cia = ppu.cia;
+	const u32 old_cia = ppu.cia;
 
-			if (ctr_ok && cond_ok)
-			{
-				ppu.cia = vm::get_addr(this_op);
-				// Provide additional information by using the origin of the call
-				// Because this is a fixed target branch there's no abiguity about it
-				ppu_record_call<Flags...>(ppu, ppu.cia, op);
+	if (ctr_ok && cond_ok)
+	{
+		ppu.cia = vm::get_addr(this_op);
+		// Provide additional information by using the origin of the call
+		// Because this is a fixed target branch there's no abiguity about it
+		ppu_record_call<Flags...>(ppu, ppu.cia, op);
 
-				ppu.cia = (op.aa ? 0 : ppu.cia) + op.bt14;
-			}
-			else if (!ppu.state) [[likely]]
-			{
-				return next_fn->fn(ppu, {this_op[1]}, this_op + 1, next_fn + 1);
-			}
-			else
-			{
-				ppu.cia = link;
-			}
+		ppu.cia = (op.aa ? 0 : ppu.cia) + op.bt14;
+	}
+	else if (!ppu.state) [[likely]]
+	{
+		return next_fn->fn(ppu, {this_op[1]}, this_op + 1, next_fn + 1);
+	}
+	else
+	{
+		ppu.cia = link;
+	}
 
-			ppu.exec_bytes += link - old_cia;
-		};
+	ppu.exec_bytes += link - old_cia;
+	};
 }
 
 template <u32 Build, ppu_exec_bit... Flags>
@@ -3276,20 +3267,18 @@ auto B()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_call_history>();
 
-	if constexpr (Build == 0)
-		return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func*)
-		{
-			const u32 old_cia = ppu.cia;
-			const u32 link = (ppu.cia = vm::get_addr(this_op)) + 4;
-			// Provide additional information by using the origin of the call
-			// Because this is a fixed target branch there's no abiguity about it
-			ppu_record_call<Flags...>(ppu, ppu.cia, op);
+	if constexpr (Build == 0) return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func*)
+	{
+	const u32 old_cia = ppu.cia;
+	const u32 link = (ppu.cia = vm::get_addr(this_op)) + 4;
+	// Provide additional information by using the origin of the call
+	// Because this is a fixed target branch there's no abiguity about it
+	ppu_record_call<Flags...>(ppu, ppu.cia, op);
 
-			ppu.cia = (op.aa ? 0 : ppu.cia) + op.bt24;
-			if (op.lk)
-				ppu.lr = link;
-			ppu.exec_bytes += link - old_cia;
-		};
+	ppu.cia = (op.aa ? 0 : ppu.cia) + op.bt24;
+	if (op.lk) ppu.lr = link;
+	ppu.exec_bytes += link - old_cia;
+	};
 }
 
 template <u32 Build, ppu_exec_bit... Flags>
@@ -3298,10 +3287,9 @@ auto MCRF()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		CHECK_SIZE(ppu_thread::cr, 32);
-		ppu.cr.fields[op.crfd] = ppu.cr.fields[op.crfs];
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	CHECK_SIZE(ppu_thread::cr, 32);
+	ppu.cr.fields[op.crfd] = ppu.cr.fields[op.crfs];
 	};
 	RETURN_(ppu, op);
 }
@@ -3312,42 +3300,40 @@ auto BCLR()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_call_history>();
 
-	if constexpr (Build == 0)
-		return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func* next_fn)
-		{
-			const bool bo0 = (op.bo & 0x10) != 0;
-			const bool bo1 = (op.bo & 0x08) != 0;
-			const bool bo2 = (op.bo & 0x04) != 0;
-			const bool bo3 = (op.bo & 0x02) != 0;
+	if constexpr (Build == 0) return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func* next_fn)
+	{
+	const bool bo0 = (op.bo & 0x10) != 0;
+	const bool bo1 = (op.bo & 0x08) != 0;
+	const bool bo2 = (op.bo & 0x04) != 0;
+	const bool bo3 = (op.bo & 0x02) != 0;
 
-			ppu.ctr -= (bo2 ^ true);
+	ppu.ctr -= (bo2 ^ true);
 
-			const bool ctr_ok = bo2 | ((ppu.ctr != 0) ^ bo3);
-			const bool cond_ok = bo0 | (!!(ppu.cr[op.bi]) ^ (bo1 ^ true));
+	const bool ctr_ok = bo2 | ((ppu.ctr != 0) ^ bo3);
+	const bool cond_ok = bo0 | (!!(ppu.cr[op.bi]) ^ (bo1 ^ true));
 
-			const u32 target = static_cast<u32>(ppu.lr) & ~3;
-			const u32 link = vm::get_addr(this_op) + 4;
-			if (op.lk)
-				ppu.lr = link;
+	const u32 target = static_cast<u32>(ppu.lr) & ~3;
+	const u32 link = vm::get_addr(this_op) + 4;
+	if (op.lk) ppu.lr = link;
 
-			const u32 old_cia = ppu.cia;
+	const u32 old_cia = ppu.cia;
 
-			if (ctr_ok && cond_ok)
-			{
-				ppu_record_call<Flags...>(ppu, target, op, true);
-				ppu.cia = target;
-			}
-			else if (!ppu.state) [[likely]]
-			{
-				return next_fn->fn(ppu, {this_op[1]}, this_op + 1, next_fn + 1);
-			}
-			else
-			{
-				ppu.cia = link;
-			}
+	if (ctr_ok && cond_ok)
+	{
+		ppu_record_call<Flags...>(ppu, target, op, true);
+		ppu.cia = target;
+	}
+	else if (!ppu.state) [[likely]]
+	{
+		return next_fn->fn(ppu, {this_op[1]}, this_op + 1, next_fn + 1);
+	}
+	else
+	{
+		ppu.cia = link;
+	}
 
-			ppu.exec_bytes += link - old_cia;
-		};
+	ppu.exec_bytes += link - old_cia;
+	};
 }
 
 template <u32 Build, ppu_exec_bit... Flags>
@@ -3356,9 +3342,8 @@ auto CRNOR()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.cr[op.crbd] = (ppu.cr[op.crba] | ppu.cr[op.crbb]) ^ true;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.cr[op.crbd] = (ppu.cr[op.crba] | ppu.cr[op.crbb]) ^ true;
 	};
 	RETURN_(ppu, op);
 }
@@ -3369,9 +3354,8 @@ auto CRANDC()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.cr[op.crbd] = ppu.cr[op.crba] & (ppu.cr[op.crbb] ^ true);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.cr[op.crbd] = ppu.cr[op.crba] & (ppu.cr[op.crbb] ^ true);
 	};
 	RETURN_(ppu, op);
 }
@@ -3382,9 +3366,8 @@ auto ISYNC()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](auto&&, auto)
-	{
-		atomic_fence_acquire();
+	static const auto exec = [](auto&&, auto) {
+	atomic_fence_acquire();
 	};
 	RETURN_(ppu, op);
 }
@@ -3395,9 +3378,8 @@ auto CRXOR()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.cr[op.crbd] = ppu.cr[op.crba] ^ ppu.cr[op.crbb];
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.cr[op.crbd] = ppu.cr[op.crba] ^ ppu.cr[op.crbb];
 	};
 	RETURN_(ppu, op);
 }
@@ -3408,9 +3390,8 @@ auto CRNAND()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.cr[op.crbd] = (ppu.cr[op.crba] & ppu.cr[op.crbb]) ^ true;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.cr[op.crbd] = (ppu.cr[op.crba] & ppu.cr[op.crbb]) ^ true;
 	};
 	RETURN_(ppu, op);
 }
@@ -3421,9 +3402,8 @@ auto CRAND()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.cr[op.crbd] = ppu.cr[op.crba] & ppu.cr[op.crbb];
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.cr[op.crbd] = ppu.cr[op.crba] & ppu.cr[op.crbb];
 	};
 	RETURN_(ppu, op);
 }
@@ -3434,9 +3414,8 @@ auto CREQV()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.cr[op.crbd] = (ppu.cr[op.crba] ^ ppu.cr[op.crbb]) ^ true;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.cr[op.crbd] = (ppu.cr[op.crba] ^ ppu.cr[op.crbb]) ^ true;
 	};
 	RETURN_(ppu, op);
 }
@@ -3447,9 +3426,8 @@ auto CRORC()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.cr[op.crbd] = ppu.cr[op.crba] | (ppu.cr[op.crbb] ^ true);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.cr[op.crbd] = ppu.cr[op.crba] | (ppu.cr[op.crbb] ^ true);
 	};
 	RETURN_(ppu, op);
 }
@@ -3460,9 +3438,8 @@ auto CROR()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.cr[op.crbd] = ppu.cr[op.crba] | ppu.cr[op.crbb];
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.cr[op.crbd] = ppu.cr[op.crba] | ppu.cr[op.crbb];
 	};
 	RETURN_(ppu, op);
 }
@@ -3473,31 +3450,29 @@ auto BCCTR()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_call_history>();
 
-	if constexpr (Build == 0)
-		return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func* next_fn)
-		{
-			const u32 link = vm::get_addr(this_op) + 4;
-			if (op.lk)
-				ppu.lr = link;
-			const u32 old_cia = ppu.cia;
+	if constexpr (Build == 0) return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func* next_fn)
+	{
+	const u32 link = vm::get_addr(this_op) + 4;
+	if (op.lk) ppu.lr = link;
+	const u32 old_cia = ppu.cia;
 
-			if (op.bo & 0x10 || ppu.cr[op.bi] == ((op.bo & 0x8) != 0))
-			{
-				const u32 target = static_cast<u32>(ppu.ctr) & ~3;
-				ppu_record_call<Flags...>(ppu, target, op, true);
-				ppu.cia = target;
-			}
-			else if (!ppu.state) [[likely]]
-			{
-				return next_fn->fn(ppu, {this_op[1]}, this_op + 1, next_fn + 1);
-			}
-			else
-			{
-				ppu.cia = link;
-			}
+	if (op.bo & 0x10 || ppu.cr[op.bi] == ((op.bo & 0x8) != 0))
+	{
+		const u32 target = static_cast<u32>(ppu.ctr) & ~3;
+		ppu_record_call<Flags...>(ppu, target, op, true);
+		ppu.cia = target;
+	}
+	else if (!ppu.state) [[likely]]
+	{
+		return next_fn->fn(ppu, {this_op[1]}, this_op + 1, next_fn + 1);
+	}
+	else
+	{
+		ppu.cia = link;
+	}
 
-			ppu.exec_bytes += link - old_cia;
-		};
+	ppu.exec_bytes += link - old_cia;
+	};
 }
 
 template <u32 Build, ppu_exec_bit... Flags>
@@ -3506,12 +3481,11 @@ auto RLWIMI()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 mask = ppu_rotate_mask(32 + op.mb32, 32 + op.me32);
-		ppu.gpr[op.ra] = (ppu.gpr[op.ra] & ~mask) | (dup32(rx::rol32(static_cast<u32>(ppu.gpr[op.rs]), op.sh32)) & mask);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 mask = ppu_rotate_mask(32 + op.mb32, 32 + op.me32);
+	ppu.gpr[op.ra] = (ppu.gpr[op.ra] & ~mask) | (dup32(std::rotl<u32>(static_cast<u32>(ppu.gpr[op.rs]), op.sh32)) & mask);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -3522,11 +3496,10 @@ auto RLWINM()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = dup32(rx::rol32(static_cast<u32>(ppu.gpr[op.rs]), op.sh32)) & ppu_rotate_mask(32 + op.mb32, 32 + op.me32);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = dup32(std::rotl<u32>(static_cast<u32>(ppu.gpr[op.rs]), op.sh32)) & ppu_rotate_mask(32 + op.mb32, 32 + op.me32);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -3537,11 +3510,10 @@ auto RLWNM()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = dup32(rx::rol32(static_cast<u32>(ppu.gpr[op.rs]), ppu.gpr[op.rb] & 0x1f)) & ppu_rotate_mask(32 + op.mb32, 32 + op.me32);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = dup32(std::rotl<u32>(static_cast<u32>(ppu.gpr[op.rs]), ppu.gpr[op.rb] & 0x1f)) & ppu_rotate_mask(32 + op.mb32, 32 + op.me32);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -3552,9 +3524,8 @@ auto ORI()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = ppu.gpr[op.rs] | op.uimm16;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = ppu.gpr[op.rs] | op.uimm16;
 	};
 	RETURN_(ppu, op);
 }
@@ -3565,9 +3536,8 @@ auto ORIS()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = ppu.gpr[op.rs] | (u64{op.uimm16} << 16);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = ppu.gpr[op.rs] | (u64{op.uimm16} << 16);
 	};
 	RETURN_(ppu, op);
 }
@@ -3578,9 +3548,8 @@ auto XORI()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = ppu.gpr[op.rs] ^ op.uimm16;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = ppu.gpr[op.rs] ^ op.uimm16;
 	};
 	RETURN_(ppu, op);
 }
@@ -3591,9 +3560,8 @@ auto XORIS()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = ppu.gpr[op.rs] ^ (u64{op.uimm16} << 16);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = ppu.gpr[op.rs] ^ (u64{op.uimm16} << 16);
 	};
 	RETURN_(ppu, op);
 }
@@ -3604,10 +3572,9 @@ auto ANDI()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = ppu.gpr[op.rs] & op.uimm16;
-		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = ppu.gpr[op.rs] & op.uimm16;
+	ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -3618,10 +3585,9 @@ auto ANDIS()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = ppu.gpr[op.rs] & (u64{op.uimm16} << 16);
-		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = ppu.gpr[op.rs] & (u64{op.uimm16} << 16);
+	ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -3632,11 +3598,10 @@ auto RLDICL()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = rx::rol64(ppu.gpr[op.rs], op.sh64) & (~0ull >> op.mbe64);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = std::rotl<u64>(ppu.gpr[op.rs], op.sh64) & (~0ull >> op.mbe64);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -3647,11 +3612,10 @@ auto RLDICR()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = rx::rol64(ppu.gpr[op.rs], op.sh64) & (~0ull << (op.mbe64 ^ 63));
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = std::rotl<u64>(ppu.gpr[op.rs], op.sh64) & (~0ull << (op.mbe64 ^ 63));
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -3662,11 +3626,10 @@ auto RLDIC()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = rx::rol64(ppu.gpr[op.rs], op.sh64) & ppu_rotate_mask(op.mbe64, op.sh64 ^ 63);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = std::rotl<u64>(ppu.gpr[op.rs], op.sh64) & ppu_rotate_mask(op.mbe64, op.sh64 ^ 63);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -3677,12 +3640,11 @@ auto RLDIMI()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 mask = ppu_rotate_mask(op.mbe64, op.sh64 ^ 63);
-		ppu.gpr[op.ra] = (ppu.gpr[op.ra] & ~mask) | (rx::rol64(ppu.gpr[op.rs], op.sh64) & mask);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 mask = ppu_rotate_mask(op.mbe64, op.sh64 ^ 63);
+	ppu.gpr[op.ra] = (ppu.gpr[op.ra] & ~mask) | (std::rotl<u64>(ppu.gpr[op.rs], op.sh64) & mask);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -3693,11 +3655,10 @@ auto RLDCL()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = rx::rol64(ppu.gpr[op.rs], ppu.gpr[op.rb] & 0x3f) & (~0ull >> op.mbe64);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = std::rotl<u64>(ppu.gpr[op.rs], ppu.gpr[op.rb] & 0x3f) & (~0ull >> op.mbe64);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -3708,11 +3669,10 @@ auto RLDCR()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = rx::rol64(ppu.gpr[op.rs], ppu.gpr[op.rb] & 0x3f) & (~0ull << (op.mbe64 ^ 63));
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = std::rotl<u64>(ppu.gpr[op.rs], ppu.gpr[op.rb] & 0x3f) & (~0ull << (op.mbe64 ^ 63));
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -3723,16 +3683,15 @@ auto CMP()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	if (op.l10)
 	{
-		if (op.l10)
-		{
-			ppu_cr_set<s64>(ppu, op.crfd, ppu.gpr[op.ra], ppu.gpr[op.rb]);
-		}
-		else
-		{
-			ppu_cr_set<s32>(ppu, op.crfd, static_cast<u32>(ppu.gpr[op.ra]), static_cast<u32>(ppu.gpr[op.rb]));
-		}
+		ppu_cr_set<s64>(ppu, op.crfd, ppu.gpr[op.ra], ppu.gpr[op.rb]);
+	}
+	else
+	{
+		ppu_cr_set<s32>(ppu, op.crfd, static_cast<u32>(ppu.gpr[op.ra]), static_cast<u32>(ppu.gpr[op.rb]));
+	}
 	};
 	RETURN_(ppu, op);
 }
@@ -3743,45 +3702,45 @@ auto TW()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	if constexpr (Build == 0)
-		return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func* next_fn)
-		{
-			s32 a = static_cast<s32>(ppu.gpr[op.ra]);
-			s32 b = static_cast<s32>(ppu.gpr[op.rb]);
+	if constexpr (Build == 0) return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func* next_fn)
+	{
+	s32 a = static_cast<s32>(ppu.gpr[op.ra]);
+	s32 b = static_cast<s32>(ppu.gpr[op.rb]);
 
-			if ((a < b && (op.bo & 0x10)) ||
-				(a > b && (op.bo & 0x8)) ||
-				(a == b && (op.bo & 0x4)) ||
-				(static_cast<u32>(a) < static_cast<u32>(b) && (op.bo & 0x2)) ||
-				(static_cast<u32>(a) > static_cast<u32>(b) && (op.bo & 0x1)))
-			{
-				[[unlikely]] ppu_trap(ppu, vm::get_addr(this_op));
-				return;
-			}
-			return next_fn->fn(ppu, {this_op[1]}, this_op + 1, next_fn + 1);
-		};
+	if ((a < b && (op.bo & 0x10)) ||
+		(a > b && (op.bo & 0x8)) ||
+		(a == b && (op.bo & 0x4)) ||
+		(static_cast<u32>(a) < static_cast<u32>(b) && (op.bo & 0x2)) ||
+		(static_cast<u32>(a) > static_cast<u32>(b) && (op.bo & 0x1)))
+	{
+		[[unlikely]]
+		ppu_trap(ppu, vm::get_addr(this_op));
+		return;
+	}
+	return next_fn->fn(ppu, {this_op[1]}, this_op + 1, next_fn + 1);
+	};
 }
 
 const v128 s_lvsl_base = v128::from64r(0x0001020304050607, 0x08090a0b0c0d0e0f);
 
 const v128 s_lvsl_consts[16] =
-	{
-		gv_add8(s_lvsl_base, gv_bcst8(0)),
-		gv_add8(s_lvsl_base, gv_bcst8(1)),
-		gv_add8(s_lvsl_base, gv_bcst8(2)),
-		gv_add8(s_lvsl_base, gv_bcst8(3)),
-		gv_add8(s_lvsl_base, gv_bcst8(4)),
-		gv_add8(s_lvsl_base, gv_bcst8(5)),
-		gv_add8(s_lvsl_base, gv_bcst8(6)),
-		gv_add8(s_lvsl_base, gv_bcst8(7)),
-		gv_add8(s_lvsl_base, gv_bcst8(8)),
-		gv_add8(s_lvsl_base, gv_bcst8(9)),
-		gv_add8(s_lvsl_base, gv_bcst8(10)),
-		gv_add8(s_lvsl_base, gv_bcst8(11)),
-		gv_add8(s_lvsl_base, gv_bcst8(12)),
-		gv_add8(s_lvsl_base, gv_bcst8(13)),
-		gv_add8(s_lvsl_base, gv_bcst8(14)),
-		gv_add8(s_lvsl_base, gv_bcst8(15)),
+{
+	gv_add8(s_lvsl_base, gv_bcst8(0)),
+	gv_add8(s_lvsl_base, gv_bcst8(1)),
+	gv_add8(s_lvsl_base, gv_bcst8(2)),
+	gv_add8(s_lvsl_base, gv_bcst8(3)),
+	gv_add8(s_lvsl_base, gv_bcst8(4)),
+	gv_add8(s_lvsl_base, gv_bcst8(5)),
+	gv_add8(s_lvsl_base, gv_bcst8(6)),
+	gv_add8(s_lvsl_base, gv_bcst8(7)),
+	gv_add8(s_lvsl_base, gv_bcst8(8)),
+	gv_add8(s_lvsl_base, gv_bcst8(9)),
+	gv_add8(s_lvsl_base, gv_bcst8(10)),
+	gv_add8(s_lvsl_base, gv_bcst8(11)),
+	gv_add8(s_lvsl_base, gv_bcst8(12)),
+	gv_add8(s_lvsl_base, gv_bcst8(13)),
+	gv_add8(s_lvsl_base, gv_bcst8(14)),
+	gv_add8(s_lvsl_base, gv_bcst8(15)),
 };
 
 template <u32 Build, ppu_exec_bit... Flags>
@@ -3805,10 +3764,9 @@ auto LVEBX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~0xfull;
-		ppu.vr[op.vd] = ppu_feed_data<v128, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~0xfull;
+	ppu.vr[op.vd] = ppu_feed_data<v128, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -3819,17 +3777,16 @@ auto SUBFC()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 RA = ppu.gpr[op.ra];
-		const u64 RB = ppu.gpr[op.rb];
-		const auto r = add64_flags(~RA, RB, 1);
-		ppu.gpr[op.rd] = r.result;
-		ppu.xer_ca = r.carry;
-		if constexpr (((Flags == has_oe) || ...))
-			ppu_ov_set(ppu, (~RA >> 63 == RB >> 63) && (~RA >> 63 != ppu.gpr[op.rd] >> 63));
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, r.result, 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 RA = ppu.gpr[op.ra];
+	const u64 RB = ppu.gpr[op.rb];
+	const auto r = add64_flags(~RA, RB, 1);
+	ppu.gpr[op.rd] = r.result;
+	ppu.xer.ca = r.carry;
+	if constexpr (((Flags == has_oe) || ...))
+		ppu_ov_set(ppu, (~RA >> 63 == RB >> 63) && (~RA >> 63 != ppu.gpr[op.rd] >> 63));
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, r.result, 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -3840,11 +3797,10 @@ auto MULHDU()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.rd] = rx::umulh64(ppu.gpr[op.ra], ppu.gpr[op.rb]);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.rd] = utils::umulh64(ppu.gpr[op.ra], ppu.gpr[op.rb]);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -3855,17 +3811,16 @@ auto ADDC()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 RA = ppu.gpr[op.ra];
-		const u64 RB = ppu.gpr[op.rb];
-		const auto r = add64_flags(RA, RB);
-		ppu.gpr[op.rd] = r.result;
-		ppu.xer_ca = r.carry;
-		if constexpr (((Flags == has_oe) || ...))
-			ppu_ov_set(ppu, (RA >> 63 == RB >> 63) && (RA >> 63 != ppu.gpr[op.rd] >> 63));
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, r.result, 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 RA = ppu.gpr[op.ra];
+	const u64 RB = ppu.gpr[op.rb];
+	const auto r = add64_flags(RA, RB);
+	ppu.gpr[op.rd] = r.result;
+	ppu.xer.ca = r.carry;
+	if constexpr (((Flags == has_oe) || ...))
+		ppu_ov_set(ppu, (RA >> 63 == RB >> 63) && (RA >> 63 != ppu.gpr[op.rd] >> 63));
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, r.result, 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -3876,13 +3831,12 @@ auto MULHWU()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		u32 a = static_cast<u32>(ppu.gpr[op.ra]);
-		u32 b = static_cast<u32>(ppu.gpr[op.rb]);
-		ppu.gpr[op.rd] = (u64{a} * b) >> 32;
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	u32 a = static_cast<u32>(ppu.gpr[op.ra]);
+	u32 b = static_cast<u32>(ppu.gpr[op.rb]);
+	ppu.gpr[op.rd] = (u64{a} * b) >> 32;
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -3891,7 +3845,7 @@ template <u32 N>
 struct MFOCRF
 {
 	template <ppu_exec_bit... Flags>
-	static auto select(rx::EnumBitSet<ppu_exec_bit> selected, auto func)
+	static auto select(bs_t<ppu_exec_bit> selected, auto func)
 	{
 		return ppu_exec_select<>::select<Flags...>(selected, func);
 	}
@@ -3941,10 +3895,9 @@ auto LWARX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = ppu_lwarx(ppu, vm::cast(addr));
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = ppu_lwarx(ppu, vm::cast(addr));
 	};
 	RETURN_(ppu, op);
 }
@@ -3955,10 +3908,9 @@ auto LDX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = ppu_feed_data<u64, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = ppu_feed_data<u64, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -3969,10 +3921,9 @@ auto LWZX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = ppu_feed_data<u32, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = ppu_feed_data<u32, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -3983,11 +3934,10 @@ auto SLW()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = static_cast<u32>(ppu.gpr[op.rs] << (ppu.gpr[op.rb] & 0x3f));
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = static_cast<u32>(ppu.gpr[op.rs] << (ppu.gpr[op.rb] & 0x3f));
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -3998,11 +3948,10 @@ auto CNTLZW()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = std::countl_zero(static_cast<u32>(ppu.gpr[op.rs]));
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = std::countl_zero(static_cast<u32>(ppu.gpr[op.rs]));
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4013,12 +3962,11 @@ auto SLD()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u32 n = ppu.gpr[op.rb] & 0x7f;
-		ppu.gpr[op.ra] = n & 0x40 ? 0 : ppu.gpr[op.rs] << n;
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u32 n = ppu.gpr[op.rb] & 0x7f;
+	ppu.gpr[op.ra] = n & 0x40 ? 0 : ppu.gpr[op.rs] << n;
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4029,11 +3977,10 @@ auto AND()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = ppu.gpr[op.rs] & ppu.gpr[op.rb];
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = ppu.gpr[op.rs] & ppu.gpr[op.rb];
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4044,38 +3991,37 @@ auto CMPL()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	if (op.l10)
 	{
-		if (op.l10)
-		{
-			ppu_cr_set<u64>(ppu, op.crfd, ppu.gpr[op.ra], ppu.gpr[op.rb]);
-		}
-		else
-		{
-			ppu_cr_set<u32>(ppu, op.crfd, static_cast<u32>(ppu.gpr[op.ra]), static_cast<u32>(ppu.gpr[op.rb]));
-		}
+		ppu_cr_set<u64>(ppu, op.crfd, ppu.gpr[op.ra], ppu.gpr[op.rb]);
+	}
+	else
+	{
+		ppu_cr_set<u32>(ppu, op.crfd, static_cast<u32>(ppu.gpr[op.ra]), static_cast<u32>(ppu.gpr[op.rb]));
+	}
 	};
 	RETURN_(ppu, op);
 }
 
 const v128 s_lvsr_consts[16] =
-	{
-		gv_add8(s_lvsl_base, gv_bcst8(16)),
-		gv_add8(s_lvsl_base, gv_bcst8(15)),
-		gv_add8(s_lvsl_base, gv_bcst8(14)),
-		gv_add8(s_lvsl_base, gv_bcst8(13)),
-		gv_add8(s_lvsl_base, gv_bcst8(12)),
-		gv_add8(s_lvsl_base, gv_bcst8(11)),
-		gv_add8(s_lvsl_base, gv_bcst8(10)),
-		gv_add8(s_lvsl_base, gv_bcst8(9)),
-		gv_add8(s_lvsl_base, gv_bcst8(8)),
-		gv_add8(s_lvsl_base, gv_bcst8(7)),
-		gv_add8(s_lvsl_base, gv_bcst8(6)),
-		gv_add8(s_lvsl_base, gv_bcst8(5)),
-		gv_add8(s_lvsl_base, gv_bcst8(4)),
-		gv_add8(s_lvsl_base, gv_bcst8(3)),
-		gv_add8(s_lvsl_base, gv_bcst8(2)),
-		gv_add8(s_lvsl_base, gv_bcst8(1)),
+{
+	gv_add8(s_lvsl_base, gv_bcst8(16)),
+	gv_add8(s_lvsl_base, gv_bcst8(15)),
+	gv_add8(s_lvsl_base, gv_bcst8(14)),
+	gv_add8(s_lvsl_base, gv_bcst8(13)),
+	gv_add8(s_lvsl_base, gv_bcst8(12)),
+	gv_add8(s_lvsl_base, gv_bcst8(11)),
+	gv_add8(s_lvsl_base, gv_bcst8(10)),
+	gv_add8(s_lvsl_base, gv_bcst8(9)),
+	gv_add8(s_lvsl_base, gv_bcst8(8)),
+	gv_add8(s_lvsl_base, gv_bcst8(7)),
+	gv_add8(s_lvsl_base, gv_bcst8(6)),
+	gv_add8(s_lvsl_base, gv_bcst8(5)),
+	gv_add8(s_lvsl_base, gv_bcst8(4)),
+	gv_add8(s_lvsl_base, gv_bcst8(3)),
+	gv_add8(s_lvsl_base, gv_bcst8(2)),
+	gv_add8(s_lvsl_base, gv_bcst8(1)),
 };
 
 template <u32 Build, ppu_exec_bit... Flags>
@@ -4099,10 +4045,9 @@ auto LVEHX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~0xfull;
-		ppu.vr[op.vd] = ppu_feed_data<v128, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~0xfull;
+	ppu.vr[op.vd] = ppu_feed_data<v128, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -4113,15 +4058,14 @@ auto SUBF()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 RA = ppu.gpr[op.ra];
-		const u64 RB = ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = RB - RA;
-		if constexpr (((Flags == has_oe) || ...))
-			ppu_ov_set(ppu, (~RA >> 63 == RB >> 63) && (~RA >> 63 != ppu.gpr[op.rd] >> 63));
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 RA = ppu.gpr[op.ra];
+	const u64 RB = ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = RB - RA;
+	if constexpr (((Flags == has_oe) || ...))
+		ppu_ov_set(ppu, (~RA >> 63 == RB >> 63) && (~RA >> 63 != ppu.gpr[op.rd] >> 63));
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4132,11 +4076,10 @@ auto LDUX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = ppu_feed_data<u64, Flags...>(ppu, addr);
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = ppu_feed_data<u64, Flags...>(ppu, addr);
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -4147,7 +4090,8 @@ auto DCBST()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](auto&&, auto) {};
+	static const auto exec = [](auto&&, auto) {
+	};
 	RETURN_(ppu, op);
 }
 
@@ -4157,11 +4101,10 @@ auto LWZUX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = ppu_feed_data<u32, Flags...>(ppu, addr);
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = ppu_feed_data<u32, Flags...>(ppu, addr);
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -4172,11 +4115,10 @@ auto CNTLZD()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = std::countl_zero(ppu.gpr[op.rs]);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = std::countl_zero(ppu.gpr[op.rs]);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4187,11 +4129,10 @@ auto ANDC()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = ppu.gpr[op.rs] & ~ppu.gpr[op.rb];
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = ppu.gpr[op.rs] & ~ppu.gpr[op.rb];
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4202,23 +4143,23 @@ auto TD()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	if constexpr (Build == 0)
-		return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func* next_fn)
-		{
-			const s64 a = ppu.gpr[op.ra], b = ppu.gpr[op.rb];
-			const u64 a_ = a, b_ = b;
+	if constexpr (Build == 0) return +[](ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, ppu_intrp_func* next_fn)
+	{
+	const s64 a = ppu.gpr[op.ra], b = ppu.gpr[op.rb];
+	const u64 a_ = a, b_ = b;
 
-			if (((op.bo & 0x10) && a < b) ||
-				((op.bo & 0x8) && a > b) ||
-				((op.bo & 0x4) && a == b) ||
-				((op.bo & 0x2) && a_ < b_) ||
-				((op.bo & 0x1) && a_ > b_))
-			{
-				[[unlikely]] ppu_trap(ppu, vm::get_addr(this_op));
-				return;
-			}
-			return next_fn->fn(ppu, {this_op[1]}, this_op + 1, next_fn + 1);
-		};
+	if (((op.bo & 0x10) && a < b) ||
+		((op.bo & 0x8) && a > b) ||
+		((op.bo & 0x4) && a == b) ||
+		((op.bo & 0x2) && a_ < b_) ||
+		((op.bo & 0x1) && a_ > b_))
+	{
+		[[unlikely]]
+		ppu_trap(ppu, vm::get_addr(this_op));
+		return;
+	}
+	return next_fn->fn(ppu, {this_op[1]}, this_op + 1, next_fn + 1);
+	};
 }
 
 template <u32 Build, ppu_exec_bit... Flags>
@@ -4227,10 +4168,9 @@ auto LVEWX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~0xfull;
-		ppu.vr[op.vd] = ppu_feed_data<v128, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~0xfull;
+	ppu.vr[op.vd] = ppu_feed_data<v128, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -4241,11 +4181,10 @@ auto MULHD()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.rd] = rx::mulh64(ppu.gpr[op.ra], ppu.gpr[op.rb]);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.rd] = utils::mulh64(ppu.gpr[op.ra], ppu.gpr[op.rb]);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4256,13 +4195,12 @@ auto MULHW()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		s32 a = static_cast<s32>(ppu.gpr[op.ra]);
-		s32 b = static_cast<s32>(ppu.gpr[op.rb]);
-		ppu.gpr[op.rd] = (s64{a} * b) >> 32;
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	s32 a = static_cast<s32>(ppu.gpr[op.ra]);
+	s32 b = static_cast<s32>(ppu.gpr[op.rb]);
+	ppu.gpr[op.rd] = (s64{a} * b) >> 32;
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4273,10 +4211,9 @@ auto LDARX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = ppu_ldarx(ppu, vm::cast(addr));
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = ppu_ldarx(ppu, vm::cast(addr));
 	};
 	RETURN_(ppu, op);
 }
@@ -4287,7 +4224,8 @@ auto DCBF()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](auto&&, auto) {};
+	static const auto exec = [](auto&&, auto) {
+	};
 	RETURN_(ppu, op);
 }
 
@@ -4297,10 +4235,9 @@ auto LBZX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = ppu_feed_data<u8, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = ppu_feed_data<u8, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -4311,10 +4248,9 @@ auto LVX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~0xfull;
-		ppu.vr[op.vd] = ppu_feed_data<v128, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~0xfull;
+	ppu.vr[op.vd] = ppu_feed_data<v128, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -4325,14 +4261,13 @@ auto NEG()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 RA = ppu.gpr[op.ra];
-		ppu.gpr[op.rd] = 0 - RA;
-		if constexpr (((Flags == has_oe) || ...))
-			ppu_ov_set(ppu, RA == (1ull << 63));
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 RA = ppu.gpr[op.ra];
+	ppu.gpr[op.rd] = 0 - RA;
+	if constexpr (((Flags == has_oe) || ...))
+		ppu_ov_set(ppu, RA == (1ull << 63));
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4343,11 +4278,10 @@ auto LBZUX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = ppu_feed_data<u8, Flags...>(ppu, addr);
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = ppu_feed_data<u8, Flags...>(ppu, addr);
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -4358,11 +4292,10 @@ auto NOR()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = ~(ppu.gpr[op.rs] | ppu.gpr[op.rb]);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = ~(ppu.gpr[op.rs] | ppu.gpr[op.rb]);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4373,11 +4306,10 @@ auto STVEBX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		const u8 eb = addr & 0xf;
-		PPU_WRITE_8(vm::cast(addr), ppu.vr[op.vs]._u8[15 - eb]);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	const u8 eb = addr & 0xf;
+	PPU_WRITE_8(vm::cast(addr), ppu.vr[op.vs]._u8[15 - eb]);
 	};
 	RETURN_(ppu, op);
 }
@@ -4388,17 +4320,16 @@ auto SUBFE()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 RA = ppu.gpr[op.ra];
-		const u64 RB = ppu.gpr[op.rb];
-		const auto r = add64_flags(~RA, RB, ppu.xer_ca);
-		ppu.gpr[op.rd] = r.result;
-		ppu.xer_ca = r.carry;
-		if constexpr (((Flags == has_oe) || ...))
-			ppu_ov_set(ppu, (~RA >> 63 == RB >> 63) && (~RA >> 63 != ppu.gpr[op.rd] >> 63));
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, r.result, 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 RA = ppu.gpr[op.ra];
+	const u64 RB = ppu.gpr[op.rb];
+	const auto r = add64_flags(~RA, RB, ppu.xer.ca);
+	ppu.gpr[op.rd] = r.result;
+	ppu.xer.ca = r.carry;
+	if constexpr (((Flags == has_oe) || ...))
+		ppu_ov_set(ppu, (~RA >> 63 == RB >> 63) && (~RA >> 63 != ppu.gpr[op.rd] >> 63));
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, r.result, 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4409,17 +4340,16 @@ auto ADDE()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 RA = ppu.gpr[op.ra];
-		const u64 RB = ppu.gpr[op.rb];
-		const auto r = add64_flags(RA, RB, ppu.xer_ca);
-		ppu.gpr[op.rd] = r.result;
-		ppu.xer_ca = r.carry;
-		if constexpr (((Flags == has_oe) || ...))
-			ppu_ov_set(ppu, (RA >> 63 == RB >> 63) && (RA >> 63 != ppu.gpr[op.rd] >> 63));
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, r.result, 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 RA = ppu.gpr[op.ra];
+	const u64 RB = ppu.gpr[op.rb];
+	const auto r = add64_flags(RA, RB, ppu.xer.ca);
+	ppu.gpr[op.rd] = r.result;
+	ppu.xer.ca = r.carry;
+	if constexpr (((Flags == has_oe) || ...))
+		ppu_ov_set(ppu, (RA >> 63 == RB >> 63) && (RA >> 63 != ppu.gpr[op.rd] >> 63));
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, r.result, 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4430,50 +4360,50 @@ auto MTOCRF()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	alignas(4) static const u8 s_table[16][4]
 	{
-		alignas(4) static const CrField s_table[16]{
-			CrField::From(false, false, false, false),
-			CrField::From(false, false, false, true),
-			CrField::From(false, false, true, false),
-			CrField::From(false, false, true, true),
-			CrField::From(false, true, false, false),
-			CrField::From(false, true, false, true),
-			CrField::From(false, true, true, false),
-			CrField::From(false, true, true, true),
-			CrField::From(true, false, false, false),
-			CrField::From(true, false, false, true),
-			CrField::From(true, false, true, false),
-			CrField::From(true, false, true, true),
-			CrField::From(true, true, false, false),
-			CrField::From(true, true, false, true),
-			CrField::From(true, true, true, false),
-			CrField::From(true, true, true, true),
-		};
+		{0, 0, 0, 0},
+		{0, 0, 0, 1},
+		{0, 0, 1, 0},
+		{0, 0, 1, 1},
+		{0, 1, 0, 0},
+		{0, 1, 0, 1},
+		{0, 1, 1, 0},
+		{0, 1, 1, 1},
+		{1, 0, 0, 0},
+		{1, 0, 0, 1},
+		{1, 0, 1, 0},
+		{1, 0, 1, 1},
+		{1, 1, 0, 0},
+		{1, 1, 0, 1},
+		{1, 1, 1, 0},
+		{1, 1, 1, 1},
+	};
 
-		const u64 s = ppu.gpr[op.rs];
+	const u64 s = ppu.gpr[op.rs];
 
-		if (op.l11)
+	if (op.l11)
+	{
+		// MTOCRF
+
+		const u32 n = std::countl_zero<u32>(op.crm) & 7;
+		const u64 v = (s >> ((n * 4) ^ 0x1c)) & 0xf;
+		ppu.cr.fields[n] = *reinterpret_cast<const u32*>(s_table + v);
+	}
+	else
+	{
+		// MTCRF
+
+		for (u32 i = 0; i < 8; i++)
 		{
-			// MTOCRF
-
-			const u32 n = std::countl_zero<u32>(op.crm) & 7;
-			const u64 v = (s >> ((n * 4) ^ 0x1c)) & 0xf;
-			ppu.cr.fields[n] = s_table[v];
-		}
-		else
-		{
-			// MTCRF
-
-			for (u32 i = 0; i < 8; i++)
+			if (op.crm & (128 >> i))
 			{
-				if (op.crm & (128 >> i))
-				{
-					const u64 v = (s >> ((i * 4) ^ 0x1c)) & 0xf;
-					ppu.cr.fields[i] = s_table[v];
-				}
+				const u64 v = (s >> ((i * 4) ^ 0x1c)) & 0xf;
+				ppu.cr.fields[i] = *reinterpret_cast<const u32*>(s_table + v);
 			}
 		}
+	}
 	};
 	RETURN_(ppu, op);
 }
@@ -4484,10 +4414,9 @@ auto STDX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		PPU_WRITE_64(vm::cast(addr), ppu.gpr[op.rs]);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	PPU_WRITE_64(vm::cast(addr), ppu.gpr[op.rs]);
 	};
 	RETURN_(ppu, op);
 }
@@ -4498,10 +4427,9 @@ auto STWCX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		ppu_cr_set(ppu, 0, false, false, ppu_stwcx(ppu, vm::cast(addr), static_cast<u32>(ppu.gpr[op.rs])), ppu.xer_so);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	ppu_cr_set(ppu, 0, false, false, ppu_stwcx(ppu, vm::cast(addr), static_cast<u32>(ppu.gpr[op.rs])), ppu.xer.so);
 	};
 	RETURN_(ppu, op);
 }
@@ -4512,10 +4440,9 @@ auto STWX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		PPU_WRITE_32(vm::cast(addr), static_cast<u32>(ppu.gpr[op.rs]));
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	PPU_WRITE_32(vm::cast(addr), static_cast<u32>(ppu.gpr[op.rs]));
 	};
 	RETURN_(ppu, op);
 }
@@ -4526,11 +4453,10 @@ auto STVEHX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~1ULL;
-		const u8 eb = (addr & 0xf) >> 1;
-		PPU_WRITE_16(vm::cast(addr), ppu.vr[op.vs]._u16[7 - eb]);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~1ULL;
+	const u8 eb = (addr & 0xf) >> 1;
+	PPU_WRITE_16(vm::cast(addr), ppu.vr[op.vs]._u16[7 - eb]);
 	};
 	RETURN_(ppu, op);
 }
@@ -4541,11 +4467,10 @@ auto STDUX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
-		PPU_WRITE_64(vm::cast(addr), ppu.gpr[op.rs]);
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
+	PPU_WRITE_64(vm::cast(addr), ppu.gpr[op.rs]);
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -4556,11 +4481,10 @@ auto STWUX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
-		PPU_WRITE_32(vm::cast(addr), static_cast<u32>(ppu.gpr[op.rs]));
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
+	PPU_WRITE_32(vm::cast(addr), static_cast<u32>(ppu.gpr[op.rs]));
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -4571,11 +4495,10 @@ auto STVEWX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~3ULL;
-		const u8 eb = (addr & 0xf) >> 2;
-		PPU_WRITE_32(vm::cast(addr), ppu.vr[op.vs]._u32[3 - eb]);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~3ULL;
+	const u8 eb = (addr & 0xf) >> 2;
+	PPU_WRITE_32(vm::cast(addr), ppu.vr[op.vs]._u32[3 - eb]);
 	};
 	RETURN_(ppu, op);
 }
@@ -4586,16 +4509,15 @@ auto SUBFZE()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 RA = ppu.gpr[op.ra];
-		const auto r = add64_flags(~RA, 0, ppu.xer_ca);
-		ppu.gpr[op.rd] = r.result;
-		ppu.xer_ca = r.carry;
-		if constexpr (((Flags == has_oe) || ...))
-			ppu_ov_set(ppu, (~RA >> 63 == 0) && (~RA >> 63 != ppu.gpr[op.rd] >> 63));
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, r.result, 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 RA = ppu.gpr[op.ra];
+	const auto r = add64_flags(~RA, 0, ppu.xer.ca);
+	ppu.gpr[op.rd] = r.result;
+	ppu.xer.ca = r.carry;
+	if constexpr (((Flags == has_oe) || ...))
+		ppu_ov_set(ppu, (~RA >> 63 == 0) && (~RA >> 63 != ppu.gpr[op.rd] >> 63));
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, r.result, 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4606,16 +4528,15 @@ auto ADDZE()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 RA = ppu.gpr[op.ra];
-		const auto r = add64_flags(RA, 0, ppu.xer_ca);
-		ppu.gpr[op.rd] = r.result;
-		ppu.xer_ca = r.carry;
-		if constexpr (((Flags == has_oe) || ...))
-			ppu_ov_set(ppu, (RA >> 63 == 0) && (RA >> 63 != ppu.gpr[op.rd] >> 63));
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, r.result, 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 RA = ppu.gpr[op.ra];
+	const auto r = add64_flags(RA, 0, ppu.xer.ca);
+	ppu.gpr[op.rd] = r.result;
+	ppu.xer.ca = r.carry;
+	if constexpr (((Flags == has_oe) || ...))
+		ppu_ov_set(ppu, (RA >> 63 == 0) && (RA >> 63 != ppu.gpr[op.rd] >> 63));
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, r.result, 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4626,10 +4547,9 @@ auto STDCX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		ppu_cr_set(ppu, 0, false, false, ppu_stdcx(ppu, vm::cast(addr), ppu.gpr[op.rs]), ppu.xer_so);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	ppu_cr_set(ppu, 0, false, false, ppu_stdcx(ppu, vm::cast(addr), ppu.gpr[op.rs]), ppu.xer.so);
 	};
 	RETURN_(ppu, op);
 }
@@ -4640,10 +4560,9 @@ auto STBX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		PPU_WRITE_8(vm::cast(addr), static_cast<u8>(ppu.gpr[op.rs]));
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	PPU_WRITE_8(vm::cast(addr), static_cast<u8>(ppu.gpr[op.rs]));
 	};
 	RETURN_(ppu, op);
 }
@@ -4654,10 +4573,9 @@ auto STVX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~0xfull;
-		vm::_ref<v128>(vm::cast(addr)) = ppu.vr[op.vs];
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~0xfull;
+	PPU_WRITE(v128, vm::cast(addr), ppu.vr[op.vs]);
 	};
 	RETURN_(ppu, op);
 }
@@ -4668,18 +4586,17 @@ auto MULLD()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const s64 RA = ppu.gpr[op.ra];
+	const s64 RB = ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = RA * RB;
+	if (op.oe) [[unlikely]]
 	{
-		const s64 RA = ppu.gpr[op.ra];
-		const s64 RB = ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = RA * RB;
-		if (op.oe) [[unlikely]]
-		{
-			const s64 high = rx::mulh64(RA, RB);
-			ppu_ov_set(ppu, high != s64(ppu.gpr[op.rd]) >> 63);
-		}
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
+		const s64 high = utils::mulh64(RA, RB);
+		ppu_ov_set(ppu, high != s64(ppu.gpr[op.rd]) >> 63);
+	}
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4690,16 +4607,15 @@ auto SUBFME()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 RA = ppu.gpr[op.ra];
-		const auto r = add64_flags(~RA, ~0ull, ppu.xer_ca);
-		ppu.gpr[op.rd] = r.result;
-		ppu.xer_ca = r.carry;
-		if constexpr (((Flags == has_oe) || ...))
-			ppu_ov_set(ppu, (~RA >> 63 == 1) && (~RA >> 63 != ppu.gpr[op.rd] >> 63));
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, r.result, 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 RA = ppu.gpr[op.ra];
+	const auto r = add64_flags(~RA, ~0ull, ppu.xer.ca);
+	ppu.gpr[op.rd] = r.result;
+	ppu.xer.ca = r.carry;
+	if constexpr (((Flags == has_oe) || ...))
+		ppu_ov_set(ppu, (~RA >> 63 == 1) && (~RA >> 63 != ppu.gpr[op.rd] >> 63));
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, r.result, 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4710,16 +4626,15 @@ auto ADDME()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const s64 RA = ppu.gpr[op.ra];
-		const auto r = add64_flags(RA, ~0ull, ppu.xer_ca);
-		ppu.gpr[op.rd] = r.result;
-		ppu.xer_ca = r.carry;
-		if constexpr (((Flags == has_oe) || ...))
-			ppu_ov_set(ppu, (u64(RA) >> 63 == 1) && (u64(RA) >> 63 != ppu.gpr[op.rd] >> 63));
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, r.result, 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const s64 RA = ppu.gpr[op.ra];
+	const auto r = add64_flags(RA, ~0ull, ppu.xer.ca);
+	ppu.gpr[op.rd] = r.result;
+	ppu.xer.ca = r.carry;
+	if constexpr (((Flags == has_oe) || ...))
+		ppu_ov_set(ppu, (u64(RA) >> 63 == 1) && (u64(RA) >> 63 != ppu.gpr[op.rd] >> 63));
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, r.result, 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4730,13 +4645,12 @@ auto MULLW()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.rd] = s64{static_cast<s32>(ppu.gpr[op.ra])} * static_cast<s32>(ppu.gpr[op.rb]);
-		if constexpr (((Flags == has_oe) || ...))
-			ppu_ov_set(ppu, s64(ppu.gpr[op.rd]) < INT32_MIN || s64(ppu.gpr[op.rd]) > INT32_MAX);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.rd] = s64{static_cast<s32>(ppu.gpr[op.ra])} * static_cast<s32>(ppu.gpr[op.rb]);
+	if constexpr (((Flags == has_oe) || ...))
+		ppu_ov_set(ppu, s64(ppu.gpr[op.rd]) < INT32_MIN || s64(ppu.gpr[op.rd]) > INT32_MAX);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4747,7 +4661,8 @@ auto DCBTST()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](auto&&, auto) {};
+	static const auto exec = [](auto&&, auto) {
+	};
 	RETURN_(ppu, op);
 }
 
@@ -4757,11 +4672,10 @@ auto STBUX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
-		PPU_WRITE_8(vm::cast(addr), static_cast<u8>(ppu.gpr[op.rs]));
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
+	PPU_WRITE_8(vm::cast(addr), static_cast<u8>(ppu.gpr[op.rs]));
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -4772,15 +4686,14 @@ auto ADD()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 RA = ppu.gpr[op.ra];
-		const u64 RB = ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = RA + RB;
-		if constexpr (((Flags == has_oe) || ...))
-			ppu_ov_set(ppu, (RA >> 63 == RB >> 63) && (RA >> 63 != ppu.gpr[op.rd] >> 63));
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 RA = ppu.gpr[op.ra];
+	const u64 RB = ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = RA + RB;
+	if constexpr (((Flags == has_oe) || ...))
+		ppu_ov_set(ppu, (RA >> 63 == RB >> 63) && (RA >> 63 != ppu.gpr[op.rd] >> 63));
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4791,7 +4704,8 @@ auto DCBT()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](auto&&, auto) {};
+	static const auto exec = [](auto&&, auto) {
+	};
 	RETURN_(ppu, op);
 }
 
@@ -4801,10 +4715,9 @@ auto LHZX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = ppu_feed_data<u16, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = ppu_feed_data<u16, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -4815,11 +4728,10 @@ auto EQV()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = ~(ppu.gpr[op.rs] ^ ppu.gpr[op.rb]);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = ~(ppu.gpr[op.rs] ^ ppu.gpr[op.rb]);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4830,9 +4742,8 @@ auto ECIWX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](auto&&, auto)
-	{
-		fmt::throw_exception("ECIWX");
+	static const auto exec = [](auto&&, auto) {
+	fmt::throw_exception("ECIWX");
 	};
 	RETURN_(ppu, op);
 }
@@ -4843,11 +4754,10 @@ auto LHZUX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = ppu_feed_data<u16, Flags...>(ppu, addr);
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = ppu_feed_data<u16, Flags...>(ppu, addr);
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -4858,11 +4768,10 @@ auto XOR()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = ppu.gpr[op.rs] ^ ppu.gpr[op.rb];
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = ppu.gpr[op.rs] ^ ppu.gpr[op.rb];
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -4873,21 +4782,21 @@ auto MFSPR()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u32 n = (op.spr >> 5) | ((op.spr & 0x1f) << 5);
+
+	switch (n)
 	{
-		const u32 n = (op.spr >> 5) | ((op.spr & 0x1f) << 5);
+	case 0x001: ppu.gpr[op.rd] = u32{ppu.xer.so} << 31 | ppu.xer.ov << 30 | ppu.xer.ca << 29 | ppu.xer.cnt; break;
+	case 0x008: ppu.gpr[op.rd] = ppu.lr; break;
+	case 0x009: ppu.gpr[op.rd] = ppu.ctr; break;
+	case 0x100: ppu.gpr[op.rd] = ppu.vrsave; break;
 
-		switch (n)
-		{
-		case 0x001: ppu.gpr[op.rd] = u32{ppu.xer_so} << 31 | ppu.xer_ov << 30 | ppu.xer_ca << 29 | ppu.xer_cnt; break;
-		case 0x008: ppu.gpr[op.rd] = ppu.lr; break;
-		case 0x009: ppu.gpr[op.rd] = ppu.ctr; break;
-		case 0x100: ppu.gpr[op.rd] = ppu.vrsave; break;
+	case 0x10C: ppu.gpr[op.rd] = get_timebased_time(); break;
+	case 0x10D: ppu.gpr[op.rd] = get_timebased_time() >> 32; break;
+	default: fmt::throw_exception("MFSPR 0x%x", n);
+	}
 
-		case 0x10C: ppu.gpr[op.rd] = get_timebased_time(); break;
-		case 0x10D: ppu.gpr[op.rd] = get_timebased_time() >> 32; break;
-		default: fmt::throw_exception("MFSPR 0x%x", n);
-		}
 	};
 	RETURN_(ppu, op);
 }
@@ -4898,10 +4807,9 @@ auto LWAX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = ppu_feed_data<s32, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = ppu_feed_data<s32, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -4912,7 +4820,8 @@ auto DST()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](auto&&, auto) {};
+	static const auto exec = [](auto&&, auto) {
+	};
 	RETURN_(ppu, op);
 }
 
@@ -4922,10 +4831,9 @@ auto LHAX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = ppu_feed_data<s16, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = ppu_feed_data<s16, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -4936,10 +4844,9 @@ auto LVXL()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~0xfull;
-		ppu.vr[op.vd] = ppu_feed_data<v128, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~0xfull;
+	ppu.vr[op.vd] = ppu_feed_data<v128, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -4950,16 +4857,16 @@ auto MFTB()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u32 n = (op.spr >> 5) | ((op.spr & 0x1f) << 5);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u32 n = (op.spr >> 5) | ((op.spr & 0x1f) << 5);
 
-		switch (n)
-		{
-		case 0x10C: ppu.gpr[op.rd] = get_timebased_time(); break;
-		case 0x10D: ppu.gpr[op.rd] = get_timebased_time() >> 32; break;
-		default: fmt::throw_exception("MFTB 0x%x", n);
-		}
+	switch (n)
+	{
+	case 0x10C: ppu.gpr[op.rd] = get_timebased_time(); break;
+	case 0x10D: ppu.gpr[op.rd] = get_timebased_time() >> 32; break;
+	default: fmt::throw_exception("MFTB 0x%x", n);
+	}
+
 	};
 	RETURN_(ppu, op);
 }
@@ -4970,11 +4877,10 @@ auto LWAUX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = ppu_feed_data<s32, Flags...>(ppu, addr);
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = ppu_feed_data<s32, Flags...>(ppu, addr);
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -4985,7 +4891,8 @@ auto DSTST()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](auto&&, auto) {};
+	static const auto exec = [](auto&&, auto) {
+	};
 	RETURN_(ppu, op);
 }
 
@@ -4995,11 +4902,10 @@ auto LHAUX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = ppu_feed_data<s16, Flags...>(ppu, addr);
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = ppu_feed_data<s16, Flags...>(ppu, addr);
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -5010,10 +4916,9 @@ auto STHX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		PPU_WRITE_16(vm::cast(addr), static_cast<u16>(ppu.gpr[op.rs]));
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	PPU_WRITE_16(vm::cast(addr), static_cast<u16>(ppu.gpr[op.rs]));
 	};
 	RETURN_(ppu, op);
 }
@@ -5024,11 +4929,10 @@ auto ORC()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = ppu.gpr[op.rs] | ~ppu.gpr[op.rb];
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = ppu.gpr[op.rs] | ~ppu.gpr[op.rb];
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -5039,9 +4943,8 @@ auto ECOWX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](auto&&, auto)
-	{
-		fmt::throw_exception("ECOWX");
+	static const auto exec = [](auto&&, auto) {
+	fmt::throw_exception("ECOWX");
 	};
 	RETURN_(ppu, op);
 }
@@ -5052,11 +4955,10 @@ auto STHUX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
-		PPU_WRITE_16(vm::cast(addr), static_cast<u16>(ppu.gpr[op.rs]));
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
+	PPU_WRITE_16(vm::cast(addr), static_cast<u16>(ppu.gpr[op.rs]));
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -5067,11 +4969,10 @@ auto OR()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = ppu.gpr[op.rs] | ppu.gpr[op.rb];
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = ppu.gpr[op.rs] | ppu.gpr[op.rb];
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -5082,15 +4983,14 @@ auto DIVDU()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 RA = ppu.gpr[op.ra];
-		const u64 RB = ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = RB == 0 ? 0 : RA / RB;
-		if constexpr (((Flags == has_oe) || ...))
-			ppu_ov_set(ppu, RB == 0);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 RA = ppu.gpr[op.ra];
+	const u64 RB = ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = RB == 0 ? 0 : RA / RB;
+	if constexpr (((Flags == has_oe) || ...))
+		ppu_ov_set(ppu, RB == 0);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -5101,15 +5001,14 @@ auto DIVWU()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u32 RA = static_cast<u32>(ppu.gpr[op.ra]);
-		const u32 RB = static_cast<u32>(ppu.gpr[op.rb]);
-		ppu.gpr[op.rd] = RB == 0 ? 0 : RA / RB;
-		if constexpr (((Flags == has_oe) || ...))
-			ppu_ov_set(ppu, RB == 0);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u32 RA = static_cast<u32>(ppu.gpr[op.ra]);
+	const u32 RB = static_cast<u32>(ppu.gpr[op.rb]);
+	ppu.gpr[op.rd] = RB == 0 ? 0 : RA / RB;
+	if constexpr (((Flags == has_oe) || ...))
+		ppu_ov_set(ppu, RB == 0);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -5120,26 +5019,26 @@ auto MTSPR()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u32 n = (op.spr >> 5) | ((op.spr & 0x1f) << 5);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u32 n = (op.spr >> 5) | ((op.spr & 0x1f) << 5);
 
-		switch (n)
-		{
-		case 0x001:
-		{
-			const u64 value = ppu.gpr[op.rs];
-			ppu.xer_so = (value & 0x80000000) != 0;
-			ppu.xer_ov = (value & 0x40000000) != 0;
-			ppu.xer_ca = (value & 0x20000000) != 0;
-			ppu.xer_cnt = value & 0x7f;
-			break;
-		}
-		case 0x008: ppu.lr = ppu.gpr[op.rs]; break;
-		case 0x009: ppu.ctr = ppu.gpr[op.rs]; break;
-		case 0x100: ppu.vrsave = static_cast<u32>(ppu.gpr[op.rs]); break;
-		default: fmt::throw_exception("MTSPR 0x%x", n);
-		}
+	switch (n)
+	{
+	case 0x001:
+	{
+		const u64 value = ppu.gpr[op.rs];
+		ppu.xer.so = (value & 0x80000000) != 0;
+		ppu.xer.ov = (value & 0x40000000) != 0;
+		ppu.xer.ca = (value & 0x20000000) != 0;
+		ppu.xer.cnt = value & 0x7f;
+		break;
+	}
+	case 0x008: ppu.lr = ppu.gpr[op.rs]; break;
+	case 0x009: ppu.ctr = ppu.gpr[op.rs]; break;
+	case 0x100: ppu.vrsave = static_cast<u32>(ppu.gpr[op.rs]); break;
+	default: fmt::throw_exception("MTSPR 0x%x", n);
+	}
+
 	};
 	RETURN_(ppu, op);
 }
@@ -5150,7 +5049,8 @@ auto DCBI()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](auto&&, auto) {};
+	static const auto exec = [](auto&&, auto) {
+	};
 	RETURN_(ppu, op);
 }
 
@@ -5160,11 +5060,10 @@ auto NAND()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = ~(ppu.gpr[op.rs] & ppu.gpr[op.rb]);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = ~(ppu.gpr[op.rs] & ppu.gpr[op.rb]);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -5175,10 +5074,9 @@ auto STVXL()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~0xfull;
-		vm::_ref<v128>(vm::cast(addr)) = ppu.vr[op.vs];
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = (op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb]) & ~0xfull;
+	PPU_WRITE(v128, vm::cast(addr), ppu.vr[op.vs]);
 	};
 	RETURN_(ppu, op);
 }
@@ -5189,16 +5087,15 @@ auto DIVD()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const s64 RA = ppu.gpr[op.ra];
-		const s64 RB = ppu.gpr[op.rb];
-		const bool o = RB == 0 || (RA == INT64_MIN && RB == -1);
-		ppu.gpr[op.rd] = o ? 0 : RA / RB;
-		if constexpr (((Flags == has_oe) || ...))
-			ppu_ov_set(ppu, o);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const s64 RA = ppu.gpr[op.ra];
+	const s64 RB = ppu.gpr[op.rb];
+	const bool o = RB == 0 || (RA == INT64_MIN && RB == -1);
+	ppu.gpr[op.rd] = o ? 0 : RA / RB;
+	if constexpr (((Flags == has_oe) || ...))
+		ppu_ov_set(ppu, o);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -5209,16 +5106,15 @@ auto DIVW()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const s32 RA = static_cast<s32>(ppu.gpr[op.ra]);
-		const s32 RB = static_cast<s32>(ppu.gpr[op.rb]);
-		const bool o = RB == 0 || (RA == INT32_MIN && RB == -1);
-		ppu.gpr[op.rd] = o ? 0 : static_cast<u32>(RA / RB);
-		if constexpr (((Flags == has_oe) || ...))
-			ppu_ov_set(ppu, o);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const s32 RA = static_cast<s32>(ppu.gpr[op.ra]);
+	const s32 RB = static_cast<s32>(ppu.gpr[op.rb]);
+	const bool o = RB == 0 || (RA == INT32_MIN && RB == -1);
+	ppu.gpr[op.rd] = o ? 0 : static_cast<u32>(RA / RB);
+	if constexpr (((Flags == has_oe) || ...))
+		ppu_ov_set(ppu, o);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.rd], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -5245,10 +5141,9 @@ auto LDBRX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = ppu_feed_data<le_t<u64>, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = ppu_feed_data<le_t<u64>, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -5259,24 +5154,23 @@ auto LSWX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	u32 count = ppu.xer.cnt & 0x7f;
+	for (; count >= 4; count -= 4, addr += 4, op.rd = (op.rd + 1) & 31)
 	{
-		u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		u32 count = ppu.xer_cnt & 0x7f;
-		for (; count >= 4; count -= 4, addr += 4, op.rd = (op.rd + 1) & 31)
+		ppu.gpr[op.rd] = ppu_feed_data<u32, Flags...>(ppu, addr);
+	}
+	if (count)
+	{
+		u32 value = 0;
+		for (u32 byte = 0; byte < count; byte++)
 		{
-			ppu.gpr[op.rd] = ppu_feed_data<u32, Flags...>(ppu, addr);
+			u32 byte_value = ppu_feed_data<u8, Flags...>(ppu, addr + byte);
+			value |= byte_value << ((3 ^ byte) * 8);
 		}
-		if (count)
-		{
-			u32 value = 0;
-			for (u32 byte = 0; byte < count; byte++)
-			{
-				u32 byte_value = ppu_feed_data<u8, Flags...>(ppu, addr + byte);
-				value |= byte_value << ((3 ^ byte) * 8);
-			}
-			ppu.gpr[op.rd] = value;
-		}
+		ppu.gpr[op.rd] = value;
+	}
 	};
 	RETURN_(ppu, op);
 }
@@ -5287,10 +5181,9 @@ auto LWBRX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = ppu_feed_data<le_t<u32>, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = ppu_feed_data<le_t<u32>, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -5301,10 +5194,9 @@ auto LFSX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		ppu.fpr[op.frd] = ppu_feed_data<f32, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	ppu.fpr[op.frd] = ppu_feed_data<f32, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -5315,11 +5207,10 @@ auto SRW()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = (ppu.gpr[op.rs] & 0xffffffff) >> (ppu.gpr[op.rb] & 0x3f);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = (ppu.gpr[op.rs] & 0xffffffff) >> (ppu.gpr[op.rb] & 0x3f);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -5330,12 +5221,11 @@ auto SRD()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u32 n = ppu.gpr[op.rb] & 0x7f;
-		ppu.gpr[op.ra] = n & 0x40 ? 0 : ppu.gpr[op.rs] >> n;
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u32 n = ppu.gpr[op.rb] & 0x7f;
+	ppu.gpr[op.ra] = n & 0x40 ? 0 : ppu.gpr[op.rs] >> n;
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -5364,35 +5254,34 @@ auto LSWI()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		u64 addr = op.ra ? ppu.gpr[op.ra] : 0;
-		u64 N = op.rb ? op.rb : 32;
-		u8 reg = op.rd;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	u64 addr = op.ra ? ppu.gpr[op.ra] : 0;
+	u64 N = op.rb ? op.rb : 32;
+	u8 reg = op.rd;
 
-		while (N > 0)
+	while (N > 0)
+	{
+		if (N > 3)
 		{
-			if (N > 3)
-			{
-				ppu.gpr[reg] = ppu_feed_data<u32, Flags...>(ppu, addr);
-				addr += 4;
-				N -= 4;
-			}
-			else
-			{
-				u32 buf = 0;
-				u32 i = 3;
-				while (N > 0)
-				{
-					N = N - 1;
-					buf |= ppu_feed_data<u8, Flags...>(ppu, addr) << (i * 8);
-					addr++;
-					i--;
-				}
-				ppu.gpr[reg] = buf;
-			}
-			reg = (reg + 1) % 32;
+			ppu.gpr[reg] = ppu_feed_data<u32, Flags...>(ppu, addr);
+			addr += 4;
+			N -= 4;
 		}
+		else
+		{
+			u32 buf = 0;
+			u32 i = 3;
+			while (N > 0)
+			{
+				N = N - 1;
+				buf |= ppu_feed_data<u8, Flags...>(ppu, addr) << (i * 8);
+				addr++;
+				i--;
+			}
+			ppu.gpr[reg] = buf;
+		}
+		reg = (reg + 1) % 32;
+	}
 	};
 	RETURN_(ppu, op);
 }
@@ -5403,11 +5292,10 @@ auto LFSUX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
-		ppu.fpr[op.frd] = ppu_feed_data<f32, Flags...>(ppu, addr);
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
+	ppu.fpr[op.frd] = ppu_feed_data<f32, Flags...>(ppu, addr);
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -5418,9 +5306,8 @@ auto SYNC()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](auto&&, auto)
-	{
-		atomic_fence_seq_cst();
+	static const auto exec = [](auto&&, auto) {
+	atomic_fence_seq_cst();
 	};
 	RETURN_(ppu, op);
 }
@@ -5431,10 +5318,9 @@ auto LFDX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		ppu.fpr[op.frd] = ppu_feed_data<f64, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	ppu.fpr[op.frd] = ppu_feed_data<f64, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -5445,11 +5331,10 @@ auto LFDUX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
-		ppu.fpr[op.frd] = ppu_feed_data<f64, Flags...>(ppu, addr);
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
+	ppu.fpr[op.frd] = ppu_feed_data<f64, Flags...>(ppu, addr);
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -5478,10 +5363,9 @@ auto STDBRX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		vm::_ref<le_t<u64>>(vm::cast(addr)) = ppu.gpr[op.rs];
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	PPU_WRITE(le_t<u64>, vm::cast(addr), ppu.gpr[op.rs]);
 	};
 	RETURN_(ppu, op);
 }
@@ -5492,23 +5376,22 @@ auto STSWX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	u32 count = ppu.xer.cnt & 0x7F;
+	for (; count >= 4; count -= 4, addr += 4, op.rs = (op.rs + 1) & 31)
 	{
-		u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		u32 count = ppu.xer_cnt & 0x7F;
-		for (; count >= 4; count -= 4, addr += 4, op.rs = (op.rs + 1) & 31)
+		PPU_WRITE_32(vm::cast(addr), static_cast<u32>(ppu.gpr[op.rs]));
+	}
+	if (count)
+	{
+		u32 value = static_cast<u32>(ppu.gpr[op.rs]);
+		for (u32 byte = 0; byte < count; byte++)
 		{
-			PPU_WRITE_32(vm::cast(addr), static_cast<u32>(ppu.gpr[op.rs]));
+			u8 byte_value = static_cast<u8>(value >> ((3 ^ byte) * 8));
+			PPU_WRITE_8(vm::cast(addr + byte), byte_value);
 		}
-		if (count)
-		{
-			u32 value = static_cast<u32>(ppu.gpr[op.rs]);
-			for (u32 byte = 0; byte < count; byte++)
-			{
-				u8 byte_value = static_cast<u8>(value >> ((3 ^ byte) * 8));
-				PPU_WRITE_8(vm::cast(addr + byte), byte_value);
-			}
-		}
+	}
 	};
 	RETURN_(ppu, op);
 }
@@ -5519,10 +5402,9 @@ auto STWBRX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		vm::_ref<le_t<u32>>(vm::cast(addr)) = static_cast<u32>(ppu.gpr[op.rs]);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	PPU_WRITE(le_t<u32>, vm::cast(addr), static_cast<u32>(ppu.gpr[op.rs]));
 	};
 	RETURN_(ppu, op);
 }
@@ -5533,10 +5415,9 @@ auto STFSX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		vm::_ref<f32>(vm::cast(addr)) = static_cast<float>(ppu.fpr[op.frs]);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	PPU_WRITE(f32, vm::cast(addr), static_cast<float>(ppu.fpr[op.frs]));
 	};
 	RETURN_(ppu, op);
 }
@@ -5565,11 +5446,10 @@ auto STFSUX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
-		vm::_ref<f32>(vm::cast(addr)) = static_cast<float>(ppu.fpr[op.frs]);
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
+	PPU_WRITE(f32, vm::cast(addr), static_cast<float>(ppu.fpr[op.frs]));
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -5580,33 +5460,32 @@ auto STSWI()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		u64 addr = op.ra ? ppu.gpr[op.ra] : 0;
-		u64 N = op.rb ? op.rb : 32;
-		u8 reg = op.rd;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	u64 addr = op.ra ? ppu.gpr[op.ra] : 0;
+	u64 N = op.rb ? op.rb : 32;
+	u8 reg = op.rd;
 
-		while (N > 0)
+	while (N > 0)
+	{
+		if (N > 3)
 		{
-			if (N > 3)
-			{
-				PPU_WRITE_32(vm::cast(addr), static_cast<u32>(ppu.gpr[reg]));
-				addr += 4;
-				N -= 4;
-			}
-			else
-			{
-				u32 buf = static_cast<u32>(ppu.gpr[reg]);
-				while (N > 0)
-				{
-					N = N - 1;
-					PPU_WRITE_8(vm::cast(addr), (0xFF000000 & buf) >> 24);
-					buf <<= 8;
-					addr++;
-				}
-			}
-			reg = (reg + 1) % 32;
+			PPU_WRITE_32(vm::cast(addr), static_cast<u32>(ppu.gpr[reg]));
+			addr += 4;
+			N -= 4;
 		}
+		else
+		{
+			u32 buf = static_cast<u32>(ppu.gpr[reg]);
+			while (N > 0)
+			{
+				N = N - 1;
+				PPU_WRITE_8(vm::cast(addr), (0xFF000000 & buf) >> 24);
+				buf <<= 8;
+				addr++;
+			}
+		}
+		reg = (reg + 1) % 32;
+	}
 	};
 	RETURN_(ppu, op);
 }
@@ -5617,10 +5496,9 @@ auto STFDX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		vm::_ref<f64>(vm::cast(addr)) = ppu.fpr[op.frs];
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	PPU_WRITE(f64, vm::cast(addr), ppu.fpr[op.frs]);
 	};
 	RETURN_(ppu, op);
 }
@@ -5631,11 +5509,10 @@ auto STFDUX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
-		vm::_ref<f64>(vm::cast(addr)) = ppu.fpr[op.frs];
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + ppu.gpr[op.rb];
+	PPU_WRITE(f64, vm::cast(addr), ppu.fpr[op.frs]);
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -5652,10 +5529,9 @@ auto LHBRX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		ppu.gpr[op.rd] = ppu_feed_data<le_t<u16>, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	ppu.gpr[op.rd] = ppu_feed_data<le_t<u16>, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -5666,23 +5542,22 @@ auto SRAW()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	s32 RS = static_cast<s32>(ppu.gpr[op.rs]);
+	u8 shift = ppu.gpr[op.rb] & 63;
+	if (shift > 31)
 	{
-		s32 RS = static_cast<s32>(ppu.gpr[op.rs]);
-		u8 shift = ppu.gpr[op.rb] & 63;
-		if (shift > 31)
-		{
-			ppu.gpr[op.ra] = 0 - (RS < 0);
-			ppu.xer_ca = (RS < 0);
-		}
-		else
-		{
-			ppu.gpr[op.ra] = RS >> shift;
-			ppu.xer_ca = (RS < 0) && ((ppu.gpr[op.ra] << shift) != static_cast<u64>(RS));
-		}
+		ppu.gpr[op.ra] = 0 - (RS < 0);
+		ppu.xer.ca = (RS < 0);
+	}
+	else
+	{
+		ppu.gpr[op.ra] = RS >> shift;
+		ppu.xer.ca = (RS < 0) && ((ppu.gpr[op.ra] << shift) != static_cast<u64>(RS));
+	}
 
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -5693,23 +5568,22 @@ auto SRAD()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	s64 RS = ppu.gpr[op.rs];
+	u8 shift = ppu.gpr[op.rb] & 127;
+	if (shift > 63)
 	{
-		s64 RS = ppu.gpr[op.rs];
-		u8 shift = ppu.gpr[op.rb] & 127;
-		if (shift > 63)
-		{
-			ppu.gpr[op.ra] = 0 - (RS < 0);
-			ppu.xer_ca = (RS < 0);
-		}
-		else
-		{
-			ppu.gpr[op.ra] = RS >> shift;
-			ppu.xer_ca = (RS < 0) && ((ppu.gpr[op.ra] << shift) != static_cast<u64>(RS));
-		}
+		ppu.gpr[op.ra] = 0 - (RS < 0);
+		ppu.xer.ca = (RS < 0);
+	}
+	else
+	{
+		ppu.gpr[op.ra] = RS >> shift;
+		ppu.xer.ca = (RS < 0) && ((ppu.gpr[op.ra] << shift) != static_cast<u64>(RS));
+	}
 
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -5726,7 +5600,8 @@ auto DSS()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](auto&&, auto) {};
+	static const auto exec = [](auto&&, auto) {
+	};
 	RETURN_(ppu, op);
 }
 
@@ -5736,14 +5611,13 @@ auto SRAWI()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		s32 RS = static_cast<u32>(ppu.gpr[op.rs]);
-		ppu.gpr[op.ra] = RS >> op.sh32;
-		ppu.xer_ca = (RS < 0) && (static_cast<u32>(ppu.gpr[op.ra] << op.sh32) != static_cast<u32>(RS));
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	s32 RS = static_cast<u32>(ppu.gpr[op.rs]);
+	ppu.gpr[op.ra] = RS >> op.sh32;
+	ppu.xer.ca = (RS < 0) && (static_cast<u32>(ppu.gpr[op.ra] << op.sh32) != static_cast<u32>(RS));
 
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -5754,15 +5628,14 @@ auto SRADI()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		auto sh = op.sh64;
-		s64 RS = ppu.gpr[op.rs];
-		ppu.gpr[op.ra] = RS >> sh;
-		ppu.xer_ca = (RS < 0) && ((ppu.gpr[op.ra] << sh) != static_cast<u64>(RS));
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	auto sh = op.sh64;
+	s64 RS = ppu.gpr[op.rs];
+	ppu.gpr[op.ra] = RS >> sh;
+	ppu.xer.ca = (RS < 0) && ((ppu.gpr[op.ra] << sh) != static_cast<u64>(RS));
 
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -5773,9 +5646,8 @@ auto EIEIO()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](auto&&, auto)
-	{
-		atomic_fence_seq_cst();
+	static const auto exec = [](auto&&, auto) {
+	atomic_fence_seq_cst();
 	};
 	RETURN_(ppu, op);
 }
@@ -5792,10 +5664,9 @@ auto STHBRX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		vm::_ref<le_t<u16>>(vm::cast(addr)) = static_cast<u16>(ppu.gpr[op.rs]);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	PPU_WRITE(le_t<u16>, vm::cast(addr), static_cast<u16>(ppu.gpr[op.rs]));
 	};
 	RETURN_(ppu, op);
 }
@@ -5806,11 +5677,10 @@ auto EXTSH()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = static_cast<s16>(ppu.gpr[op.rs]);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = static_cast<s16>(ppu.gpr[op.rs]);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -5827,11 +5697,10 @@ auto EXTSB()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = static_cast<s8>(ppu.gpr[op.rs]);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = static_cast<s8>(ppu.gpr[op.rs]);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -5842,10 +5711,9 @@ auto STFIWX()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		PPU_WRITE_32(vm::cast(addr), static_cast<u32>(std::bit_cast<u64>(ppu.fpr[op.frs])));
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	PPU_WRITE_32(vm::cast(addr), static_cast<u32>(std::bit_cast<u64>(ppu.fpr[op.frs])));
 	};
 	RETURN_(ppu, op);
 }
@@ -5856,11 +5724,10 @@ auto EXTSW()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.gpr[op.ra] = static_cast<s32>(ppu.gpr[op.rs]);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.gpr[op.ra] = static_cast<s32>(ppu.gpr[op.rs]);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set<s64>(ppu, 0, ppu.gpr[op.ra], 0);
 	};
 	RETURN_(ppu, op);
 }
@@ -5871,7 +5738,8 @@ auto ICBI()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](auto&&, auto) {};
+	static const auto exec = [](auto&&, auto) {
+	};
 	RETURN_(ppu, op);
 }
 
@@ -5881,19 +5749,18 @@ auto DCBZ()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
+	const u32 addr0 = vm::cast(addr) & ~127;
+
+	if (g_cfg.core.accurate_cache_line_stores)
 	{
-		const u64 addr = op.ra ? ppu.gpr[op.ra] + ppu.gpr[op.rb] : ppu.gpr[op.rb];
-		const u32 addr0 = vm::cast(addr) & ~127;
+		alignas(64) static constexpr u8 zero_buf[128]{};
+		do_cell_atomic_128_store(addr0, zero_buf);
+		return;
+	}
 
-		if (g_cfg.core.accurate_cache_line_stores)
-		{
-			alignas(64) static constexpr u8 zero_buf[128]{};
-			do_cell_atomic_128_store(addr0, zero_buf);
-			return;
-		}
-
-		std::memset(vm::base(addr0), 0, 128);
+	std::memset(vm::base(addr0), 0, 128);
 	};
 	RETURN_(ppu, op);
 }
@@ -5904,10 +5771,9 @@ auto LWZ()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
-		ppu.gpr[op.rd] = ppu_feed_data<u32, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
+	ppu.gpr[op.rd] = ppu_feed_data<u32, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -5918,11 +5784,10 @@ auto LWZU()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + op.simm16;
-		ppu.gpr[op.rd] = ppu_feed_data<u32, Flags...>(ppu, addr);
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + op.simm16;
+	ppu.gpr[op.rd] = ppu_feed_data<u32, Flags...>(ppu, addr);
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -5933,10 +5798,9 @@ auto LBZ()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
-		ppu.gpr[op.rd] = ppu_feed_data<u8, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
+	ppu.gpr[op.rd] = ppu_feed_data<u8, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -5947,11 +5811,10 @@ auto LBZU()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + op.simm16;
-		ppu.gpr[op.rd] = ppu_feed_data<u8, Flags...>(ppu, addr);
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + op.simm16;
+	ppu.gpr[op.rd] = ppu_feed_data<u8, Flags...>(ppu, addr);
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -5962,17 +5825,17 @@ auto STW()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
-		const u32 value = static_cast<u32>(ppu.gpr[op.rs]);
-		PPU_WRITE_32(vm::cast(addr), value);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
+	const u32 value = static_cast<u32>(ppu.gpr[op.rs]);
+	PPU_WRITE_32(vm::cast(addr), value);
 
-		// Insomniac engine v3 & v4 (newer R&C, Fuse, Resitance 3)
-		if (value == 0xAAAAAAAA) [[unlikely]]
-		{
-			vm::reservation_update(vm::cast(addr));
-		}
+	//Insomniac engine v3 & v4 (newer R&C, Fuse, Resitance 3)
+	if (value == 0xAAAAAAAA) [[unlikely]]
+	{
+		vm::reservation_update(vm::cast(addr));
+	}
+
 	};
 	RETURN_(ppu, op);
 }
@@ -5983,11 +5846,10 @@ auto STWU()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + op.simm16;
-		PPU_WRITE_32(vm::cast(addr), static_cast<u32>(ppu.gpr[op.rs]));
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + op.simm16;
+	PPU_WRITE_32(vm::cast(addr), static_cast<u32>(ppu.gpr[op.rs]));
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -5998,10 +5860,9 @@ auto STB()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
-		PPU_WRITE_8(vm::cast(addr), static_cast<u8>(ppu.gpr[op.rs]));
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
+	PPU_WRITE_8(vm::cast(addr), static_cast<u8>(ppu.gpr[op.rs]));
 	};
 	RETURN_(ppu, op);
 }
@@ -6012,11 +5873,10 @@ auto STBU()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + op.simm16;
-		PPU_WRITE_8(vm::cast(addr), static_cast<u8>(ppu.gpr[op.rs]));
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + op.simm16;
+	PPU_WRITE_8(vm::cast(addr), static_cast<u8>(ppu.gpr[op.rs]));
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -6027,10 +5887,9 @@ auto LHZ()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
-		ppu.gpr[op.rd] = ppu_feed_data<u16, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
+	ppu.gpr[op.rd] = ppu_feed_data<u16, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -6041,11 +5900,10 @@ auto LHZU()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + op.simm16;
-		ppu.gpr[op.rd] = ppu_feed_data<u16, Flags...>(ppu, addr);
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + op.simm16;
+	ppu.gpr[op.rd] = ppu_feed_data<u16, Flags...>(ppu, addr);
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -6056,10 +5914,9 @@ auto LHA()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
-		ppu.gpr[op.rd] = ppu_feed_data<s16, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
+	ppu.gpr[op.rd] = ppu_feed_data<s16, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -6070,11 +5927,10 @@ auto LHAU()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + op.simm16;
-		ppu.gpr[op.rd] = ppu_feed_data<s16, Flags...>(ppu, addr);
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + op.simm16;
+	ppu.gpr[op.rd] = ppu_feed_data<s16, Flags...>(ppu, addr);
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -6085,10 +5941,9 @@ auto STH()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
-		PPU_WRITE_16(vm::cast(addr), static_cast<u16>(ppu.gpr[op.rs]));
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
+	PPU_WRITE_16(vm::cast(addr), static_cast<u16>(ppu.gpr[op.rs]));
 	};
 	RETURN_(ppu, op);
 }
@@ -6099,11 +5954,10 @@ auto STHU()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + op.simm16;
-		PPU_WRITE_16(vm::cast(addr), static_cast<u16>(ppu.gpr[op.rs]));
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + op.simm16;
+	PPU_WRITE_16(vm::cast(addr), static_cast<u16>(ppu.gpr[op.rs]));
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -6114,13 +5968,12 @@ auto LMW()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	u64 addr = op.ra ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
+	for (u32 i = op.rd; i<32; ++i, addr += 4)
 	{
-		u64 addr = op.ra ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
-		for (u32 i = op.rd; i < 32; ++i, addr += 4)
-		{
-			ppu.gpr[i] = ppu_feed_data<u32, Flags...>(ppu, addr);
-		}
+		ppu.gpr[i] = ppu_feed_data<u32, Flags...>(ppu, addr);
+	}
 	};
 	RETURN_(ppu, op);
 }
@@ -6131,13 +5984,12 @@ auto STMW()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	u64 addr = op.ra ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
+	for (u32 i = op.rs; i<32; ++i, addr += 4)
 	{
-		u64 addr = op.ra ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
-		for (u32 i = op.rs; i < 32; ++i, addr += 4)
-		{
-			PPU_WRITE_32(vm::cast(addr), static_cast<u32>(ppu.gpr[i]));
-		}
+		PPU_WRITE_32(vm::cast(addr), static_cast<u32>(ppu.gpr[i]));
+	}
 	};
 	RETURN_(ppu, op);
 }
@@ -6148,10 +6000,9 @@ auto LFS()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
-		ppu.fpr[op.frd] = ppu_feed_data<f32, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
+	ppu.fpr[op.frd] = ppu_feed_data<f32, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -6162,11 +6013,10 @@ auto LFSU()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + op.simm16;
-		ppu.fpr[op.frd] = ppu_feed_data<f32, Flags...>(ppu, addr);
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + op.simm16;
+	ppu.fpr[op.frd] = ppu_feed_data<f32, Flags...>(ppu, addr);
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -6177,10 +6027,9 @@ auto LFD()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
-		ppu.fpr[op.frd] = ppu_feed_data<f64, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
+	ppu.fpr[op.frd] = ppu_feed_data<f64, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -6191,11 +6040,10 @@ auto LFDU()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + op.simm16;
-		ppu.fpr[op.frd] = ppu_feed_data<f64, Flags...>(ppu, addr);
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + op.simm16;
+	ppu.fpr[op.frd] = ppu_feed_data<f64, Flags...>(ppu, addr);
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -6206,10 +6054,9 @@ auto STFS()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
-		vm::_ref<f32>(vm::cast(addr)) = static_cast<float>(ppu.fpr[op.frs]);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
+	PPU_WRITE(f32, vm::cast(addr), static_cast<float>(ppu.fpr[op.frs]));
 	};
 	RETURN_(ppu, op);
 }
@@ -6220,11 +6067,10 @@ auto STFSU()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + op.simm16;
-		vm::_ref<f32>(vm::cast(addr)) = static_cast<float>(ppu.fpr[op.frs]);
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + op.simm16;
+	PPU_WRITE(f32, vm::cast(addr), static_cast<float>(ppu.fpr[op.frs]));
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -6235,10 +6081,9 @@ auto STFD()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
-		vm::_ref<f64>(vm::cast(addr)) = ppu.fpr[op.frs];
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = op.ra || 1 ? ppu.gpr[op.ra] + op.simm16 : op.simm16;
+	PPU_WRITE(f64, vm::cast(addr), ppu.fpr[op.frs]);
 	};
 	RETURN_(ppu, op);
 }
@@ -6249,11 +6094,10 @@ auto STFDU()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + op.simm16;
-		vm::_ref<f64>(vm::cast(addr)) = ppu.fpr[op.frs];
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + op.simm16;
+	PPU_WRITE(f64, vm::cast(addr), ppu.fpr[op.frs]);
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -6264,10 +6108,9 @@ auto LD()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = (op.simm16 & ~3) + (op.ra ? ppu.gpr[op.ra] : 0);
-		ppu.gpr[op.rd] = ppu_feed_data<u64, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = (op.simm16 & ~3) + (op.ra ? ppu.gpr[op.ra] : 0);
+	ppu.gpr[op.rd] = ppu_feed_data<u64, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -6278,11 +6121,10 @@ auto LDU()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + (op.simm16 & ~3);
-		ppu.gpr[op.rd] = ppu_feed_data<u64, Flags...>(ppu, addr);
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + (op.simm16 & ~3);
+	ppu.gpr[op.rd] = ppu_feed_data<u64, Flags...>(ppu, addr);
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -6293,10 +6135,9 @@ auto LWA()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_feed_data>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = (op.simm16 & ~3) + (op.ra ? ppu.gpr[op.ra] : 0);
-		ppu.gpr[op.rd] = ppu_feed_data<s32, Flags...>(ppu, addr);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = (op.simm16 & ~3) + (op.ra ? ppu.gpr[op.ra] : 0);
+	ppu.gpr[op.rd] = ppu_feed_data<s32, Flags...>(ppu, addr);
 	};
 	RETURN_(ppu, op);
 }
@@ -6307,10 +6148,9 @@ auto STD()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = (op.simm16 & ~3) + (op.ra ? ppu.gpr[op.ra] : 0);
-		PPU_WRITE_64(vm::cast(addr), ppu.gpr[op.rs]);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = (op.simm16 & ~3) + (op.ra ? ppu.gpr[op.ra] : 0);
+	PPU_WRITE_64(vm::cast(addr), ppu.gpr[op.rs]);
 	};
 	RETURN_(ppu, op);
 }
@@ -6321,11 +6161,10 @@ auto STDU()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u64 addr = ppu.gpr[op.ra] + (op.simm16 & ~3);
-		PPU_WRITE_64(vm::cast(addr), ppu.gpr[op.rs]);
-		ppu.gpr[op.ra] = addr;
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u64 addr = ppu.gpr[op.ra] + (op.simm16 & ~3);
+	PPU_WRITE_64(vm::cast(addr), ppu.gpr[op.rs]);
+	ppu.gpr[op.ra] = addr;
 	};
 	RETURN_(ppu, op);
 }
@@ -6336,10 +6175,9 @@ auto FDIVS()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_fpcc>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.fpr[op.frd] = f32(ppu.fpr[op.fra] / ppu.fpr[op.frb]);
-		ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.fpr[op.frd] = f32(ppu.fpr[op.fra] / ppu.fpr[op.frb]);
+	ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
 	};
 	RETURN_(ppu, op);
 }
@@ -6350,10 +6188,9 @@ auto FSUBS()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_fpcc>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.fpr[op.frd] = f32(ppu.fpr[op.fra] - ppu.fpr[op.frb]);
-		ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.fpr[op.frd] = f32(ppu.fpr[op.fra] - ppu.fpr[op.frb]);
+	ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
 	};
 	RETURN_(ppu, op);
 }
@@ -6364,10 +6201,9 @@ auto FADDS()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_fpcc>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.fpr[op.frd] = f32(ppu.fpr[op.fra] + ppu.fpr[op.frb]);
-		ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.fpr[op.frd] = f32(ppu.fpr[op.fra] + ppu.fpr[op.frb]);
+	ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
 	};
 	RETURN_(ppu, op);
 }
@@ -6378,10 +6214,9 @@ auto FSQRTS()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_fpcc>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.fpr[op.frd] = f32(std::sqrt(ppu.fpr[op.frb]));
-		ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.fpr[op.frd] = f32(std::sqrt(ppu.fpr[op.frb]));
+	ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
 	};
 	RETURN_(ppu, op);
 }
@@ -6397,7 +6232,7 @@ auto FRES()
 		const f64 a = ppu.fpr[op.frb];
 		const u64 b = std::bit_cast<u64>(a);
 		const u64 e = (b >> 52) & 0x7ff; // double exp
-		const u64 i = (b >> 45) & 0x7f;  // mantissa LUT index
+		const u64 i = (b >> 45) & 0x7f; // mantissa LUT index
 		const u64 r = e >= (0x3ff + 0x80) ? 0 : (0x7ff - 2 - e) << 52 | u64{ppu_fres_mantissas[i]} << (32 - 3);
 
 		ppu.fpr[op.frd] = f32(std::bit_cast<f64>(a == a ? (b & 0x8000'0000'0000'0000) | r : (0x8'0000'0000'0000 | b)));
@@ -6412,10 +6247,9 @@ auto FMULS()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_fpcc>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.fpr[op.frd] = f32(ppu.fpr[op.fra] * ppu.fpr[op.frc]);
-		ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.fpr[op.frd] = f32(ppu.fpr[op.fra] * ppu.fpr[op.frc]);
+	ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
 	};
 	RETURN_(ppu, op);
 }
@@ -6426,14 +6260,13 @@ auto FMADDS()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_fpcc>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		if constexpr (((Flags == use_dfma) || ...))
-			ppu.fpr[op.frd] = f32(std::fma(ppu.fpr[op.fra], ppu.fpr[op.frc], ppu.fpr[op.frb]));
-		else
-			ppu.fpr[op.frd] = f32(ppu.fpr[op.fra] * ppu.fpr[op.frc] + ppu.fpr[op.frb]);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	if constexpr (((Flags == use_dfma) || ...))
+		ppu.fpr[op.frd] = f32(std::fma(ppu.fpr[op.fra], ppu.fpr[op.frc], ppu.fpr[op.frb]));
+	else
+		ppu.fpr[op.frd] = f32(ppu.fpr[op.fra] * ppu.fpr[op.frc] + ppu.fpr[op.frb]);
 
-		ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
+	ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
 	};
 	RETURN_(ppu, op);
 }
@@ -6444,14 +6277,13 @@ auto FMSUBS()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_fpcc, use_dfma>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		if constexpr (((Flags == use_dfma) || ...))
-			ppu.fpr[op.frd] = f32(std::fma(ppu.fpr[op.fra], ppu.fpr[op.frc], -ppu.fpr[op.frb]));
-		else
-			ppu.fpr[op.frd] = f32(ppu.fpr[op.fra] * ppu.fpr[op.frc] - ppu.fpr[op.frb]);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	if constexpr (((Flags == use_dfma) || ...))
+		ppu.fpr[op.frd] = f32(std::fma(ppu.fpr[op.fra], ppu.fpr[op.frc], -ppu.fpr[op.frb]));
+	else
+		ppu.fpr[op.frd] = f32(ppu.fpr[op.fra] * ppu.fpr[op.frc] - ppu.fpr[op.frb]);
 
-		ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
+	ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
 	};
 	RETURN_(ppu, op);
 }
@@ -6462,14 +6294,13 @@ auto FNMSUBS()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_fpcc, use_dfma>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		if constexpr (((Flags == use_dfma) || ...))
-			ppu.fpr[op.frd] = f32(-std::fma(ppu.fpr[op.fra], ppu.fpr[op.frc], -ppu.fpr[op.frb]));
-		else
-			ppu.fpr[op.frd] = f32(-(ppu.fpr[op.fra] * ppu.fpr[op.frc] - ppu.fpr[op.frb]));
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	if constexpr (((Flags == use_dfma) || ...))
+		ppu.fpr[op.frd] = f32(-std::fma(ppu.fpr[op.fra], ppu.fpr[op.frc], -ppu.fpr[op.frb]));
+	else
+		ppu.fpr[op.frd] = f32(-(ppu.fpr[op.fra] * ppu.fpr[op.frc] - ppu.fpr[op.frb]));
 
-		ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
+	ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
 	};
 	RETURN_(ppu, op);
 }
@@ -6480,14 +6311,13 @@ auto FNMADDS()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_fpcc, use_dfma>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		if constexpr (((Flags == use_dfma) || ...))
-			ppu.fpr[op.frd] = f32(-std::fma(ppu.fpr[op.fra], ppu.fpr[op.frc], ppu.fpr[op.frb]));
-		else
-			ppu.fpr[op.frd] = f32(-(ppu.fpr[op.fra] * ppu.fpr[op.frc] + ppu.fpr[op.frb]));
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	if constexpr (((Flags == use_dfma) || ...))
+		ppu.fpr[op.frd] = f32(-std::fma(ppu.fpr[op.fra], ppu.fpr[op.frc], ppu.fpr[op.frb]));
+	else
+		ppu.fpr[op.frd] = f32(-(ppu.fpr[op.fra] * ppu.fpr[op.frc] + ppu.fpr[op.frb]));
 
-		ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
+	ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
 	};
 	RETURN_(ppu, op);
 }
@@ -6498,14 +6328,12 @@ auto MTFSB1()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u32 bit = op.crbd;
-		if (bit < 16 || bit > 19)
-			ppu_log.warning("MTFSB1(%d)", bit);
-		ppu.fpscr.bits[bit] = 1;
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set(ppu, 1, ppu.fpscr.fg, ppu.fpscr.fl, ppu.fpscr.fe, ppu.fpscr.fu);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u32 bit = op.crbd;
+	if (bit < 16 || bit > 19) ppu_log.warning("MTFSB1(%d)", bit);
+	ppu.fpscr.bits[bit] = 1;
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set(ppu, 1, ppu.fpscr.fg, ppu.fpscr.fl, ppu.fpscr.fe, ppu.fpscr.fu);
 	};
 	RETURN_(ppu, op);
 }
@@ -6516,11 +6344,9 @@ auto MCRFS()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		if (op.crfs != 4)
-			ppu_log.warning("MCRFS(%d)", op.crfs);
-		ppu.cr.fields[op.crfd] = ppu.fpscr.fields[op.crfs];
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	if (op.crfs != 4) ppu_log.warning("MCRFS(%d)", op.crfs);
+	ppu.cr.fields[op.crfd] = ppu.fpscr.fields[op.crfs];
 	};
 	RETURN_(ppu, op);
 }
@@ -6531,14 +6357,12 @@ auto MTFSB0()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const u32 bit = op.crbd;
-		if (bit < 16 || bit > 19)
-			ppu_log.warning("MTFSB0(%d)", bit);
-		ppu.fpscr.bits[bit] = 0;
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set(ppu, 1, ppu.fpscr.fg, ppu.fpscr.fl, ppu.fpscr.fe, ppu.fpscr.fu);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u32 bit = op.crbd;
+	if (bit < 16 || bit > 19) ppu_log.warning("MTFSB0(%d)", bit);
+	ppu.fpscr.bits[bit] = 0;
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set(ppu, 1, ppu.fpscr.fg, ppu.fpscr.fl, ppu.fpscr.fe, ppu.fpscr.fu);
 	};
 	RETURN_(ppu, op);
 }
@@ -6549,42 +6373,38 @@ auto MTFSFI()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const u32 bf = op.crfd;
+
+	if (bf != 4)
 	{
-		const u32 bf = op.crfd;
+		// Do nothing on non-FPCC field (TODO)
+		ppu_log.warning("MTFSFI(%d)", op.crfd);
+	}
+	else
+	{
+		static constexpr std::array<u32, 16> all_values = []() -> std::array<u32, 16>
+		{
+			std::array<u32, 16> values{};
 
-		if (bf != 4)
-		{
-			// Do nothing on non-FPCC field (TODO)
-			ppu_log.warning("MTFSFI(%d)", op.crfd);
-		}
-		else
-		{
-			static constexpr auto all_values = []
+			for (u32 i = 0; i < values.size(); i++)
 			{
-				std::array<CrField, 16> values{};
+				u32 value = 0, im = i;
+				value |= (im & 1) << (8 * 3); im >>= 1;
+				value |= (im & 1) << (8 * 2); im >>= 1;
+				value |= (im & 1) << (8 * 1); im >>= 1;
+				value |= (im & 1) << (8 * 0);
+				values[i] = value;
+			}
 
-				for (u32 i = 0; i < values.size(); i++)
-				{
-					u32 value = 0, im = i;
-					value |= (im & 1) << (8 * 3);
-					im >>= 1;
-					value |= (im & 1) << (8 * 2);
-					im >>= 1;
-					value |= (im & 1) << (8 * 1);
-					im >>= 1;
-					value |= (im & 1) << (8 * 0);
-					values[i] = std::bit_cast<CrField>(value);
-				}
+			return values;
+		}();
 
-				return values;
-			}();
+		ppu.fpscr.fields[bf] = all_values[op.i];
+	}
 
-			ppu.fpscr.fields[bf] = all_values[op.i];
-		}
-
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set(ppu, 1, ppu.fpscr.fg, ppu.fpscr.fl, ppu.fpscr.fe, ppu.fpscr.fu);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set(ppu, 1, ppu.fpscr.fg, ppu.fpscr.fl, ppu.fpscr.fe, ppu.fpscr.fu);
 	};
 	RETURN_(ppu, op);
 }
@@ -6595,12 +6415,11 @@ auto MFFS()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu_log.warning("MFFS");
-		ppu.fpr[op.frd] = std::bit_cast<f64>(u64{ppu.fpscr.fl} << 15 | u64{ppu.fpscr.fg} << 14 | u64{ppu.fpscr.fe} << 13 | u64{ppu.fpscr.fu} << 12);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set(ppu, 1, ppu.fpscr.fg, ppu.fpscr.fl, ppu.fpscr.fe, ppu.fpscr.fu);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu_log.warning("MFFS");
+	ppu.fpr[op.frd] = std::bit_cast<f64>(u64{ppu.fpscr.fl} << 15 | u64{ppu.fpscr.fg} << 14 | u64{ppu.fpscr.fe} << 13 | u64{ppu.fpscr.fu} << 12);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set(ppu, 1, ppu.fpscr.fg, ppu.fpscr.fl, ppu.fpscr.fe, ppu.fpscr.fu);
 	};
 	RETURN_(ppu, op);
 }
@@ -6611,11 +6430,10 @@ auto MTFSF()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](auto&& ppu, auto)
-	{
-		ppu_log.warning("MTFSF");
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set(ppu, 1, ppu.fpscr.fg, ppu.fpscr.fl, ppu.fpscr.fe, ppu.fpscr.fu);
+	static const auto exec = [](auto&& ppu, auto) {
+	ppu_log.warning("MTFSF");
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set(ppu, 1, ppu.fpscr.fg, ppu.fpscr.fl, ppu.fpscr.fe, ppu.fpscr.fu);
 	};
 	RETURN_(ppu, op);
 }
@@ -6626,11 +6444,10 @@ auto FCMPU()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		const f64 a = ppu.fpr[op.fra];
-		const f64 b = ppu.fpr[op.frb];
-		ppu_set_fpcc<set_fpcc, has_rc, Flags...>(ppu, a, b, op.crfd);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	const f64 a = ppu.fpr[op.fra];
+	const f64 b = ppu.fpr[op.frb];
+	ppu_set_fpcc<set_fpcc, has_rc, Flags...>(ppu, a, b, op.crfd);
 	};
 	RETURN_(ppu, op);
 }
@@ -6643,13 +6460,13 @@ auto FCTIW()
 
 	static const auto exec = [](ppu_thread& ppu, auto&& d, auto&& b)
 	{
-#if defined(ARCH_X64)
+	#if defined(ARCH_X64)
 		const auto val = _mm_set_sd(b);
 		const auto res = _mm_xor_si128(_mm_cvtpd_epi32(val), _mm_castpd_si128(_mm_cmpge_pd(val, _mm_set1_pd(0x80000000))));
 		d = std::bit_cast<f64, s64>(_mm_cvtsi128_si32(res));
-#elif defined(ARCH_ARM64)
+	#elif defined(ARCH_ARM64)
 		d = std::bit_cast<f64, s64>(!(b == b) ? INT32_MIN : vqmovnd_s64(std::bit_cast<f64>(vrndi_f64(std::bit_cast<float64x1_t>(b)))));
-#endif
+	#endif
 		ppu_set_fpcc<Flags...>(ppu, 0., 0.); // undefined (TODO)
 	};
 
@@ -6664,13 +6481,13 @@ auto FCTIWZ()
 
 	static const auto exec = [](ppu_thread& ppu, auto&& d, auto&& b)
 	{
-#if defined(ARCH_X64)
+	#if defined(ARCH_X64)
 		const auto val = _mm_set_sd(b);
 		const auto res = _mm_xor_si128(_mm_cvttpd_epi32(val), _mm_castpd_si128(_mm_cmpge_pd(val, _mm_set1_pd(0x80000000))));
 		d = std::bit_cast<f64, s64>(_mm_cvtsi128_si32(res));
-#elif defined(ARCH_ARM64)
+	#elif defined(ARCH_ARM64)
 		d = std::bit_cast<f64, s64>(!(b == b) ? INT32_MIN : vqmovnd_s64(std::bit_cast<s64>(vcvt_s64_f64(std::bit_cast<float64x1_t>(b)))));
-#endif
+	#endif
 		ppu_set_fpcc<Flags...>(ppu, 0., 0.); // undefined (TODO)
 	};
 
@@ -6683,10 +6500,9 @@ auto FRSP()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_fpcc>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.fpr[op.frd] = f32(ppu.fpr[op.frb]);
-		ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.fpr[op.frd] = f32(ppu.fpr[op.frb]);
+	ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
 	};
 	RETURN_(ppu, op);
 }
@@ -6697,10 +6513,9 @@ auto FDIV()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_fpcc>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.fpr[op.frd] = ppu.fpr[op.fra] / ppu.fpr[op.frb];
-		ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.fpr[op.frd] = ppu.fpr[op.fra] / ppu.fpr[op.frb];
+	ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
 	};
 	RETURN_(ppu, op);
 }
@@ -6711,10 +6526,9 @@ auto FSUB()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_fpcc>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.fpr[op.frd] = ppu.fpr[op.fra] - ppu.fpr[op.frb];
-		ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.fpr[op.frd] = ppu.fpr[op.fra] - ppu.fpr[op.frb];
+	ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
 	};
 	RETURN_(ppu, op);
 }
@@ -6725,10 +6539,9 @@ auto FADD()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_fpcc>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.fpr[op.frd] = ppu.fpr[op.fra] + ppu.fpr[op.frb];
-		ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.fpr[op.frd] = ppu.fpr[op.fra] + ppu.fpr[op.frb];
+	ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
 	};
 	RETURN_(ppu, op);
 }
@@ -6739,10 +6552,9 @@ auto FSQRT()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_fpcc>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.fpr[op.frd] = std::sqrt(ppu.fpr[op.frb]);
-		ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.fpr[op.frd] = std::sqrt(ppu.fpr[op.frb]);
+	ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
 	};
 	RETURN_(ppu, op);
 }
@@ -6753,11 +6565,10 @@ auto FSEL()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.fpr[op.frd] = ppu.fpr[op.fra] >= 0.0 ? ppu.fpr[op.frc] : ppu.fpr[op.frb];
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set(ppu, 1, ppu.fpscr.fg, ppu.fpscr.fl, ppu.fpscr.fe, ppu.fpscr.fu);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.fpr[op.frd] = ppu.fpr[op.fra] >= 0.0 ? ppu.fpr[op.frc] : ppu.fpr[op.frb];
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set(ppu, 1, ppu.fpscr.fg, ppu.fpscr.fl, ppu.fpscr.fe, ppu.fpscr.fu);
 	};
 	RETURN_(ppu, op);
 }
@@ -6768,10 +6579,9 @@ auto FMUL()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_fpcc>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.fpr[op.frd] = ppu.fpr[op.fra] * ppu.fpr[op.frc];
-		ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.fpr[op.frd] = ppu.fpr[op.fra] * ppu.fpr[op.frc];
+	ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
 	};
 	RETURN_(ppu, op);
 }
@@ -6798,14 +6608,13 @@ auto FMSUB()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_fpcc, use_dfma>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		if constexpr (((Flags == use_dfma) || ...))
-			ppu.fpr[op.frd] = std::fma(ppu.fpr[op.fra], ppu.fpr[op.frc], -ppu.fpr[op.frb]);
-		else
-			ppu.fpr[op.frd] = ppu.fpr[op.fra] * ppu.fpr[op.frc] - ppu.fpr[op.frb];
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	if constexpr (((Flags == use_dfma) || ...))
+		ppu.fpr[op.frd] = std::fma(ppu.fpr[op.fra], ppu.fpr[op.frc], -ppu.fpr[op.frb]);
+	else
+		ppu.fpr[op.frd] = ppu.fpr[op.fra] * ppu.fpr[op.frc] - ppu.fpr[op.frb];
 
-		ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
+	ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
 	};
 	RETURN_(ppu, op);
 }
@@ -6816,14 +6625,13 @@ auto FMADD()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_fpcc, use_dfma>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		if constexpr (((Flags == use_dfma) || ...))
-			ppu.fpr[op.frd] = std::fma(ppu.fpr[op.fra], ppu.fpr[op.frc], ppu.fpr[op.frb]);
-		else
-			ppu.fpr[op.frd] = ppu.fpr[op.fra] * ppu.fpr[op.frc] + ppu.fpr[op.frb];
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	if constexpr (((Flags == use_dfma) || ...))
+		ppu.fpr[op.frd] = std::fma(ppu.fpr[op.fra], ppu.fpr[op.frc], ppu.fpr[op.frb]);
+	else
+		ppu.fpr[op.frd] = ppu.fpr[op.fra] * ppu.fpr[op.frc] + ppu.fpr[op.frb];
 
-		ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
+	ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
 	};
 	RETURN_(ppu, op);
 }
@@ -6834,14 +6642,13 @@ auto FNMSUB()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_fpcc, use_dfma>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		if constexpr (((Flags == use_dfma) || ...))
-			ppu.fpr[op.frd] = -std::fma(ppu.fpr[op.fra], ppu.fpr[op.frc], -ppu.fpr[op.frb]);
-		else
-			ppu.fpr[op.frd] = -(ppu.fpr[op.fra] * ppu.fpr[op.frc] - ppu.fpr[op.frb]);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	if constexpr (((Flags == use_dfma) || ...))
+		ppu.fpr[op.frd] = -std::fma(ppu.fpr[op.fra], ppu.fpr[op.frc], -ppu.fpr[op.frb]);
+	else
+		ppu.fpr[op.frd] = -(ppu.fpr[op.fra] * ppu.fpr[op.frc] - ppu.fpr[op.frb]);
 
-		ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
+	ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
 	};
 	RETURN_(ppu, op);
 }
@@ -6852,14 +6659,13 @@ auto FNMADD()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<set_fpcc, use_dfma>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		if constexpr (((Flags == use_dfma) || ...))
-			ppu.fpr[op.frd] = -std::fma(ppu.fpr[op.fra], ppu.fpr[op.frc], ppu.fpr[op.frb]);
-		else
-			ppu.fpr[op.frd] = -(ppu.fpr[op.fra] * ppu.fpr[op.frc] + ppu.fpr[op.frb]);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	if constexpr (((Flags == use_dfma) || ...))
+		ppu.fpr[op.frd] = -std::fma(ppu.fpr[op.fra], ppu.fpr[op.frc], ppu.fpr[op.frb]);
+	else
+		ppu.fpr[op.frd] = -(ppu.fpr[op.fra] * ppu.fpr[op.frc] + ppu.fpr[op.frb]);
 
-		ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
+	ppu_set_fpcc<Flags...>(ppu, ppu.fpr[op.frd], 0.);
 	};
 	RETURN_(ppu, op);
 }
@@ -6876,11 +6682,10 @@ auto FNEG()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<use_dfma>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.fpr[op.frd] = -ppu.fpr[op.frb];
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set(ppu, 1, ppu.fpscr.fg, ppu.fpscr.fl, ppu.fpscr.fe, ppu.fpscr.fu);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.fpr[op.frd] = -ppu.fpr[op.frb];
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set(ppu, 1, ppu.fpscr.fg, ppu.fpscr.fl, ppu.fpscr.fe, ppu.fpscr.fu);
 	};
 	RETURN_(ppu, op);
 }
@@ -6891,11 +6696,10 @@ auto FMR()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.fpr[op.frd] = ppu.fpr[op.frb];
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set(ppu, 1, ppu.fpscr.fg, ppu.fpscr.fl, ppu.fpscr.fe, ppu.fpscr.fu);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.fpr[op.frd] = ppu.fpr[op.frb];
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set(ppu, 1, ppu.fpscr.fg, ppu.fpscr.fl, ppu.fpscr.fe, ppu.fpscr.fu);
 	};
 	RETURN_(ppu, op);
 }
@@ -6906,11 +6710,10 @@ auto FNABS()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.fpr[op.frd] = -std::fabs(ppu.fpr[op.frb]);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set(ppu, 1, ppu.fpscr.fg, ppu.fpscr.fl, ppu.fpscr.fe, ppu.fpscr.fu);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.fpr[op.frd] = -std::fabs(ppu.fpr[op.frb]);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set(ppu, 1, ppu.fpscr.fg, ppu.fpscr.fl, ppu.fpscr.fe, ppu.fpscr.fu);
 	};
 	RETURN_(ppu, op);
 }
@@ -6921,11 +6724,10 @@ auto FABS()
 	if constexpr (Build == 0xf1a6)
 		return ppu_exec_select<Flags...>::template select<>();
 
-	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op)
-	{
-		ppu.fpr[op.frd] = std::fabs(ppu.fpr[op.frb]);
-		if constexpr (((Flags == has_rc) || ...))
-			ppu_cr_set(ppu, 1, ppu.fpscr.fg, ppu.fpscr.fl, ppu.fpscr.fe, ppu.fpscr.fu);
+	static const auto exec = [](ppu_thread& ppu, ppu_opcode_t op) {
+	ppu.fpr[op.frd] = std::fabs(ppu.fpr[op.frb]);
+	if constexpr (((Flags == has_rc) || ...))
+		ppu_cr_set(ppu, 1, ppu.fpscr.fg, ppu.fpscr.fl, ppu.fpscr.fe, ppu.fpscr.fu);
 	};
 	RETURN_(ppu, op);
 }
@@ -6938,13 +6740,13 @@ auto FCTID()
 
 	static const auto exec = [](ppu_thread& ppu, auto&& d, auto&& b)
 	{
-#if defined(ARCH_X64)
+	#if defined(ARCH_X64)
 		const auto val = _mm_set_sd(b);
 		const auto res = _mm_xor_si128(_mm_set1_epi64x(_mm_cvtsd_si64(val)), _mm_castpd_si128(_mm_cmpge_pd(val, _mm_set1_pd(f64(1ull << 63)))));
 		d = std::bit_cast<f64>(_mm_cvtsi128_si64(res));
-#elif defined(ARCH_ARM64)
+	#elif defined(ARCH_ARM64)
 		d = std::bit_cast<f64, s64>(!(b == b) ? f64{INT64_MIN} : std::bit_cast<f64>(vrndi_f64(std::bit_cast<float64x1_t>(b))));
-#endif
+	#endif
 		ppu_set_fpcc<Flags...>(ppu, 0., 0.); // undefined (TODO)
 	};
 
@@ -6959,13 +6761,13 @@ auto FCTIDZ()
 
 	static const auto exec = [](ppu_thread& ppu, auto&& d, auto&& b)
 	{
-#if defined(ARCH_X64)
+	#if defined(ARCH_X64)
 		const auto val = _mm_set_sd(b);
 		const auto res = _mm_xor_si128(_mm_set1_epi64x(_mm_cvttsd_si64(val)), _mm_castpd_si128(_mm_cmpge_pd(val, _mm_set1_pd(f64(1ull << 63)))));
 		d = std::bit_cast<f64>(_mm_cvtsi128_si64(res));
-#elif defined(ARCH_ARM64)
+	#elif defined(ARCH_ARM64)
 		d = std::bit_cast<f64>(!(b == b) ? int64x1_t{INT64_MIN} : vcvt_s64_f64(std::bit_cast<float64x1_t>(b)));
-#endif
+	#endif
 		ppu_set_fpcc<Flags...>(ppu, 0., 0.); // undefined (TODO)
 	};
 
@@ -7547,7 +7349,7 @@ struct ppu_interpreter_t
 ppu_interpreter_rt_base::ppu_interpreter_rt_base() noexcept
 {
 	// Obtain required set of flags from settings
-	rx::EnumBitSet<ppu_exec_bit> selected{};
+	bs_t<ppu_exec_bit> selected{};
 	if (g_cfg.core.ppu_set_sat_bit)
 		selected += set_sat;
 	if (g_cfg.core.ppu_use_nj_bit)
@@ -7586,55 +7388,55 @@ ppu_interpreter_rt_base::ppu_interpreter_rt_base() noexcept
 
 #ifndef __INTELLISENSE__
 
-#define INIT_VCMP(name)       \
+#define INIT_VCMP(name) \
 	ptrs->name = ::name<0>(); \
-	ptrs->name##_ = ::name<0, has_oe>();
+	ptrs->name##_ = ::name<0, has_oe>(); \
 
-#define INIT_OV(name)         \
+#define INIT_OV(name) \
 	ptrs->name = ::name<0>(); \
-	ptrs->name##O = ::name<0, has_oe>();
+	ptrs->name##O = ::name<0, has_oe>(); \
 
-#define INIT_RC(name)                                                                   \
-	ptrs->name = ::name<0xf1a6>()(selected, []<ppu_exec_bit... Flags>() {               \
-		return ::name<0, Flags...>();                                                   \
-	});                                                                                 \
-	ptrs->name##_ = ::name<0xf1a6, set_fpcc>()(selected, []<ppu_exec_bit... Flags>() {  \
+#define INIT_RC(name) \
+	ptrs->name = ::name<0xf1a6>()(selected, []<ppu_exec_bit... Flags>() { \
+		return ::name<0, Flags...>(); \
+	}); \
+	ptrs->name##_ = ::name<0xf1a6, set_fpcc>()(selected, []<ppu_exec_bit... Flags>() { \
 		/* Minor optimization: has_rc implies set_fpcc so don't compile has_rc alone */ \
-		return ::name<0, has_rc, Flags...>();                                           \
-	});
+		return ::name<0, has_rc, Flags...>(); \
+	}); \
 
-#define INIT_RC_OV(name)                 \
-	ptrs->name = ::name<0>();            \
+#define INIT_RC_OV(name) \
+	ptrs->name = ::name<0>(); \
 	ptrs->name##O = ::name<0, has_oe>(); \
 	ptrs->name##_ = ::name<0, has_rc>(); \
-	ptrs->name##O_ = ::name<0, has_oe, has_rc>();
+	ptrs->name##O_ = ::name<0, has_oe, has_rc>(); \
 
 	// Initialize instructions with their own sets of supported flags (except INIT_VCMP, INIT_OV, INIT_RC_OV)
-#define INIT(name)                                                        \
+#define INIT(name) \
 	ptrs->name = ::name<0xf1a6>()(selected, []<ppu_exec_bit... Flags>() { \
-		return ::name<0, Flags...>();                                     \
-	});
+		return ::name<0, Flags...>(); \
+	}); \
 
-#define INIT_ONE(name, bits)                                                                   \
+#define INIT_ONE(name, bits) \
 	ptrs->name##_[0b##bits] = ::name<0b##bits>::select(selected, []<ppu_exec_bit... Flags>() { \
-		return ::name<0b##bits>::impl<0, Flags...>();                                          \
-	});
+		return ::name<0b##bits>::impl<0, Flags...>(); \
+	}); \
 
 #define INIT_PACK2(name, bits) \
-	INIT_ONE(name, bits##0)    \
-	INIT_ONE(name, bits##1)
+	INIT_ONE(name, bits##0) \
+	INIT_ONE(name, bits##1) \
 
 #define INIT_PACK4(name, bits) \
-	INIT_PACK2(name, bits##0)  \
-	INIT_PACK2(name, bits##1)
+	INIT_PACK2(name, bits##0) \
+	INIT_PACK2(name, bits##1) \
 
 #define INIT_PACK8(name, bits) \
-	INIT_PACK4(name, bits##0)  \
-	INIT_PACK4(name, bits##1)
+	INIT_PACK4(name, bits##0) \
+	INIT_PACK4(name, bits##1) \
 
 #define INIT_PACK16(name, bits) \
-	INIT_PACK8(name, bits##0)   \
-	INIT_PACK8(name, bits##1)
+	INIT_PACK8(name, bits##0) \
+	INIT_PACK8(name, bits##1) \
 
 	INIT(MFVSCR);
 	INIT(MTVSCR);
@@ -7739,7 +7541,7 @@ ppu_interpreter_rt_base::ppu_interpreter_rt_base() noexcept
 	INIT(VSEL);
 	INIT(VSL);
 	INIT(VSLB);
-	INIT_PACK16(VSLDOI, );
+	INIT_PACK16(VSLDOI,);
 	INIT(VSLH);
 	INIT(VSLO);
 	INIT(VSLW);
@@ -7827,7 +7629,7 @@ ppu_interpreter_rt_base::ppu_interpreter_rt_base() noexcept
 	INIT_RC_OV(ADDC);
 	INIT_RC(MULHDU);
 	INIT_RC(MULHWU);
-	INIT_PACK8(MFOCRF, );
+	INIT_PACK8(MFOCRF,);
 	INIT(MFCR); //+
 	INIT(LWARX);
 	INIT(LDX);
@@ -7857,8 +7659,8 @@ ppu_interpreter_rt_base::ppu_interpreter_rt_base() noexcept
 	INIT(LBZUX);
 	INIT_RC(NOR);
 	INIT(STVEBX);
-	INIT_OV(SUBFE);
-	INIT_OV(ADDE);
+	INIT_RC_OV(SUBFE);
+	INIT_RC_OV(ADDE);
 	INIT(MTOCRF);
 	INIT(STDX);
 	INIT(STWCX);
@@ -8025,7 +7827,8 @@ ppu_interpreter_rt_base::~ppu_interpreter_rt_base()
 }
 
 ppu_interpreter_rt::ppu_interpreter_rt() noexcept
-	: ppu_interpreter_rt_base(), table(*ptrs)
+	: ppu_interpreter_rt_base()
+	, table(*ptrs)
 {
 }
 
@@ -8082,1180 +7885,4 @@ ppu_intrp_func_t ppu_interpreter_rt::decode(u32 opv) const noexcept
 	}
 
 	return table.decode(opv);
-}
-
-using isel_type = void (*)(PPUContext&, rx::cell::ppu::Instruction);
-
-#define IMPORT_DECODER(x) extern "C" isel_type ISEL_PPU_##x##_DEC
-#define IMPORT_DECODER_ALIAS(x, name)           \
-	extern "C" isel_type ISEL_PPU_##name##_DEC; \
-	inline isel_type ISEL_PPU_##x##_DEC = ISEL_PPU_##name##_DEC;
-
-IMPORT_DECODER(MFVSCR);
-IMPORT_DECODER(MTVSCR);
-IMPORT_DECODER(VADDCUW);
-IMPORT_DECODER(VADDFP);
-IMPORT_DECODER(VADDSBS);
-IMPORT_DECODER(VADDSHS);
-IMPORT_DECODER(VADDSWS);
-IMPORT_DECODER(VADDUBM);
-IMPORT_DECODER(VADDUBS);
-IMPORT_DECODER(VADDUHM);
-IMPORT_DECODER(VADDUHS);
-IMPORT_DECODER(VADDUWM);
-IMPORT_DECODER(VADDUWS);
-IMPORT_DECODER(VAND);
-IMPORT_DECODER(VANDC);
-IMPORT_DECODER(VAVGSB);
-IMPORT_DECODER(VAVGSH);
-IMPORT_DECODER(VAVGSW);
-IMPORT_DECODER(VAVGUB);
-IMPORT_DECODER(VAVGUH);
-IMPORT_DECODER(VAVGUW);
-IMPORT_DECODER(VCFSX);
-IMPORT_DECODER(VCFUX);
-IMPORT_DECODER(VCMPBFP);
-IMPORT_DECODER_ALIAS(VCMPBFP_, VCMPBFP);
-IMPORT_DECODER(VCMPEQFP);
-IMPORT_DECODER_ALIAS(VCMPEQFP_, VCMPEQFP);
-IMPORT_DECODER(VCMPEQUB);
-IMPORT_DECODER_ALIAS(VCMPEQUB_, VCMPEQUB);
-IMPORT_DECODER(VCMPEQUH);
-IMPORT_DECODER_ALIAS(VCMPEQUH_, VCMPEQUH);
-IMPORT_DECODER(VCMPEQUW);
-IMPORT_DECODER_ALIAS(VCMPEQUW_, VCMPEQUW);
-IMPORT_DECODER(VCMPGEFP);
-IMPORT_DECODER_ALIAS(VCMPGEFP_, VCMPGEFP);
-IMPORT_DECODER(VCMPGTFP);
-IMPORT_DECODER_ALIAS(VCMPGTFP_, VCMPGTFP);
-IMPORT_DECODER(VCMPGTSB);
-IMPORT_DECODER_ALIAS(VCMPGTSB_, VCMPGTSB);
-IMPORT_DECODER(VCMPGTSH);
-IMPORT_DECODER_ALIAS(VCMPGTSH_, VCMPGTSH);
-IMPORT_DECODER(VCMPGTSW);
-IMPORT_DECODER_ALIAS(VCMPGTSW_, VCMPGTSW);
-IMPORT_DECODER(VCMPGTUB);
-IMPORT_DECODER_ALIAS(VCMPGTUB_, VCMPGTUB);
-IMPORT_DECODER(VCMPGTUH);
-IMPORT_DECODER_ALIAS(VCMPGTUH_, VCMPGTUH);
-IMPORT_DECODER(VCMPGTUW);
-IMPORT_DECODER_ALIAS(VCMPGTUW_, VCMPGTUW);
-IMPORT_DECODER(VCTSXS);
-IMPORT_DECODER(VCTUXS);
-IMPORT_DECODER(VEXPTEFP);
-IMPORT_DECODER(VLOGEFP);
-IMPORT_DECODER(VMADDFP);
-IMPORT_DECODER(VMAXFP);
-IMPORT_DECODER(VMAXSB);
-IMPORT_DECODER(VMAXSH);
-IMPORT_DECODER(VMAXSW);
-IMPORT_DECODER(VMAXUB);
-IMPORT_DECODER(VMAXUH);
-IMPORT_DECODER(VMAXUW);
-IMPORT_DECODER(VMHADDSHS);
-IMPORT_DECODER(VMHRADDSHS);
-IMPORT_DECODER(VMINFP);
-IMPORT_DECODER(VMINSB);
-IMPORT_DECODER(VMINSH);
-IMPORT_DECODER(VMINSW);
-IMPORT_DECODER(VMINUB);
-IMPORT_DECODER(VMINUH);
-IMPORT_DECODER(VMINUW);
-IMPORT_DECODER(VMLADDUHM);
-IMPORT_DECODER(VMRGHB);
-IMPORT_DECODER(VMRGHH);
-IMPORT_DECODER(VMRGHW);
-IMPORT_DECODER(VMRGLB);
-IMPORT_DECODER(VMRGLH);
-IMPORT_DECODER(VMRGLW);
-IMPORT_DECODER(VMSUMMBM);
-IMPORT_DECODER(VMSUMSHM);
-IMPORT_DECODER(VMSUMSHS);
-IMPORT_DECODER(VMSUMUBM);
-IMPORT_DECODER(VMSUMUHM);
-IMPORT_DECODER(VMSUMUHS);
-IMPORT_DECODER(VMULESB);
-IMPORT_DECODER(VMULESH);
-IMPORT_DECODER(VMULEUB);
-IMPORT_DECODER(VMULEUH);
-IMPORT_DECODER(VMULOSB);
-IMPORT_DECODER(VMULOSH);
-IMPORT_DECODER(VMULOUB);
-IMPORT_DECODER(VMULOUH);
-IMPORT_DECODER(VNMSUBFP);
-IMPORT_DECODER(VNOR);
-IMPORT_DECODER(VOR);
-IMPORT_DECODER(VPERM);
-IMPORT_DECODER(VPKPX);
-IMPORT_DECODER(VPKSHSS);
-IMPORT_DECODER(VPKSHUS);
-IMPORT_DECODER(VPKSWSS);
-IMPORT_DECODER(VPKSWUS);
-IMPORT_DECODER(VPKUHUM);
-IMPORT_DECODER(VPKUHUS);
-IMPORT_DECODER(VPKUWUM);
-IMPORT_DECODER(VPKUWUS);
-IMPORT_DECODER(VREFP);
-IMPORT_DECODER(VRFIM);
-IMPORT_DECODER(VRFIN);
-IMPORT_DECODER(VRFIP);
-IMPORT_DECODER(VRFIZ);
-IMPORT_DECODER(VRLB);
-IMPORT_DECODER(VRLH);
-IMPORT_DECODER(VRLW);
-IMPORT_DECODER(VRSQRTEFP);
-IMPORT_DECODER(VSEL);
-IMPORT_DECODER(VSL);
-IMPORT_DECODER(VSLB);
-IMPORT_DECODER(VSLDOI);
-IMPORT_DECODER(VSLH);
-IMPORT_DECODER(VSLO);
-IMPORT_DECODER(VSLW);
-IMPORT_DECODER(VSPLTB);
-IMPORT_DECODER(VSPLTH);
-IMPORT_DECODER(VSPLTISB);
-IMPORT_DECODER(VSPLTISH);
-IMPORT_DECODER(VSPLTISW);
-IMPORT_DECODER(VSPLTW);
-IMPORT_DECODER(VSR);
-IMPORT_DECODER(VSRAB);
-IMPORT_DECODER(VSRAH);
-IMPORT_DECODER(VSRAW);
-IMPORT_DECODER(VSRB);
-IMPORT_DECODER(VSRH);
-IMPORT_DECODER(VSRO);
-IMPORT_DECODER(VSRW);
-IMPORT_DECODER(VSUBCUW);
-IMPORT_DECODER(VSUBFP);
-IMPORT_DECODER(VSUBSBS);
-IMPORT_DECODER(VSUBSHS);
-IMPORT_DECODER(VSUBSWS);
-IMPORT_DECODER(VSUBUBM);
-IMPORT_DECODER(VSUBUBS);
-IMPORT_DECODER(VSUBUHM);
-IMPORT_DECODER(VSUBUHS);
-IMPORT_DECODER(VSUBUWM);
-IMPORT_DECODER(VSUBUWS);
-IMPORT_DECODER(VSUMSWS);
-IMPORT_DECODER(VSUM2SWS);
-IMPORT_DECODER(VSUM4SBS);
-IMPORT_DECODER(VSUM4SHS);
-IMPORT_DECODER(VSUM4UBS);
-IMPORT_DECODER(VUPKHPX);
-IMPORT_DECODER(VUPKHSB);
-IMPORT_DECODER(VUPKHSH);
-IMPORT_DECODER(VUPKLPX);
-IMPORT_DECODER(VUPKLSB);
-IMPORT_DECODER(VUPKLSH);
-IMPORT_DECODER(VXOR);
-IMPORT_DECODER(TDI);
-IMPORT_DECODER(TWI);
-IMPORT_DECODER(MULLI);
-IMPORT_DECODER(SUBFIC);
-IMPORT_DECODER(CMPLI);
-IMPORT_DECODER(CMPI);
-IMPORT_DECODER(ADDIC);
-IMPORT_DECODER(ADDI);
-IMPORT_DECODER(ADDIS);
-IMPORT_DECODER(BC);
-IMPORT_DECODER(SC);
-IMPORT_DECODER(B);
-IMPORT_DECODER(MCRF);
-IMPORT_DECODER(BCLR);
-IMPORT_DECODER(RFID);
-IMPORT_DECODER(CRNOR);
-IMPORT_DECODER(RFSCV);
-IMPORT_DECODER(CRANDC);
-IMPORT_DECODER(ISYNC);
-IMPORT_DECODER(CRXOR);
-IMPORT_DECODER(CRNAND);
-IMPORT_DECODER(CRAND);
-IMPORT_DECODER(HRFID);
-IMPORT_DECODER(CREQV);
-IMPORT_DECODER(URFID);
-IMPORT_DECODER(STOP);
-IMPORT_DECODER(CRORC);
-IMPORT_DECODER(CROR);
-IMPORT_DECODER(BCCTR);
-IMPORT_DECODER(RLWIMI);
-IMPORT_DECODER(RLWINM);
-IMPORT_DECODER(RLWNM);
-IMPORT_DECODER(ORI);
-IMPORT_DECODER(ORIS);
-IMPORT_DECODER(XORI);
-IMPORT_DECODER(XORIS);
-IMPORT_DECODER(ANDI);
-IMPORT_DECODER(ANDIS);
-IMPORT_DECODER(RLDICL);
-IMPORT_DECODER(RLDICR);
-IMPORT_DECODER(RLDIC);
-IMPORT_DECODER(RLDIMI);
-IMPORT_DECODER(RLDCL);
-IMPORT_DECODER(RLDCR);
-IMPORT_DECODER(CMP);
-IMPORT_DECODER(TW);
-IMPORT_DECODER(LVSL);
-IMPORT_DECODER(LVEBX);
-IMPORT_DECODER(SUBFC);
-IMPORT_DECODER(MULHDU);
-IMPORT_DECODER(ADDC);
-IMPORT_DECODER(MULHWU);
-IMPORT_DECODER(MFOCRF);
-IMPORT_DECODER(LWARX);
-IMPORT_DECODER(LDX);
-IMPORT_DECODER(LWZX);
-IMPORT_DECODER(SLW);
-IMPORT_DECODER(CNTLZW);
-IMPORT_DECODER(SLD);
-IMPORT_DECODER(AND);
-IMPORT_DECODER(CMPL);
-IMPORT_DECODER(LVSR);
-IMPORT_DECODER(LVEHX);
-IMPORT_DECODER(SUBF);
-IMPORT_DECODER(LDUX);
-IMPORT_DECODER(DCBST);
-IMPORT_DECODER(LWZUX);
-IMPORT_DECODER(CNTLZD);
-IMPORT_DECODER(ANDC);
-IMPORT_DECODER(TD);
-IMPORT_DECODER(LVEWX);
-IMPORT_DECODER(MULHD);
-IMPORT_DECODER(MULHW);
-IMPORT_DECODER(LDARX);
-IMPORT_DECODER(DCBF);
-IMPORT_DECODER(LBZX);
-IMPORT_DECODER(LVX);
-IMPORT_DECODER(NEG);
-IMPORT_DECODER(LBZUX);
-IMPORT_DECODER(NOR);
-IMPORT_DECODER(STVEBX);
-IMPORT_DECODER(SUBFE);
-IMPORT_DECODER(ADDE);
-IMPORT_DECODER(MTOCRF);
-IMPORT_DECODER(STDX);
-IMPORT_DECODER(STWCX);
-IMPORT_DECODER(STWX);
-IMPORT_DECODER(STVEHX);
-IMPORT_DECODER(STDUX);
-IMPORT_DECODER(STWUX);
-IMPORT_DECODER(STVEWX);
-IMPORT_DECODER(SUBFZE);
-IMPORT_DECODER(ADDZE);
-IMPORT_DECODER(STDCX);
-IMPORT_DECODER(STBX);
-IMPORT_DECODER(STVX);
-IMPORT_DECODER(MULLD);
-IMPORT_DECODER(SUBFME);
-IMPORT_DECODER(ADDME);
-IMPORT_DECODER(MULLW);
-IMPORT_DECODER(DCBTST);
-IMPORT_DECODER(STBUX);
-IMPORT_DECODER(ADD);
-IMPORT_DECODER(DCBT);
-IMPORT_DECODER(LHZX);
-IMPORT_DECODER(EQV);
-IMPORT_DECODER(ECIWX);
-IMPORT_DECODER(LHZUX);
-IMPORT_DECODER(XOR);
-IMPORT_DECODER(MFSPR);
-IMPORT_DECODER(LWAX);
-IMPORT_DECODER(DST);
-IMPORT_DECODER(LHAX);
-IMPORT_DECODER(LVXL);
-IMPORT_DECODER(MFTB);
-IMPORT_DECODER(LWAUX);
-IMPORT_DECODER(DSTST);
-IMPORT_DECODER(LHAUX);
-IMPORT_DECODER(STHX);
-IMPORT_DECODER(ORC);
-IMPORT_DECODER(ECOWX);
-IMPORT_DECODER(STHUX);
-IMPORT_DECODER(OR);
-IMPORT_DECODER(DIVDU);
-IMPORT_DECODER(DIVWU);
-IMPORT_DECODER(MTSPR);
-IMPORT_DECODER(DCBI);
-IMPORT_DECODER(NAND);
-IMPORT_DECODER(STVXL);
-IMPORT_DECODER(DIVD);
-IMPORT_DECODER(DIVW);
-IMPORT_DECODER(LVLX);
-IMPORT_DECODER(LDBRX);
-IMPORT_DECODER(LSWX);
-IMPORT_DECODER(LWBRX);
-IMPORT_DECODER(LFSX);
-IMPORT_DECODER(SRW);
-IMPORT_DECODER(SRD);
-IMPORT_DECODER(LVRX);
-IMPORT_DECODER(LSWI);
-IMPORT_DECODER(LFSUX);
-IMPORT_DECODER(SYNC);
-IMPORT_DECODER(LFDX);
-IMPORT_DECODER(LFDUX);
-IMPORT_DECODER(STVLX);
-IMPORT_DECODER(STDBRX);
-IMPORT_DECODER(STSWX);
-IMPORT_DECODER(STWBRX);
-IMPORT_DECODER(STFSX);
-IMPORT_DECODER(STVRX);
-IMPORT_DECODER(STFSUX);
-IMPORT_DECODER(STSWI);
-IMPORT_DECODER(STFDX);
-IMPORT_DECODER(STFDUX);
-IMPORT_DECODER(LVLXL);
-IMPORT_DECODER(LHBRX);
-IMPORT_DECODER(SRAW);
-IMPORT_DECODER(SRAD);
-IMPORT_DECODER(LVRXL);
-IMPORT_DECODER(DSS);
-IMPORT_DECODER(SRAWI);
-IMPORT_DECODER(SRADI);
-IMPORT_DECODER(EIEIO);
-IMPORT_DECODER(STVLXL);
-IMPORT_DECODER(STHBRX);
-IMPORT_DECODER(EXTSH);
-IMPORT_DECODER(STVRXL);
-IMPORT_DECODER(EXTSB);
-IMPORT_DECODER(STFIWX);
-IMPORT_DECODER(EXTSW);
-IMPORT_DECODER(ICBI);
-IMPORT_DECODER(DCBZ);
-IMPORT_DECODER(LWZ);
-IMPORT_DECODER(LWZU);
-IMPORT_DECODER(LBZ);
-IMPORT_DECODER(LBZU);
-IMPORT_DECODER(STW);
-IMPORT_DECODER(STWU);
-IMPORT_DECODER(STB);
-IMPORT_DECODER(STBU);
-IMPORT_DECODER(LHZ);
-IMPORT_DECODER(LHZU);
-IMPORT_DECODER(LHA);
-IMPORT_DECODER(LHAU);
-IMPORT_DECODER(STH);
-IMPORT_DECODER(STHU);
-IMPORT_DECODER(LMW);
-IMPORT_DECODER(STMW);
-IMPORT_DECODER(LFS);
-IMPORT_DECODER(LFSU);
-IMPORT_DECODER(LFD);
-IMPORT_DECODER(LFDU);
-IMPORT_DECODER(STFS);
-IMPORT_DECODER(STFSU);
-IMPORT_DECODER(STFD);
-IMPORT_DECODER(STFDU);
-IMPORT_DECODER(LD);
-IMPORT_DECODER(LDU);
-IMPORT_DECODER(LWA);
-IMPORT_DECODER(STD);
-IMPORT_DECODER(STDU);
-IMPORT_DECODER(FDIVS);
-IMPORT_DECODER(FSUBS);
-IMPORT_DECODER(FADDS);
-IMPORT_DECODER(FSQRTS);
-IMPORT_DECODER(FRES);
-IMPORT_DECODER(FMULS);
-IMPORT_DECODER(FMADDS);
-IMPORT_DECODER(FMSUBS);
-IMPORT_DECODER(FNMSUBS);
-IMPORT_DECODER(FNMADDS);
-IMPORT_DECODER(MTFSB1);
-IMPORT_DECODER(MCRFS);
-IMPORT_DECODER(MTFSB0);
-IMPORT_DECODER(MTFSFI);
-IMPORT_DECODER(MFFS);
-IMPORT_DECODER(MTFSF);
-IMPORT_DECODER(FCMPU);
-IMPORT_DECODER(FRSP);
-IMPORT_DECODER(FCTIW);
-IMPORT_DECODER(FCTIWZ);
-IMPORT_DECODER(FDIV);
-IMPORT_DECODER(FSUB);
-IMPORT_DECODER(FADD);
-IMPORT_DECODER(FSQRT);
-IMPORT_DECODER(FSEL);
-IMPORT_DECODER(FMUL);
-IMPORT_DECODER(FRSQRTE);
-IMPORT_DECODER(FMSUB);
-IMPORT_DECODER(FMADD);
-IMPORT_DECODER(FNMSUB);
-IMPORT_DECODER(FNMADD);
-IMPORT_DECODER(FCMPO);
-IMPORT_DECODER(FNEG);
-IMPORT_DECODER(FMR);
-IMPORT_DECODER(FNABS);
-IMPORT_DECODER(FABS);
-IMPORT_DECODER(FCTID);
-IMPORT_DECODER(FCTIDZ);
-IMPORT_DECODER(FCFID);
-IMPORT_DECODER(UNK);
-IMPORT_DECODER(SUBFCO);
-IMPORT_DECODER(ADDCO);
-IMPORT_DECODER(SUBFO);
-IMPORT_DECODER(NEGO);
-IMPORT_DECODER(SUBFEO);
-IMPORT_DECODER(ADDEO);
-IMPORT_DECODER(SUBFZEO);
-IMPORT_DECODER(ADDZEO);
-IMPORT_DECODER(SUBFMEO);
-IMPORT_DECODER(MULLDO);
-IMPORT_DECODER(ADDMEO);
-IMPORT_DECODER(MULLWO);
-IMPORT_DECODER(ADDO);
-IMPORT_DECODER(DIVDUO);
-IMPORT_DECODER(DIVWUO);
-IMPORT_DECODER(DIVDO);
-IMPORT_DECODER(DIVWO);
-IMPORT_DECODER_ALIAS(SUBFCO_, SUBFCO);
-IMPORT_DECODER_ALIAS(ADDCO_, ADDCO);
-IMPORT_DECODER_ALIAS(SUBFO_, SUBFO);
-IMPORT_DECODER_ALIAS(NEGO_, NEGO);
-IMPORT_DECODER_ALIAS(SUBFEO_, SUBFEO);
-IMPORT_DECODER_ALIAS(ADDEO_, ADDEO);
-IMPORT_DECODER_ALIAS(SUBFZEO_, SUBFZEO);
-IMPORT_DECODER_ALIAS(ADDZEO_, ADDZEO);
-IMPORT_DECODER_ALIAS(SUBFMEO_, SUBFMEO);
-IMPORT_DECODER_ALIAS(MULLDO_, MULLDO);
-IMPORT_DECODER_ALIAS(ADDMEO_, ADDMEO);
-IMPORT_DECODER_ALIAS(MULLWO_, MULLWO);
-IMPORT_DECODER_ALIAS(ADDO_, ADDO);
-IMPORT_DECODER_ALIAS(DIVDUO_, DIVDUO);
-IMPORT_DECODER_ALIAS(DIVWUO_, DIVWUO);
-IMPORT_DECODER_ALIAS(DIVDO_, DIVDO);
-IMPORT_DECODER_ALIAS(DIVWO_, DIVWO);
-IMPORT_DECODER_ALIAS(RLWIMI_, RLWIMI);
-IMPORT_DECODER_ALIAS(RLWINM_, RLWINM);
-IMPORT_DECODER_ALIAS(RLWNM_, RLWNM);
-IMPORT_DECODER_ALIAS(RLDICL_, RLDICL);
-IMPORT_DECODER_ALIAS(RLDICR_, RLDICR);
-IMPORT_DECODER_ALIAS(RLDIC_, RLDIC);
-IMPORT_DECODER_ALIAS(RLDIMI_, RLDIMI);
-IMPORT_DECODER_ALIAS(RLDCL_, RLDCL);
-IMPORT_DECODER_ALIAS(RLDCR_, RLDCR);
-IMPORT_DECODER_ALIAS(SUBFC_, SUBFC);
-IMPORT_DECODER_ALIAS(MULHDU_, MULHDU);
-IMPORT_DECODER_ALIAS(ADDC_, ADDC);
-IMPORT_DECODER_ALIAS(MULHWU_, MULHWU);
-IMPORT_DECODER_ALIAS(SLW_, SLW);
-IMPORT_DECODER_ALIAS(CNTLZW_, CNTLZW);
-IMPORT_DECODER_ALIAS(SLD_, SLD);
-IMPORT_DECODER_ALIAS(AND_, AND);
-IMPORT_DECODER_ALIAS(SUBF_, SUBF);
-IMPORT_DECODER_ALIAS(CNTLZD_, CNTLZD);
-IMPORT_DECODER_ALIAS(ANDC_, ANDC);
-IMPORT_DECODER_ALIAS(MULHD_, MULHD);
-IMPORT_DECODER_ALIAS(MULHW_, MULHW);
-IMPORT_DECODER_ALIAS(NEG_, NEG);
-IMPORT_DECODER_ALIAS(NOR_, NOR);
-IMPORT_DECODER_ALIAS(SUBFE_, SUBFE);
-IMPORT_DECODER_ALIAS(ADDE_, ADDE);
-IMPORT_DECODER_ALIAS(SUBFZE_, SUBFZE);
-IMPORT_DECODER_ALIAS(ADDZE_, ADDZE);
-IMPORT_DECODER_ALIAS(MULLD_, MULLD);
-IMPORT_DECODER_ALIAS(SUBFME_, SUBFME);
-IMPORT_DECODER_ALIAS(ADDME_, ADDME);
-IMPORT_DECODER_ALIAS(MULLW_, MULLW);
-IMPORT_DECODER_ALIAS(ADD_, ADD);
-IMPORT_DECODER_ALIAS(EQV_, EQV);
-IMPORT_DECODER_ALIAS(XOR_, XOR);
-IMPORT_DECODER_ALIAS(ORC_, ORC);
-IMPORT_DECODER_ALIAS(OR_, OR);
-IMPORT_DECODER_ALIAS(DIVDU_, DIVDU);
-IMPORT_DECODER_ALIAS(DIVWU_, DIVWU);
-IMPORT_DECODER_ALIAS(NAND_, NAND);
-IMPORT_DECODER_ALIAS(DIVD_, DIVD);
-IMPORT_DECODER_ALIAS(DIVW_, DIVW);
-IMPORT_DECODER_ALIAS(SRW_, SRW);
-IMPORT_DECODER_ALIAS(SRD_, SRD);
-IMPORT_DECODER_ALIAS(SRAW_, SRAW);
-IMPORT_DECODER_ALIAS(SRAD_, SRAD);
-IMPORT_DECODER_ALIAS(SRAWI_, SRAWI);
-IMPORT_DECODER_ALIAS(SRADI_, SRADI);
-IMPORT_DECODER_ALIAS(EXTSH_, EXTSH);
-IMPORT_DECODER_ALIAS(EXTSB_, EXTSB);
-IMPORT_DECODER_ALIAS(EXTSW_, EXTSW);
-IMPORT_DECODER_ALIAS(FDIVS_, FDIVS);
-IMPORT_DECODER_ALIAS(FSUBS_, FSUBS);
-IMPORT_DECODER_ALIAS(FADDS_, FADDS);
-IMPORT_DECODER_ALIAS(FSQRTS_, FSQRTS);
-IMPORT_DECODER_ALIAS(FRES_, FRES);
-IMPORT_DECODER_ALIAS(FMULS_, FMULS);
-IMPORT_DECODER_ALIAS(FMADDS_, FMADDS);
-IMPORT_DECODER_ALIAS(FMSUBS_, FMSUBS);
-IMPORT_DECODER_ALIAS(FNMSUBS_, FNMSUBS);
-IMPORT_DECODER_ALIAS(FNMADDS_, FNMADDS);
-IMPORT_DECODER_ALIAS(MTFSB1_, MTFSB1);
-IMPORT_DECODER_ALIAS(MTFSB0_, MTFSB0);
-IMPORT_DECODER_ALIAS(MTFSFI_, MTFSFI);
-IMPORT_DECODER_ALIAS(MFFS_, MFFS);
-IMPORT_DECODER_ALIAS(MTFSF_, MTFSF);
-IMPORT_DECODER_ALIAS(FRSP_, FRSP);
-IMPORT_DECODER_ALIAS(FCTIW_, FCTIW);
-IMPORT_DECODER_ALIAS(FCTIWZ_, FCTIWZ);
-IMPORT_DECODER_ALIAS(FDIV_, FDIV);
-IMPORT_DECODER_ALIAS(FSUB_, FSUB);
-IMPORT_DECODER_ALIAS(FADD_, FADD);
-IMPORT_DECODER_ALIAS(FSQRT_, FSQRT);
-IMPORT_DECODER_ALIAS(FSEL_, FSEL);
-IMPORT_DECODER_ALIAS(FMUL_, FMUL);
-IMPORT_DECODER_ALIAS(FRSQRTE_, FRSQRTE);
-IMPORT_DECODER_ALIAS(FMSUB_, FMSUB);
-IMPORT_DECODER_ALIAS(FMADD_, FMADD);
-IMPORT_DECODER_ALIAS(FNMSUB_, FNMSUB);
-IMPORT_DECODER_ALIAS(FNMADD_, FNMADD);
-IMPORT_DECODER_ALIAS(FNEG_, FNEG);
-IMPORT_DECODER_ALIAS(FMR_, FMR);
-IMPORT_DECODER_ALIAS(FNABS_, FNABS);
-IMPORT_DECODER_ALIAS(FABS_, FABS);
-IMPORT_DECODER_ALIAS(FCTID_, FCTID);
-IMPORT_DECODER_ALIAS(FCTIDZ_, FCTIDZ);
-IMPORT_DECODER_ALIAS(FCFID_, FCFID);
-#undef IMPORT_DECODER
-#undef IMPORT_DECODER_ALIAS
-
-PPUInterpreter::PPUInterpreter()
-{
-	for (auto& isel : impl)
-	{
-		isel = [](PPUContext&, rx::cell::ppu::Instruction)
-		{
-			fmt::throw_exception("PPU Invalid Instruction");
-		};
-	}
-#define DEFINE_DECODER(x) \
-	impl[static_cast<int>(rx::cell::ppu::Opcode::x)] = ISEL_PPU_##x##_DEC
-
-	DEFINE_DECODER(MFVSCR);
-	DEFINE_DECODER(MTVSCR);
-	DEFINE_DECODER(VADDCUW);
-	DEFINE_DECODER(VADDFP);
-	DEFINE_DECODER(VADDSBS);
-	DEFINE_DECODER(VADDSHS);
-	DEFINE_DECODER(VADDSWS);
-	DEFINE_DECODER(VADDUBM);
-	DEFINE_DECODER(VADDUBS);
-	DEFINE_DECODER(VADDUHM);
-	DEFINE_DECODER(VADDUHS);
-	DEFINE_DECODER(VADDUWM);
-	DEFINE_DECODER(VADDUWS);
-	DEFINE_DECODER(VAND);
-	DEFINE_DECODER(VANDC);
-	DEFINE_DECODER(VAVGSB);
-	DEFINE_DECODER(VAVGSH);
-	DEFINE_DECODER(VAVGSW);
-	DEFINE_DECODER(VAVGUB);
-	DEFINE_DECODER(VAVGUH);
-	DEFINE_DECODER(VAVGUW);
-	DEFINE_DECODER(VCFSX);
-	DEFINE_DECODER(VCFUX);
-	DEFINE_DECODER(VCMPBFP);
-	DEFINE_DECODER(VCMPBFP_);
-	DEFINE_DECODER(VCMPEQFP);
-	DEFINE_DECODER(VCMPEQFP_);
-	DEFINE_DECODER(VCMPEQUB);
-	DEFINE_DECODER(VCMPEQUB_);
-	DEFINE_DECODER(VCMPEQUH);
-	DEFINE_DECODER(VCMPEQUH_);
-	DEFINE_DECODER(VCMPEQUW);
-	DEFINE_DECODER(VCMPEQUW_);
-	DEFINE_DECODER(VCMPGEFP);
-	DEFINE_DECODER(VCMPGEFP_);
-	DEFINE_DECODER(VCMPGTFP);
-	DEFINE_DECODER(VCMPGTFP_);
-	DEFINE_DECODER(VCMPGTSB);
-	DEFINE_DECODER(VCMPGTSB_);
-	DEFINE_DECODER(VCMPGTSH);
-	DEFINE_DECODER(VCMPGTSH_);
-	DEFINE_DECODER(VCMPGTSW);
-	DEFINE_DECODER(VCMPGTSW_);
-	DEFINE_DECODER(VCMPGTUB);
-	DEFINE_DECODER(VCMPGTUB_);
-	DEFINE_DECODER(VCMPGTUH);
-	DEFINE_DECODER(VCMPGTUH_);
-	DEFINE_DECODER(VCMPGTUW);
-	DEFINE_DECODER(VCMPGTUW_);
-	DEFINE_DECODER(VCTSXS);
-	DEFINE_DECODER(VCTUXS);
-	DEFINE_DECODER(VEXPTEFP);
-	DEFINE_DECODER(VLOGEFP);
-	DEFINE_DECODER(VMADDFP);
-	DEFINE_DECODER(VMAXFP);
-	DEFINE_DECODER(VMAXSB);
-	DEFINE_DECODER(VMAXSH);
-	DEFINE_DECODER(VMAXSW);
-	DEFINE_DECODER(VMAXUB);
-	DEFINE_DECODER(VMAXUH);
-	DEFINE_DECODER(VMAXUW);
-	DEFINE_DECODER(VMHADDSHS);
-	DEFINE_DECODER(VMHRADDSHS);
-	DEFINE_DECODER(VMINFP);
-	DEFINE_DECODER(VMINSB);
-	DEFINE_DECODER(VMINSH);
-	DEFINE_DECODER(VMINSW);
-	DEFINE_DECODER(VMINUB);
-	DEFINE_DECODER(VMINUH);
-	DEFINE_DECODER(VMINUW);
-	DEFINE_DECODER(VMLADDUHM);
-	DEFINE_DECODER(VMRGHB);
-	DEFINE_DECODER(VMRGHH);
-	DEFINE_DECODER(VMRGHW);
-	DEFINE_DECODER(VMRGLB);
-	DEFINE_DECODER(VMRGLH);
-	DEFINE_DECODER(VMRGLW);
-	DEFINE_DECODER(VMSUMMBM);
-	DEFINE_DECODER(VMSUMSHM);
-	DEFINE_DECODER(VMSUMSHS);
-	DEFINE_DECODER(VMSUMUBM);
-	DEFINE_DECODER(VMSUMUHM);
-	DEFINE_DECODER(VMSUMUHS);
-	DEFINE_DECODER(VMULESB);
-	DEFINE_DECODER(VMULESH);
-	DEFINE_DECODER(VMULEUB);
-	DEFINE_DECODER(VMULEUH);
-	DEFINE_DECODER(VMULOSB);
-	DEFINE_DECODER(VMULOSH);
-	DEFINE_DECODER(VMULOUB);
-	DEFINE_DECODER(VMULOUH);
-	DEFINE_DECODER(VNMSUBFP);
-	DEFINE_DECODER(VNOR);
-	DEFINE_DECODER(VOR);
-	DEFINE_DECODER(VPERM);
-	DEFINE_DECODER(VPKPX);
-	DEFINE_DECODER(VPKSHSS);
-	DEFINE_DECODER(VPKSHUS);
-	DEFINE_DECODER(VPKSWSS);
-	DEFINE_DECODER(VPKSWUS);
-	DEFINE_DECODER(VPKUHUM);
-	DEFINE_DECODER(VPKUHUS);
-	DEFINE_DECODER(VPKUWUM);
-	DEFINE_DECODER(VPKUWUS);
-	DEFINE_DECODER(VREFP);
-	DEFINE_DECODER(VRFIM);
-	DEFINE_DECODER(VRFIN);
-	DEFINE_DECODER(VRFIP);
-	DEFINE_DECODER(VRFIZ);
-	DEFINE_DECODER(VRLB);
-	DEFINE_DECODER(VRLH);
-	DEFINE_DECODER(VRLW);
-	DEFINE_DECODER(VRSQRTEFP);
-	DEFINE_DECODER(VSEL);
-	DEFINE_DECODER(VSL);
-	DEFINE_DECODER(VSLB);
-	DEFINE_DECODER(VSLDOI);
-	DEFINE_DECODER(VSLH);
-	DEFINE_DECODER(VSLO);
-	DEFINE_DECODER(VSLW);
-	DEFINE_DECODER(VSPLTB);
-	DEFINE_DECODER(VSPLTH);
-	DEFINE_DECODER(VSPLTISB);
-	DEFINE_DECODER(VSPLTISH);
-	DEFINE_DECODER(VSPLTISW);
-	DEFINE_DECODER(VSPLTW);
-	DEFINE_DECODER(VSR);
-	DEFINE_DECODER(VSRAB);
-	DEFINE_DECODER(VSRAH);
-	DEFINE_DECODER(VSRAW);
-	DEFINE_DECODER(VSRB);
-	DEFINE_DECODER(VSRH);
-	DEFINE_DECODER(VSRO);
-	DEFINE_DECODER(VSRW);
-	DEFINE_DECODER(VSUBCUW);
-	DEFINE_DECODER(VSUBFP);
-	DEFINE_DECODER(VSUBSBS);
-	DEFINE_DECODER(VSUBSHS);
-	DEFINE_DECODER(VSUBSWS);
-	DEFINE_DECODER(VSUBUBM);
-	DEFINE_DECODER(VSUBUBS);
-	DEFINE_DECODER(VSUBUHM);
-	DEFINE_DECODER(VSUBUHS);
-	DEFINE_DECODER(VSUBUWM);
-	DEFINE_DECODER(VSUBUWS);
-	DEFINE_DECODER(VSUMSWS);
-	DEFINE_DECODER(VSUM2SWS);
-	DEFINE_DECODER(VSUM4SBS);
-	DEFINE_DECODER(VSUM4SHS);
-	DEFINE_DECODER(VSUM4UBS);
-	DEFINE_DECODER(VUPKHPX);
-	DEFINE_DECODER(VUPKHSB);
-	DEFINE_DECODER(VUPKHSH);
-	DEFINE_DECODER(VUPKLPX);
-	DEFINE_DECODER(VUPKLSB);
-	DEFINE_DECODER(VUPKLSH);
-	DEFINE_DECODER(VXOR);
-	DEFINE_DECODER(TDI);
-	DEFINE_DECODER(TWI);
-	DEFINE_DECODER(MULLI);
-	DEFINE_DECODER(SUBFIC);
-	DEFINE_DECODER(CMPLI);
-	DEFINE_DECODER(CMPI);
-	DEFINE_DECODER(ADDIC);
-	DEFINE_DECODER(ADDI);
-	DEFINE_DECODER(ADDIS);
-	DEFINE_DECODER(BC);
-	DEFINE_DECODER(SC);
-	DEFINE_DECODER(B);
-	DEFINE_DECODER(MCRF);
-	DEFINE_DECODER(BCLR);
-	DEFINE_DECODER(RFID);
-	DEFINE_DECODER(CRNOR);
-	DEFINE_DECODER(RFSCV);
-	DEFINE_DECODER(CRANDC);
-	DEFINE_DECODER(ISYNC);
-	DEFINE_DECODER(CRXOR);
-	DEFINE_DECODER(CRNAND);
-	DEFINE_DECODER(CRAND);
-	DEFINE_DECODER(HRFID);
-	DEFINE_DECODER(CREQV);
-	DEFINE_DECODER(URFID);
-	DEFINE_DECODER(STOP);
-	DEFINE_DECODER(CRORC);
-	DEFINE_DECODER(CROR);
-	DEFINE_DECODER(BCCTR);
-	DEFINE_DECODER(RLWIMI);
-	DEFINE_DECODER(RLWINM);
-	DEFINE_DECODER(RLWNM);
-	DEFINE_DECODER(ORI);
-	DEFINE_DECODER(ORIS);
-	DEFINE_DECODER(XORI);
-	DEFINE_DECODER(XORIS);
-	DEFINE_DECODER(ANDI);
-	DEFINE_DECODER(ANDIS);
-	DEFINE_DECODER(RLDICL);
-	DEFINE_DECODER(RLDICR);
-	DEFINE_DECODER(RLDIC);
-	DEFINE_DECODER(RLDIMI);
-	DEFINE_DECODER(RLDCL);
-	DEFINE_DECODER(RLDCR);
-	DEFINE_DECODER(CMP);
-	DEFINE_DECODER(TW);
-	DEFINE_DECODER(LVSL);
-	DEFINE_DECODER(LVEBX);
-	DEFINE_DECODER(SUBFC);
-	DEFINE_DECODER(MULHDU);
-	DEFINE_DECODER(ADDC);
-	DEFINE_DECODER(MULHWU);
-	DEFINE_DECODER(MFOCRF);
-	DEFINE_DECODER(LWARX);
-	DEFINE_DECODER(LDX);
-	DEFINE_DECODER(LWZX);
-	DEFINE_DECODER(SLW);
-	DEFINE_DECODER(CNTLZW);
-	DEFINE_DECODER(SLD);
-	DEFINE_DECODER(AND);
-	DEFINE_DECODER(CMPL);
-	DEFINE_DECODER(LVSR);
-	DEFINE_DECODER(LVEHX);
-	DEFINE_DECODER(SUBF);
-	DEFINE_DECODER(LDUX);
-	DEFINE_DECODER(DCBST);
-	DEFINE_DECODER(LWZUX);
-	DEFINE_DECODER(CNTLZD);
-	DEFINE_DECODER(ANDC);
-	DEFINE_DECODER(TD);
-	DEFINE_DECODER(LVEWX);
-	DEFINE_DECODER(MULHD);
-	DEFINE_DECODER(MULHW);
-	DEFINE_DECODER(LDARX);
-	DEFINE_DECODER(DCBF);
-	DEFINE_DECODER(LBZX);
-	DEFINE_DECODER(LVX);
-	DEFINE_DECODER(NEG);
-	DEFINE_DECODER(LBZUX);
-	DEFINE_DECODER(NOR);
-	DEFINE_DECODER(STVEBX);
-	DEFINE_DECODER(SUBFE);
-	DEFINE_DECODER(ADDE);
-	DEFINE_DECODER(MTOCRF);
-	DEFINE_DECODER(STDX);
-	DEFINE_DECODER(STWCX);
-	DEFINE_DECODER(STWX);
-	DEFINE_DECODER(STVEHX);
-	DEFINE_DECODER(STDUX);
-	DEFINE_DECODER(STWUX);
-	DEFINE_DECODER(STVEWX);
-	DEFINE_DECODER(SUBFZE);
-	DEFINE_DECODER(ADDZE);
-	DEFINE_DECODER(STDCX);
-	DEFINE_DECODER(STBX);
-	DEFINE_DECODER(STVX);
-	DEFINE_DECODER(MULLD);
-	DEFINE_DECODER(SUBFME);
-	DEFINE_DECODER(ADDME);
-	DEFINE_DECODER(MULLW);
-	DEFINE_DECODER(DCBTST);
-	DEFINE_DECODER(STBUX);
-	DEFINE_DECODER(ADD);
-	DEFINE_DECODER(DCBT);
-	DEFINE_DECODER(LHZX);
-	DEFINE_DECODER(EQV);
-	DEFINE_DECODER(ECIWX);
-	DEFINE_DECODER(LHZUX);
-	DEFINE_DECODER(XOR);
-	DEFINE_DECODER(MFSPR);
-	DEFINE_DECODER(LWAX);
-	DEFINE_DECODER(DST);
-	DEFINE_DECODER(LHAX);
-	DEFINE_DECODER(LVXL);
-	DEFINE_DECODER(MFTB);
-	DEFINE_DECODER(LWAUX);
-	DEFINE_DECODER(DSTST);
-	DEFINE_DECODER(LHAUX);
-	DEFINE_DECODER(STHX);
-	DEFINE_DECODER(ORC);
-	DEFINE_DECODER(ECOWX);
-	DEFINE_DECODER(STHUX);
-	DEFINE_DECODER(OR);
-	DEFINE_DECODER(DIVDU);
-	DEFINE_DECODER(DIVWU);
-	DEFINE_DECODER(MTSPR);
-	DEFINE_DECODER(DCBI);
-	DEFINE_DECODER(NAND);
-	DEFINE_DECODER(STVXL);
-	DEFINE_DECODER(DIVD);
-	DEFINE_DECODER(DIVW);
-	DEFINE_DECODER(LVLX);
-	DEFINE_DECODER(LDBRX);
-	DEFINE_DECODER(LSWX);
-	DEFINE_DECODER(LWBRX);
-	DEFINE_DECODER(LFSX);
-	DEFINE_DECODER(SRW);
-	DEFINE_DECODER(SRD);
-	DEFINE_DECODER(LVRX);
-	DEFINE_DECODER(LSWI);
-	DEFINE_DECODER(LFSUX);
-	DEFINE_DECODER(SYNC);
-	DEFINE_DECODER(LFDX);
-	DEFINE_DECODER(LFDUX);
-	DEFINE_DECODER(STVLX);
-	DEFINE_DECODER(STDBRX);
-	DEFINE_DECODER(STSWX);
-	DEFINE_DECODER(STWBRX);
-	DEFINE_DECODER(STFSX);
-	DEFINE_DECODER(STVRX);
-	DEFINE_DECODER(STFSUX);
-	DEFINE_DECODER(STSWI);
-	DEFINE_DECODER(STFDX);
-	DEFINE_DECODER(STFDUX);
-	DEFINE_DECODER(LVLXL);
-	DEFINE_DECODER(LHBRX);
-	DEFINE_DECODER(SRAW);
-	DEFINE_DECODER(SRAD);
-	DEFINE_DECODER(LVRXL);
-	DEFINE_DECODER(DSS);
-	DEFINE_DECODER(SRAWI);
-	DEFINE_DECODER(SRADI);
-	DEFINE_DECODER(EIEIO);
-	DEFINE_DECODER(STVLXL);
-	DEFINE_DECODER(STHBRX);
-	DEFINE_DECODER(EXTSH);
-	DEFINE_DECODER(STVRXL);
-	DEFINE_DECODER(EXTSB);
-	DEFINE_DECODER(STFIWX);
-	DEFINE_DECODER(EXTSW);
-	DEFINE_DECODER(ICBI);
-	DEFINE_DECODER(DCBZ);
-	DEFINE_DECODER(LWZ);
-	DEFINE_DECODER(LWZU);
-	DEFINE_DECODER(LBZ);
-	DEFINE_DECODER(LBZU);
-	DEFINE_DECODER(STW);
-	DEFINE_DECODER(STWU);
-	DEFINE_DECODER(STB);
-	DEFINE_DECODER(STBU);
-	DEFINE_DECODER(LHZ);
-	DEFINE_DECODER(LHZU);
-	DEFINE_DECODER(LHA);
-	DEFINE_DECODER(LHAU);
-	DEFINE_DECODER(STH);
-	DEFINE_DECODER(STHU);
-	DEFINE_DECODER(LMW);
-	DEFINE_DECODER(STMW);
-	DEFINE_DECODER(LFS);
-	DEFINE_DECODER(LFSU);
-	DEFINE_DECODER(LFD);
-	DEFINE_DECODER(LFDU);
-	DEFINE_DECODER(STFS);
-	DEFINE_DECODER(STFSU);
-	DEFINE_DECODER(STFD);
-	DEFINE_DECODER(STFDU);
-	DEFINE_DECODER(LD);
-	DEFINE_DECODER(LDU);
-	DEFINE_DECODER(LWA);
-	DEFINE_DECODER(STD);
-	DEFINE_DECODER(STDU);
-	DEFINE_DECODER(FDIVS);
-	DEFINE_DECODER(FSUBS);
-	DEFINE_DECODER(FADDS);
-	DEFINE_DECODER(FSQRTS);
-	DEFINE_DECODER(FRES);
-	DEFINE_DECODER(FMULS);
-	DEFINE_DECODER(FMADDS);
-	DEFINE_DECODER(FMSUBS);
-	DEFINE_DECODER(FNMSUBS);
-	DEFINE_DECODER(FNMADDS);
-	DEFINE_DECODER(MTFSB1);
-	DEFINE_DECODER(MCRFS);
-	DEFINE_DECODER(MTFSB0);
-	DEFINE_DECODER(MTFSFI);
-	DEFINE_DECODER(MFFS);
-	DEFINE_DECODER(MTFSF);
-	DEFINE_DECODER(FCMPU);
-	DEFINE_DECODER(FRSP);
-	DEFINE_DECODER(FCTIW);
-	DEFINE_DECODER(FCTIWZ);
-	DEFINE_DECODER(FDIV);
-	DEFINE_DECODER(FSUB);
-	DEFINE_DECODER(FADD);
-	DEFINE_DECODER(FSQRT);
-	DEFINE_DECODER(FSEL);
-	DEFINE_DECODER(FMUL);
-	DEFINE_DECODER(FRSQRTE);
-	DEFINE_DECODER(FMSUB);
-	DEFINE_DECODER(FMADD);
-	DEFINE_DECODER(FNMSUB);
-	DEFINE_DECODER(FNMADD);
-	DEFINE_DECODER(FCMPO);
-	DEFINE_DECODER(FNEG);
-	DEFINE_DECODER(FMR);
-	DEFINE_DECODER(FNABS);
-	DEFINE_DECODER(FABS);
-	DEFINE_DECODER(FCTID);
-	DEFINE_DECODER(FCTIDZ);
-	DEFINE_DECODER(FCFID);
-	DEFINE_DECODER(UNK);
-	DEFINE_DECODER(SUBFCO);
-	DEFINE_DECODER(ADDCO);
-	DEFINE_DECODER(SUBFO);
-	DEFINE_DECODER(NEGO);
-	DEFINE_DECODER(SUBFEO);
-	DEFINE_DECODER(ADDEO);
-	DEFINE_DECODER(SUBFZEO);
-	DEFINE_DECODER(ADDZEO);
-	DEFINE_DECODER(SUBFMEO);
-	DEFINE_DECODER(MULLDO);
-	DEFINE_DECODER(ADDMEO);
-	DEFINE_DECODER(MULLWO);
-	DEFINE_DECODER(ADDO);
-	DEFINE_DECODER(DIVDUO);
-	DEFINE_DECODER(DIVWUO);
-	DEFINE_DECODER(DIVDO);
-	DEFINE_DECODER(DIVWO);
-	DEFINE_DECODER(SUBFCO_);
-	DEFINE_DECODER(ADDCO_);
-	DEFINE_DECODER(SUBFO_);
-	DEFINE_DECODER(NEGO_);
-	DEFINE_DECODER(SUBFEO_);
-	DEFINE_DECODER(ADDEO_);
-	DEFINE_DECODER(SUBFZEO_);
-	DEFINE_DECODER(ADDZEO_);
-	DEFINE_DECODER(SUBFMEO_);
-	DEFINE_DECODER(MULLDO_);
-	DEFINE_DECODER(ADDMEO_);
-	DEFINE_DECODER(MULLWO_);
-	DEFINE_DECODER(ADDO_);
-	DEFINE_DECODER(DIVDUO_);
-	DEFINE_DECODER(DIVWUO_);
-	DEFINE_DECODER(DIVDO_);
-	DEFINE_DECODER(DIVWO_);
-	DEFINE_DECODER(RLWIMI_);
-	DEFINE_DECODER(RLWINM_);
-	DEFINE_DECODER(RLWNM_);
-	DEFINE_DECODER(RLDICL_);
-	DEFINE_DECODER(RLDICR_);
-	DEFINE_DECODER(RLDIC_);
-	DEFINE_DECODER(RLDIMI_);
-	DEFINE_DECODER(RLDCL_);
-	DEFINE_DECODER(RLDCR_);
-	DEFINE_DECODER(SUBFC_);
-	DEFINE_DECODER(MULHDU_);
-	DEFINE_DECODER(ADDC_);
-	DEFINE_DECODER(MULHWU_);
-	DEFINE_DECODER(SLW_);
-	DEFINE_DECODER(CNTLZW_);
-	DEFINE_DECODER(SLD_);
-	DEFINE_DECODER(AND_);
-	DEFINE_DECODER(SUBF_);
-	DEFINE_DECODER(CNTLZD_);
-	DEFINE_DECODER(ANDC_);
-	DEFINE_DECODER(MULHD_);
-	DEFINE_DECODER(MULHW_);
-	DEFINE_DECODER(NEG_);
-	DEFINE_DECODER(NOR_);
-	DEFINE_DECODER(SUBFE_);
-	DEFINE_DECODER(ADDE_);
-	DEFINE_DECODER(SUBFZE_);
-	DEFINE_DECODER(ADDZE_);
-	DEFINE_DECODER(MULLD_);
-	DEFINE_DECODER(SUBFME_);
-	DEFINE_DECODER(ADDME_);
-	DEFINE_DECODER(MULLW_);
-	DEFINE_DECODER(ADD_);
-	DEFINE_DECODER(EQV_);
-	DEFINE_DECODER(XOR_);
-	DEFINE_DECODER(ORC_);
-	DEFINE_DECODER(OR_);
-	DEFINE_DECODER(DIVDU_);
-	DEFINE_DECODER(DIVWU_);
-	DEFINE_DECODER(NAND_);
-	DEFINE_DECODER(DIVD_);
-	DEFINE_DECODER(DIVW_);
-	DEFINE_DECODER(SRW_);
-	DEFINE_DECODER(SRD_);
-	DEFINE_DECODER(SRAW_);
-	DEFINE_DECODER(SRAD_);
-	DEFINE_DECODER(SRAWI_);
-	DEFINE_DECODER(SRADI_);
-	DEFINE_DECODER(EXTSH_);
-	DEFINE_DECODER(EXTSB_);
-	DEFINE_DECODER(EXTSW_);
-	DEFINE_DECODER(FDIVS_);
-	DEFINE_DECODER(FSUBS_);
-	DEFINE_DECODER(FADDS_);
-	DEFINE_DECODER(FSQRTS_);
-	DEFINE_DECODER(FRES_);
-	DEFINE_DECODER(FMULS_);
-	DEFINE_DECODER(FMADDS_);
-	DEFINE_DECODER(FMSUBS_);
-	DEFINE_DECODER(FNMSUBS_);
-	DEFINE_DECODER(FNMADDS_);
-	DEFINE_DECODER(MTFSB1_);
-	DEFINE_DECODER(MTFSB0_);
-	DEFINE_DECODER(MTFSFI_);
-	DEFINE_DECODER(MFFS_);
-	DEFINE_DECODER(MTFSF_);
-	DEFINE_DECODER(FRSP_);
-	DEFINE_DECODER(FCTIW_);
-	DEFINE_DECODER(FCTIWZ_);
-	DEFINE_DECODER(FDIV_);
-	DEFINE_DECODER(FSUB_);
-	DEFINE_DECODER(FADD_);
-	DEFINE_DECODER(FSQRT_);
-	DEFINE_DECODER(FSEL_);
-	DEFINE_DECODER(FMUL_);
-	DEFINE_DECODER(FRSQRTE_);
-	DEFINE_DECODER(FMSUB_);
-	DEFINE_DECODER(FMADD_);
-	DEFINE_DECODER(FNMSUB_);
-	DEFINE_DECODER(FNMADD_);
-	DEFINE_DECODER(FNEG_);
-	DEFINE_DECODER(FMR_);
-	DEFINE_DECODER(FNABS_);
-	DEFINE_DECODER(FABS_);
-	DEFINE_DECODER(FCTID_);
-	DEFINE_DECODER(FCTIDZ_);
-	DEFINE_DECODER(FCFID_);
-#undef DEFINE_DECODER
-}
-
-static ppu_intrp_func ppu_ret = {[](ppu_thread& ppu, ppu_opcode_t, be_t<u32>* this_op, ppu_intrp_func*)
-	{
-		// Fix PC and return (step execution)
-		ppu.cia = vm::get_addr(this_op);
-		return;
-	}};
-
-void PPUInterpreter::interpret(PPUContext& context, std::uint32_t inst)
-{
-	auto op = rx::cell::ppu::getOpcode(inst);
-	auto instructionAddress = context.cia;
-
-	auto this_op = reinterpret_cast<be_t<u32>*>(vm::g_base_addr + instructionAddress);
-
-	const auto fn = *reinterpret_cast<ppu_intrp_func_t*>(vm::g_exec_addr + u64{instructionAddress} * 2);
-
-	if (fn)
-	{
-		fn(static_cast<ppu_thread&>(context), std::bit_cast<ppu_opcode_t>(inst), this_op, &ppu_ret);
-		return;
-	}
-
-	// if (op == rx::cell::ppu::Opcode::Invalid)
-	{
-		if (g_fxo->get<ppu_function_manager>().is_func(context.cia))
-		{
-			ppu_intrp_func_t hle_function = nullptr;
-			auto hle_addr = g_fxo->get<ppu_function_manager>().addr;
-			// HLE function index
-			const u32 index = (context.cia - hle_addr) / 8;
-
-			if (context.cia % 8 == 4 && index < ppu_function_manager::get().size())
-			{
-				// HLE function placement
-				hle_function = ppu_function_manager::get()[index];
-			}
-
-			if (hle_function)
-			{
-				hle_function(static_cast<ppu_thread&>(context), std::bit_cast<ppu_opcode_t>(inst), this_op, nullptr);
-				return;
-			}
-		}
-	}
-
-	// std::fprintf(stderr, "%08x: %s\n", instructionAddress, std::format("{}", op).c_str());
-	impl[static_cast<int>(op)](context, std::bit_cast<rx::cell::ppu::Instruction>(inst));
-
-	if (context.cia == instructionAddress &&
-		op != rx::cell::ppu::Opcode::B &&
-		op != rx::cell::ppu::Opcode::BC &&
-		op != rx::cell::ppu::Opcode::BCLR &&
-		op != rx::cell::ppu::Opcode::BCCTR)
-	{
-		context.cia += sizeof(std::uint32_t);
-	}
-}
-
-extern "C"
-{
-	[[noreturn]] void rpcsx_trap()
-	{
-		fmt::throw_exception("PPU Trap");
-	}
-	[[noreturn]] void rpcsx_invalid_instruction()
-	{
-		fmt::throw_exception("PPU Invalid Instruction");
-	}
-	[[noreturn]] void rpcsx_unimplemented_instruction()
-	{
-		fmt::throw_exception("PPU Unimplemented Instruction");
-	}
-
-	void rpcsx_vm_read(std::uint64_t vaddr, void* dest, std::size_t size)
-	{
-		std::memcpy(dest, vm::g_base_addr + vaddr, size);
-	}
-	void rpcsx_vm_write(std::uint64_t vaddr, const void* src, std::size_t size)
-	{
-		std::memcpy(vm::g_base_addr + vaddr, src, size);
-	}
-
-	std::uint64_t rpcsx_get_tb()
-	{
-		return get_timebased_time();
-	}
-}
-
-void ppu_execute_syscall(PPUContext& context, u64 code)
-{
-	return ppu_execute_syscall(static_cast<ppu_thread&>(context), code);
-}
-u32 ppu_lwarx(PPUContext& context, u32 addr)
-{
-	return ppu_lwarx(static_cast<ppu_thread&>(context), addr);
-}
-u64 ppu_ldarx(PPUContext& context, u32 addr)
-{
-	return ppu_ldarx(static_cast<ppu_thread&>(context), addr);
-}
-bool ppu_stwcx(PPUContext& context, u32 addr, u32 reg_value)
-{
-	return ppu_stwcx(static_cast<ppu_thread&>(context), addr, reg_value);
-}
-bool ppu_stdcx(PPUContext& context, u32 addr, u64 reg_value)
-{
-	return ppu_stdcx(static_cast<ppu_thread&>(context), addr, reg_value);
-}
-void ppu_trap(PPUContext& context, u64 addr)
-{
-	return ppu_trap(static_cast<ppu_thread&>(context), addr);
 }

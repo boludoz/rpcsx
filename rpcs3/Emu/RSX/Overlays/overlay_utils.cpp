@@ -50,17 +50,17 @@ static auto s_ascii_lowering_map = []()
 	_map[0x3019] = u8(']');
 	_map[0x301A] = u8('[');
 	_map[0x301B] = u8(']');
-	_map[0x301C] = u8('~'); // wave dash (inverted tilde)
-	_map[0x301D] = u8('"'); // reverse double prime quotation
-	_map[0x301E] = u8('"'); // double prime quotation
-	_map[0x301F] = u8('"'); // low double prime quotation
-	_map[0x3031] = u8('<'); // vertical kana repeat mark
+	_map[0x301C] = u8('~');  // wave dash (inverted tilde)
+	_map[0x301D] = u8('"');  // reverse double prime quotation
+	_map[0x301E] = u8('"');  // double prime quotation
+	_map[0x301F] = u8('"');  // low double prime quotation
+	_map[0x3031] = u8('<');  // vertical kana repeat mark
 
 	return _map;
 }();
 
-template <typename F>
-void process_multibyte(const std::string& s, F&& func)
+template<typename F>
+void process_multibyte(std::string_view s, F&& func)
 {
 	const usz end = s.length();
 	for (usz index = 0; index < end; ++index)
@@ -78,8 +78,7 @@ void process_multibyte(const std::string& s, F&& func)
 			continue;
 		}
 
-		const u32 extra_bytes = (code <= 0xDF) ? 1u : (code <= 0xEF) ? 2u :
-		                                                               3u;
+		const u32 extra_bytes = (code <= 0xDF) ? 1u : (code <= 0xEF) ? 2u : 3u;
 		if ((index + extra_bytes) > end)
 		{
 			// Malformed string, abort
@@ -111,32 +110,32 @@ void process_multibyte(const std::string& s, F&& func)
 	}
 }
 
-std::string utf8_to_ascii8(const std::string& utf8_string)
+std::string utf8_to_ascii8(std::string_view utf8_string)
 {
 	std::string out;
 	out.reserve(utf8_string.length());
 
 	process_multibyte(utf8_string, [&out](u32 code)
+	{
+		if (code <= 0x7F)
 		{
-			if (code <= 0x7F)
-			{
-				out.push_back(static_cast<u8>(code));
-			}
-			else if (auto replace = s_ascii_lowering_map.find(code);
-				replace == s_ascii_lowering_map.end())
-			{
-				out.push_back('#');
-			}
-			else
-			{
-				out.push_back(replace->second);
-			}
-		});
+			out.push_back(static_cast<u8>(code));
+		}
+		else if (auto replace = s_ascii_lowering_map.find(code);
+			replace == s_ascii_lowering_map.end())
+		{
+			out.push_back('#');
+		}
+		else
+		{
+			out.push_back(replace->second);
+		}
+	});
 
 	return out;
 }
 
-std::string utf16_to_ascii8(const std::u16string& utf16_string)
+std::string utf16_to_ascii8(std::u16string_view utf16_string)
 {
 	// Strip extended codes, map to '#' instead (placeholder)
 	std::string out;
@@ -153,7 +152,7 @@ std::string utf16_to_ascii8(const std::u16string& utf16_string)
 	return out;
 }
 
-std::u16string ascii8_to_utf16(const std::string& ascii_string)
+std::u16string ascii8_to_utf16(std::string_view ascii_string)
 {
 	std::u16string out;
 	out.reserve(ascii_string.length());
@@ -169,20 +168,20 @@ std::u16string ascii8_to_utf16(const std::string& ascii_string)
 	return out;
 }
 
-std::u32string utf8_to_u32string(const std::string& utf8_string)
+std::u32string utf8_to_u32string(std::string_view utf8_string)
 {
 	std::u32string result;
 	result.reserve(utf8_string.size());
 
 	process_multibyte(utf8_string, [&result](u32 code)
-		{
-			result.push_back(static_cast<char32_t>(code));
-		});
+	{
+		result.push_back(static_cast<char32_t>(code));
+	});
 
 	return result;
 }
 
-std::u16string u32string_to_utf16(const std::u32string& utf32_string)
+std::u16string u32string_to_utf16(std::u32string_view utf32_string)
 {
 	std::u16string result;
 	result.reserve(utf32_string.size());
@@ -195,14 +194,14 @@ std::u16string u32string_to_utf16(const std::u32string& utf32_string)
 	return result;
 }
 
-std::u32string utf16_to_u32string(const std::u16string& utf16_string)
+std::u32string utf16_to_u32string(std::u16string_view utf16_string)
 {
 	std::u32string result;
 	result.reserve(utf16_string.size());
 
 	for (const auto& code : utf16_string)
 	{
-		result.push_back(code);
+		result.push_back(static_cast<char32_t>(code));
 	}
 
 	return result;

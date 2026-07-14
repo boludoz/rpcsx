@@ -7,11 +7,12 @@
 namespace vk
 {
 	VkComponentMapping default_component_map =
-		{
-			VK_COMPONENT_SWIZZLE_R,
-			VK_COMPONENT_SWIZZLE_G,
-			VK_COMPONENT_SWIZZLE_B,
-			VK_COMPONENT_SWIZZLE_A};
+	{
+		VK_COMPONENT_SWIZZLE_R,
+		VK_COMPONENT_SWIZZLE_G,
+		VK_COMPONENT_SWIZZLE_B,
+		VK_COMPONENT_SWIZZLE_A
+	};
 
 	VkImageAspectFlags get_aspect_flags(VkFormat format)
 	{
@@ -31,7 +32,7 @@ namespace vk
 	VkComponentMapping apply_swizzle_remap(const std::array<VkComponentSwizzle, 4>& base_remap, const rsx::texture_channel_remap_t& remap_vector)
 	{
 		const auto final_mapping = remap_vector.remap(base_remap, VK_COMPONENT_SWIZZLE_ZERO, VK_COMPONENT_SWIZZLE_ONE);
-		return {final_mapping[1], final_mapping[2], final_mapping[3], final_mapping[0]};
+		return { final_mapping[1], final_mapping[2], final_mapping[3], final_mapping[0] };
 	}
 
 	void change_image_layout(const vk::command_buffer& cmd, VkImage image, VkImageLayout current_layout, VkImageLayout new_layout, const VkImageSubresourceRange& range,
@@ -42,7 +43,7 @@ namespace vk
 			vk::end_renderpass(cmd);
 		}
 
-		// Prepare an image to match the new layout..
+		//Prepare an image to match the new layout..
 		VkImageMemoryBarrier barrier = {};
 		barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 		barrier.newLayout = new_layout;
@@ -57,24 +58,29 @@ namespace vk
 		VkPipelineStageFlags src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 		VkPipelineStageFlags dst_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 
+		const bool is_color_surface = !!(range.aspectMask & VK_IMAGE_ASPECT_COLOR_BIT);
+
 		switch (+new_layout)
 		{
 		case VK_IMAGE_LAYOUT_GENERAL:
 			// Avoid this layout as it is unoptimized
 			barrier.dstAccessMask =
-				{
-					VK_ACCESS_TRANSFER_READ_BIT |
-					VK_ACCESS_TRANSFER_WRITE_BIT |
-					VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
-					VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
-					VK_ACCESS_SHADER_READ_BIT |
-					VK_ACCESS_INPUT_ATTACHMENT_READ_BIT};
+			{
+				VK_ACCESS_TRANSFER_READ_BIT |
+				VK_ACCESS_TRANSFER_WRITE_BIT |
+				VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+				VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+				VK_ACCESS_SHADER_READ_BIT |
+				VK_ACCESS_INPUT_ATTACHMENT_READ_BIT
+			};
 			dst_stage =
-				{
-					VK_PIPELINE_STAGE_TRANSFER_BIT |
-					VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-					VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
-					VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT};
+			{
+				VK_PIPELINE_STAGE_TRANSFER_BIT |
+				VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+				VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+				VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT |
+				VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+			};
 			break;
 		case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
 			barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -86,17 +92,30 @@ namespace vk
 			dst_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
 			break;
 		case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
-			barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
 			dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 			break;
 		case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
-			barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-			dst_stage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+			barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+			dst_stage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
 			break;
 		case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+			barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
+			dst_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+			break;
 		case VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT:
 			barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
-			dst_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+			dst_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+			if (is_color_surface)
+			{
+				barrier.dstAccessMask |= VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+				dst_stage |= VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+			}
+			else
+			{
+				barrier.dstAccessMask |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+				dst_stage |= VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+			}
 			break;
 		case VK_IMAGE_LAYOUT_UNDEFINED:
 		case VK_IMAGE_LAYOUT_PREINITIALIZED:
@@ -123,7 +142,7 @@ namespace vk
 				}
 			}
 			else if (new_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL ||
-					 new_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+				new_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
 			{
 				// Finish reading before writing
 				barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
@@ -132,19 +151,21 @@ namespace vk
 			else
 			{
 				barrier.srcAccessMask =
-					{
-						VK_ACCESS_TRANSFER_READ_BIT |
-						VK_ACCESS_TRANSFER_WRITE_BIT |
-						VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
-						VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
-						VK_ACCESS_SHADER_READ_BIT |
-						VK_ACCESS_INPUT_ATTACHMENT_READ_BIT};
+				{
+					VK_ACCESS_TRANSFER_READ_BIT |
+					VK_ACCESS_TRANSFER_WRITE_BIT |
+					VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+					VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+					VK_ACCESS_SHADER_READ_BIT |
+					VK_ACCESS_INPUT_ATTACHMENT_READ_BIT
+				};
 				src_stage =
-					{
-						VK_PIPELINE_STAGE_TRANSFER_BIT |
-						VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-						VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT |
-						VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT};
+				{
+					VK_PIPELINE_STAGE_TRANSFER_BIT |
+					VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+					VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT |
+					VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+				};
 			}
 			break;
 		case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
@@ -165,29 +186,39 @@ namespace vk
 			src_stage = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
 			break;
 		case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+			barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
+			src_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+			break;
 		case VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT:
 			barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
 			src_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+			if (is_color_surface)
+			{
+				barrier.srcAccessMask |= VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+				src_stage |= VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+			}
+			else
+			{
+				barrier.srcAccessMask |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+				src_stage |= VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+			}
 			break;
 		default:
-			break; // TODO Investigate what happens here
+			break;
 		}
 
 		barrier.srcAccessMask &= src_access_mask_bits;
 		barrier.dstAccessMask &= dst_access_mask_bits;
 
-		if (!barrier.srcAccessMask)
-			src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-		if (!barrier.dstAccessMask)
-			dst_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+		if (!barrier.srcAccessMask) src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+		if (!barrier.dstAccessMask) dst_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 
-		VK_GET_SYMBOL(vkCmdPipelineBarrier)(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+		vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 	}
 
 	void change_image_layout(const vk::command_buffer& cmd, vk::image* image, VkImageLayout new_layout, const VkImageSubresourceRange& range)
 	{
-		if (image->current_layout == new_layout)
-			return;
+		if (image->current_layout == new_layout) return;
 
 		change_image_layout(cmd, image->value, image->current_layout, new_layout, range);
 		image->current_layout = new_layout;
@@ -195,10 +226,9 @@ namespace vk
 
 	void change_image_layout(const vk::command_buffer& cmd, vk::image* image, VkImageLayout new_layout)
 	{
-		if (image->current_layout == new_layout)
-			return;
+		if (image->current_layout == new_layout) return;
 
-		change_image_layout(cmd, image->value, image->current_layout, new_layout, {image->aspect(), 0, image->mipmaps(), 0, image->layers()});
+		change_image_layout(cmd, image->value, image->current_layout, new_layout, { image->aspect(), 0, image->mipmaps(), 0, image->layers() });
 		image->current_layout = new_layout;
 	}
-} // namespace vk
+}

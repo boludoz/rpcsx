@@ -14,13 +14,15 @@ namespace vk
 
 	public:
 		query_pool(VkDevice dev, VkQueryType type, u32 size)
-			: m_query_pool(VK_NULL_HANDLE), m_device(dev), m_size(size)
+			: m_query_pool(VK_NULL_HANDLE)
+			, m_device(dev)
+			, m_size(size)
 		{
 			VkQueryPoolCreateInfo info{};
-			info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-			info.queryType = type;
+			info.sType      = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+			info.queryType  = type;
 			info.queryCount = size;
-			CHECK_RESULT(VK_GET_SYMBOL(vkCreateQueryPool)(dev, &info, nullptr, &m_query_pool));
+			CHECK_RESULT(vkCreateQueryPool(dev, &info, nullptr, &m_query_pool));
 
 			// Take 'size' references on this object
 			ref_count.release(static_cast<s32>(size));
@@ -28,7 +30,7 @@ namespace vk
 
 		~query_pool()
 		{
-			VK_GET_SYMBOL(vkDestroyQueryPool)(m_device, m_query_pool, nullptr);
+			vkDestroyQueryPool(m_device, m_query_pool, nullptr);
 		}
 
 		operator VkQueryPool()
@@ -41,4 +43,4 @@ namespace vk
 			return m_size;
 		}
 	};
-} // namespace vk
+}

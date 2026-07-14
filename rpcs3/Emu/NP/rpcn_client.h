@@ -4,37 +4,37 @@
 #include <chrono>
 #include <thread>
 #include <semaphore>
-#include "util/mutex.h"
+#include "Utilities/mutex.h"
 #include "Emu/localized_string_id.h"
 
 #ifdef _WIN32
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #else
 #ifdef __clang__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wold-style-cast"
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wold-style-cast"
 #endif
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #ifdef __clang__
-#pragma GCC diagnostic pop
+#pragma clang diagnostic pop
 #endif
 #endif
 
-#include "rpcsx/fw/ps3/sceNp.h"
-#include "rpcsx/fw/ps3/sceNp2.h"
-#include "rpcsx/fw/ps3/sceNpTus.h"
-#include <flatbuffers/flatbuffers.h>
+#include "Emu/Cell/Modules/sceNp.h"
+#include "Emu/Cell/Modules/sceNp2.h"
+#include "Emu/Cell/Modules/sceNpTus.h"
 
 #ifdef __clang__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wold-style-cast"
-#pragma GCC diagnostic ignored "-Wextern-c-compat"
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wold-style-cast"
+#pragma clang diagnostic ignored "-Wextern-c-compat"
 #endif
 #include <wolfssl/ssl.h>
 #ifdef __clang__
-#pragma GCC diagnostic pop
+#pragma clang diagnostic pop
 #endif
 
 #include "rpcn_types.h"
@@ -79,6 +79,14 @@ public:
 			res.push_back(vec[i]);
 			i++;
 		}
+
+		// Make sure we hit terminating 0
+		if (i >= vec.size())
+		{
+			error = true;
+			return {};
+		}
+
 		i++;
 
 		if (!empty && res.empty())
@@ -129,31 +137,21 @@ public:
 	}
 
 	template <typename T>
-	const T* get_flatbuffer()
+	std::unique_ptr<T> get_protobuf()
 	{
 		auto rawdata_vec = get_rawdata();
 
 		if (error)
 			return nullptr;
 
-		if (vec.empty())
+		auto msg = std::make_unique<T>();
+		if (!msg->ParseFromArray(rawdata_vec.data(), static_cast<int>(rawdata_vec.size())))
 		{
 			error = true;
 			return nullptr;
 		}
 
-		const T* ret = flatbuffers::GetRoot<T>(rawdata_vec.data());
-		flatbuffers::Verifier verifier(rawdata_vec.data(), rawdata_vec.size());
-
-		if (!ret->Verify(verifier))
-		{
-			error = true;
-			return nullptr;
-		}
-
-		aligned_bufs.push_back(std::move(rawdata_vec));
-
-		return ret;
+		return msg;
 	}
 
 	// Setters
@@ -176,14 +174,13 @@ public:
 
 protected:
 	std::vector<u8>& vec;
-	std::vector<std::vector<u8>> aligned_bufs;
-	usz i = 0;
+	usz i      = 0;
 	bool error = false;
 };
 
 namespace rpcn
 {
-	using friend_cb_func = void (*)(void* param, NotificationType ntype, const std::string& username, bool status);
+	using friend_cb_func  = void (*)(void* param, NotificationType ntype, const std::string& username, bool status);
 	using message_cb_func = void (*)(void* param, const shared_ptr<std::pair<std::string, message_data>> new_msg, u64 msg_id);
 
 	struct friend_online_data
@@ -223,10 +220,11 @@ namespace rpcn
 		static inline std::weak_ptr<rpcn_client> instance;
 		static inline shared_mutex inst_mutex;
 
-		atomic_t<bool> connected = false;
+		atomic_t<bool> connected    = false;
 		atomic_t<bool> authentified = false;
-		atomic_t<bool> want_conn = false;
-		atomic_t<bool> want_auth = false;
+		atomic_t<bool> want_conn    = false;
+		atomic_t<bool> want_auth    = false;
+		u32 binding_address = 0;
 		std::binary_semaphore sem_connected, sem_authentified;
 		std::mutex mutex_connected, mutex_authentified;
 
@@ -244,7 +242,7 @@ namespace rpcn
 		std::mutex mutex_packets_to_send;
 
 		// Friends related
-		shared_mutex mutex_friends;
+		mutable shared_mutex mutex_friends;
 		std::set<std::pair<friend_cb_func, void*>> friend_cbs;
 		friend_data friend_infos;
 
@@ -253,7 +251,7 @@ namespace rpcn
 		void handle_message(std::vector<u8> data);
 
 	private:
-		rpcn_client();
+		rpcn_client(u32 binding_address);
 
 		void rpcn_reader_thread();
 		void rpcn_writer_thread();
@@ -285,9 +283,9 @@ namespace rpcn
 
 	public:
 		~rpcn_client();
-		rpcn_client(rpcn_client& other) = delete;
+		rpcn_client(rpcn_client& other)    = delete;
 		void operator=(const rpcn_client&) = delete;
-		static std::shared_ptr<rpcn_client> get_instance(bool check_config = false);
+		static std::shared_ptr<rpcn_client> get_instance(u32 binding_address, bool check_config = false);
 		rpcn_state wait_for_connection();
 		rpcn_state wait_for_authentified();
 		bool terminate_connection();
@@ -302,22 +300,23 @@ namespace rpcn
 		ErrorType resend_token(const std::string& npid, const std::string& password);
 		ErrorType send_reset_token(std::string_view npid, std::string_view email);
 		ErrorType reset_password(std::string_view npid, std::string_view token, std::string_view password);
-		bool add_friend(const std::string& friend_username);
+		ErrorType delete_account();
+		std::optional<ErrorType> add_friend(const std::string& friend_username);
 		bool remove_friend(const std::string& friend_username);
 
-		u32 get_num_friends();
-		u32 get_num_blocks();
-		std::optional<std::string> get_friend_by_index(u32 index);
-		std::optional<std::pair<std::string, friend_online_data>> get_friend_presence_by_index(u32 index);
-		std::optional<std::pair<std::string, friend_online_data>> get_friend_presence_by_npid(const std::string& npid);
+		u32 get_num_friends() const;
+		u32 get_num_blocks() const;
+		std::optional<std::string> get_friend_by_index(u32 index) const;
+		std::optional<std::pair<std::string, friend_online_data>> get_friend_presence_by_index(u32 index) const;
+		std::optional<std::pair<std::string, friend_online_data>> get_friend_presence_by_npid(const std::string& npid) const;
 
 		std::vector<std::pair<rpcn::NotificationType, std::vector<u8>>> get_notifications();
-		std::unordered_map<u32, std::pair<rpcn::CommandType, std::vector<u8>>> get_replies();
+		std::map<u32, std::pair<rpcn::CommandType, std::vector<u8>>> get_replies();
 		std::unordered_map<std::string, friend_online_data> get_presence_updates();
 		std::map<std::string, friend_online_data> get_presence_states();
 
 		std::vector<u64> get_new_messages();
-		std::optional<shared_ptr<std::pair<std::string, message_data>>> get_message(u64 id);
+		std::optional<shared_ptr<std::pair<std::string, message_data>>> get_message(u64 id) const;
 		std::vector<std::pair<u64, shared_ptr<std::pair<std::string, message_data>>>> get_messages_and_register_cb(SceNpBasicMessageMainType type, bool include_bootable, message_cb_func cb_func, void* cb_param);
 		void remove_message_cb(message_cb_func cb_func, void* cb_param);
 		void mark_message_used(u64 id);
@@ -338,6 +337,7 @@ namespace rpcn
 		bool leave_room(u32 req_id, const SceNpCommunicationId& communication_id, const SceNpMatching2LeaveRoomRequest* req);
 		bool search_room(u32 req_id, const SceNpCommunicationId& communication_id, const SceNpMatching2SearchRoomRequest* req);
 		bool get_roomdata_external_list(u32 req_id, const SceNpCommunicationId& communication_id, const SceNpMatching2GetRoomDataExternalListRequest* req);
+		bool get_room_member_data_external_list(u32 req_id, const SceNpCommunicationId& communication_id, u64 room_id);
 		bool set_roomdata_external(u32 req_id, const SceNpCommunicationId& communication_id, const SceNpMatching2SetRoomDataExternalRequest* req);
 		bool get_roomdata_internal(u32 req_id, const SceNpCommunicationId& communication_id, const SceNpMatching2GetRoomDataInternalRequest* req);
 		bool set_roomdata_internal(u32 req_id, const SceNpCommunicationId& communication_id, const SceNpMatching2SetRoomDataInternalRequest* req);
@@ -354,7 +354,7 @@ namespace rpcn
 		bool get_score_range(u32 req_id, const SceNpCommunicationId& communication_id, SceNpScoreBoardId board_id, u32 start_rank, u32 num_rank, bool with_comment, bool with_gameinfo);
 		bool get_score_npid(u32 req_id, const SceNpCommunicationId& communication_id, SceNpScoreBoardId board_id, const std::vector<std::pair<SceNpId, s32>>& npids, bool with_comment, bool with_gameinfo);
 		bool get_score_friend(u32 req_id, const SceNpCommunicationId& communication_id, SceNpScoreBoardId board_id, bool include_self, bool with_comment, bool with_gameinfo, u32 max_entries);
-		bool record_score_data(u32 req_id, const SceNpCommunicationId& communication_id, SceNpScorePcId pc_id, SceNpScoreBoardId board_id, s64 score, const std::vector<u8>& score_data);
+		bool record_score_data(u32 req_id, const SceNpCommunicationId& communication_id,  SceNpScorePcId pc_id, SceNpScoreBoardId board_id, s64 score, const std::vector<u8>& score_data);
 		bool get_score_data(u32 req_id, const SceNpCommunicationId& communication_id, SceNpScorePcId pc_id, SceNpScoreBoardId board_id, const SceNpId& npid);
 		bool tus_set_multislot_variable(u32 req_id, const SceNpCommunicationId& communication_id, const SceNpOnlineId& targetNpId, vm::cptr<SceNpTusSlotId> slotIdArray, vm::cptr<s64> variableArray, s32 arrayNum, bool vuser);
 		bool tus_get_multislot_variable(u32 req_id, const SceNpCommunicationId& communication_id, const SceNpOnlineId& targetNpId, vm::cptr<SceNpTusSlotId> slotIdArray, s32 arrayNum, bool vuser);
@@ -396,8 +396,8 @@ namespace rpcn
 
 		std::vector<u8> forge_request(rpcn::CommandType command, u64 packet_id, const std::vector<u8>& data) const;
 		bool forge_send(rpcn::CommandType command, u64 packet_id, const std::vector<u8>& data);
-		bool forge_request_with_com_id(const flatbuffers::FlatBufferBuilder& builder, const SceNpCommunicationId& com_id, CommandType command, u64 packet_id);
-		bool forge_request_with_data(const flatbuffers::FlatBufferBuilder& builder, CommandType command, u64 packet_id);
+		bool forge_request_with_com_id(const std::string& serialized_data, const SceNpCommunicationId& com_id, CommandType command, u64 packet_id);
+		bool forge_request_with_data(const std::string& serialized_data, CommandType command, u64 packet_id);
 		bool forge_send_reply(rpcn::CommandType command, u64 packet_id, const std::vector<u8>& data, std::vector<u8>& reply_data);
 
 		bool error_and_disconnect(const std::string& error_mgs);
@@ -407,11 +407,11 @@ namespace rpcn
 
 	private:
 		WOLFSSL_CTX* wssl_ctx = nullptr;
-		WOLFSSL* read_wssl = nullptr;
-		WOLFSSL* write_wssl = nullptr;
+		WOLFSSL* read_wssl    = nullptr;
+		WOLFSSL* write_wssl   = nullptr;
 
 		atomic_t<bool> server_info_received = false;
-		u32 received_version = 0;
+		u32 received_version                = 0;
 
 		sockaddr_in addr_rpcn{};
 		sockaddr_in addr_rpcn_udp_ipv4{};
@@ -426,8 +426,8 @@ namespace rpcn
 
 		shared_mutex mutex_notifs, mutex_replies, mutex_replies_sync, mutex_presence_updates;
 		std::vector<std::pair<rpcn::NotificationType, std::vector<u8>>> notifications;       // notif type / data
-		std::unordered_map<u32, std::pair<rpcn::CommandType, std::vector<u8>>> replies;      // req id / (command / data)
-		std::unordered_map<u64, std::pair<rpcn::CommandType, std::vector<u8>>> replies_sync; // same but for sync replies(see handle_input())
+		std::map<u32, std::pair<rpcn::CommandType, std::vector<u8>>> replies;      // req id / (command / data)
+		std::map<u64, std::pair<rpcn::CommandType, std::vector<u8>>> replies_sync; // same but for sync replies(see handle_input())
 		std::unordered_map<std::string, friend_online_data> presence_updates;                // npid / presence data
 
 		// Messages
@@ -440,17 +440,17 @@ namespace rpcn
 
 			bool operator<(const message_cb_t& other) const
 			{
-				const void* void_cb_func = reinterpret_cast<const void*>(cb_func);
+				const void* void_cb_func       = reinterpret_cast<const void*>(cb_func);
 				const void* void_other_cb_func = reinterpret_cast<const void*>(other.cb_func);
 				return (void_cb_func < void_other_cb_func) || ((!(void_other_cb_func < void_cb_func)) && (cb_param < other.cb_param));
 			}
 		};
-		shared_mutex mutex_messages;
+		mutable shared_mutex mutex_messages;
 		std::set<message_cb_t> message_cbs;
 		std::unordered_map<u64, shared_ptr<std::pair<std::string, message_data>>> messages; // msg id / (sender / message)
-		std::set<u64> active_messages;                                                      // msg id of messages that have not been discarded
-		std::vector<u64> new_messages;                                                      // list of msg_id used to inform np_handler of new messages
-		u64 message_counter = 3;                                                            // id counter
+		std::set<u64> active_messages;                                                           // msg id of messages that have not been discarded
+		std::vector<u64> new_messages;                                                           // list of msg_id used to inform np_handler of new messages
+		u64 message_counter = 3;                                                                 // id counter
 
 		std::string online_name{};
 		std::string avatar_url{};

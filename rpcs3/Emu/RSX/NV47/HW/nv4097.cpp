@@ -7,11 +7,7 @@
 
 #define RSX(ctx) ctx->rsxthr
 #define REGS(ctx) (&rsx::method_registers)
-#define RSX_CAPTURE_EVENT(name)          \
-	if (RSX(ctx)->capture_current_frame) \
-	{                                    \
-		RSX(ctx)->capture_frame(name);   \
-	}
+#define RSX_CAPTURE_EVENT(name) if (RSX(ctx)->capture_current_frame) { RSX(ctx)->capture_frame(name); }
 
 namespace rsx
 {
@@ -70,7 +66,7 @@ namespace rsx
 			// Get limit imposed by FIFO PUT (if put is behind get it will result in a number ignored by min)
 			const u32 fifo_read_limit = static_cast<u32>(((RSX(ctx)->ctrl->put & ~3ull) - (RSX(ctx)->fifo_ctrl->get_pos())) / 4);
 
-			const u32 count = std::min<u32>({fifo_args_cnt, fifo_read_limit, method_range});
+			const u32 count = std::min<u32>({ fifo_args_cnt, fifo_read_limit, method_range });
 
 			const u32 load = REGS(ctx)->transform_constant_load();
 
@@ -101,7 +97,8 @@ namespace rsx
 					rsx::transform_constant_update_barrier,
 					RSX(ctx)->fifo_ctrl->get_pos(),
 					rcount,
-					reg - NV4097_SET_TRANSFORM_CONSTANT);
+					reg - NV4097_SET_TRANSFORM_CONSTANT
+				);
 
 				RSX(ctx)->fifo_ctrl->skip_methods(rcount - 1);
 				return;
@@ -146,7 +143,7 @@ namespace rsx
 			// Get limit imposed by FIFO PUT (if put is behind get it will result in a number ignored by min)
 			const u32 fifo_read_limit = static_cast<u32>(((RSX(ctx)->ctrl->put & ~3ull) - (RSX(ctx)->fifo_ctrl->get_pos())) / 4);
 
-			const u32 count = std::min<u32>({fifo_args_cnt, fifo_read_limit, method_range});
+			const u32 count = std::min<u32>({ fifo_args_cnt, fifo_read_limit, method_range });
 
 			const u32 load_pos = REGS(ctx)->transform_program_load();
 
@@ -253,8 +250,12 @@ namespace rsx
 			const auto current = REGS(ctx)->decode<NV4097_SET_SURFACE_FORMAT>(arg);
 			const auto previous = REGS(ctx)->decode<NV4097_SET_SURFACE_FORMAT>(REGS(ctx)->latch);
 
-			if (*current.antialias() != *previous.antialias() ||                         // Antialias control has changed, update ROP parameters
-				current.is_integer_color_format() != previous.is_integer_color_format()) // The type of color format also requires ROP control update
+			if (current.is_integer_color_format() != previous.is_integer_color_format()) // Different ROP emulation
+			{
+				RSX(ctx)->m_graphics_state |= rsx::pipeline_state::fragment_program_state_dirty;
+			}
+
+			if (*current.antialias() != *previous.antialias()) // Antialias control has changed, update ROP parameters
 			{
 				RSX(ctx)->m_graphics_state |= rsx::pipeline_state::fragment_state_dirty;
 			}
@@ -278,7 +279,7 @@ namespace rsx
 				return;
 			}
 
-			if (REGS(ctx)->decode<NV4097_SET_COLOR_MASK>(arg).is_invalid()) [[unlikely]]
+			if (REGS(ctx)->decode<NV4097_SET_COLOR_MASK>(arg).is_invalid()) [[ unlikely ]]
 			{
 				// Rollback
 				REGS(ctx)->decode(reg, REGS(ctx)->latch);
@@ -295,7 +296,7 @@ namespace rsx
 				return;
 			}
 
-			if (to_stencil_op(arg)) [[likely]]
+			if (to_stencil_op(arg)) [[ likely ]]
 			{
 				set_surface_options_dirty_bit(ctx, reg, arg);
 				return;
@@ -303,6 +304,34 @@ namespace rsx
 
 			// Rollback
 			REGS(ctx)->decode(reg, REGS(ctx)->latch);
+		}
+
+		void set_aa_control(context* ctx, u32 /*reg*/, u32 arg)
+		{
+			const auto latch = REGS(ctx)->latch;
+			if (arg == latch)
+			{
+				return;
+			}
+
+			// Reconfigure pipeline.
+			RSX(ctx)->m_graphics_state |= rsx::pipeline_config_dirty;
+
+			// If we support A2C in hardware, leave the rest upto the hardware. The pipeline config should take care of it.
+			const auto& backend_config = RSX(ctx)->get_backend_config();
+			if (backend_config.supports_hw_a2c &&
+				backend_config.supports_hw_a2c_1spp)
+			{
+				return;
+			}
+
+			// No A2C hardware support or partial hardware support. Invalidate the current program if A2C state changed.
+			const auto a2c_old = REGS(ctx)->decode<NV4097_SET_ANTI_ALIASING_CONTROL>(latch).msaa_alpha_to_coverage();
+			const auto a2c_new = REGS(ctx)->decode<NV4097_SET_ANTI_ALIASING_CONTROL>(arg).msaa_alpha_to_coverage();
+			if (a2c_old != a2c_new)
+			{
+				RSX(ctx)->m_graphics_state |= rsx::fragment_program_state_dirty;
+			}
 		}
 
 		///// Draw call setup (vertex, etc)
@@ -485,17 +514,14 @@ namespace rsx
 			switch (reg)
 			{
 			case NV4097_SET_CULL_FACE:
-				valid = !!to_cull_face(arg);
-				break;
+				valid = !!to_cull_face(arg); break;
 			case NV4097_SET_FRONT_FACE:
-				valid = !!to_front_face(arg);
-				break;
+				valid = !!to_front_face(arg); break;
 			default:
-				valid = false;
-				break;
+				valid = false; break;
 			}
 
-			if (valid) [[likely]]
+			if (valid) [[ likely ]]
 			{
 				RSX(ctx)->m_graphics_state |= rsx::pipeline_config_dirty;
 			}
@@ -513,7 +539,7 @@ namespace rsx
 			}
 
 			if (to_blend_equation(arg & 0xFFFF) &&
-				to_blend_equation((arg >> 16) & 0xFFFF)) [[likely]]
+				to_blend_equation((arg >> 16) & 0xFFFF)) [[ likely ]]
 			{
 				RSX(ctx)->m_graphics_state |= rsx::pipeline_config_dirty;
 				return;
@@ -531,7 +557,7 @@ namespace rsx
 			}
 
 			if (to_blend_factor(arg & 0xFFFF) &&
-				to_blend_factor((arg >> 16) & 0xFFFF)) [[likely]]
+				to_blend_factor((arg >> 16) & 0xFFFF)) [[ likely ]]
 			{
 				RSX(ctx)->m_graphics_state |= rsx::pipeline_config_dirty;
 				return;
@@ -572,11 +598,11 @@ namespace rsx
 			default:
 				rsx_log.error("NV4097_GET_REPORT: Bad type %d", type);
 
-				vm::_ref<atomic_t<CellGcmReportData>>(address_ptr).atomic_op([&](CellGcmReportData& data)
-					{
-						data.timer = RSX(ctx)->timestamp();
-						data.padding = 0;
-					});
+				vm::_ptr<atomic_t<CellGcmReportData>>(address_ptr)->atomic_op([&](CellGcmReportData& data)
+				{
+					data.timer = RSX(ctx)->timestamp();
+					data.padding = 0;
+				});
 				break;
 			}
 		}
@@ -607,8 +633,16 @@ namespace rsx
 			case 2:
 				break;
 			default:
-				rsx_log.error("Unknown render mode %d", mode);
+			{
+				struct logged_t
+				{
+					atomic_t<u8> logged_cause[256]{};
+				};
+
+				const auto& is_error = ::at32(g_fxo->get<logged_t>().logged_cause, mode).try_inc(10);
+				(is_error ? rsx_log.error : rsx_log.trace)("Unknown render mode %d", mode);
 				return;
+			}
 			}
 
 			const u32 offset = arg & 0xffffff;
@@ -657,12 +691,14 @@ namespace rsx
 
 			ensure(addr != umax);
 
-			vm::_ref<atomic_t<RsxNotify>>(addr).store(
-				{RSX(ctx)->timestamp(),
-					0});
+			vm::_ptr<atomic_t<RsxNotify>>(addr)->store(
+			{
+				RSX(ctx)->timestamp(),
+				0
+			});
 		}
 
-		void texture_read_semaphore_release(context* ctx, u32 /*reg*/, u32 arg)
+		void texture_read_semaphore_release(context* ctx, u32 reg, u32 arg)
 		{
 			// Pipeline barrier seems to be equivalent to a SHADER_READ stage barrier.
 			// Ideally the GPU only needs to have cached all textures declared up to this point before writing the label.
@@ -685,17 +721,17 @@ namespace rsx
 				rsx_log.error("NV4097 semaphore unexpected address. Please report to the developers. (offset=0x%x, addr=0x%x)", offset, addr);
 			}
 
-			if (g_cfg.video.strict_rendering_mode) [[unlikely]]
+			if (g_cfg.video.strict_rendering_mode) [[ unlikely ]]
 			{
-				util::write_gcm_label<true, true>(ctx, addr, arg);
+				util::write_gcm_label<true, true>(ctx, reg, addr, arg);
 			}
 			else
 			{
-				util::write_gcm_label<true, false>(ctx, addr, arg);
+				util::write_gcm_label<true, false>(ctx, reg, addr, arg);
 			}
 		}
 
-		void back_end_write_semaphore_release(context* ctx, u32 /*reg*/, u32 arg)
+		void back_end_write_semaphore_release(context* ctx, u32 reg, u32 arg)
 		{
 			// Full pipeline barrier. GPU must flush pipeline before writing the label
 
@@ -716,12 +752,12 @@ namespace rsx
 			}
 
 			const u32 val = (arg & 0xff00ff00) | ((arg & 0xff) << 16) | ((arg >> 16) & 0xff);
-			util::write_gcm_label<true, true>(ctx, addr, val);
+			util::write_gcm_label<true, true>(ctx, reg, addr, val);
 		}
 
 		void sync(context* ctx, u32, u32)
 		{
 			RSX(ctx)->sync();
 		}
-	} // namespace nv4097
-} // namespace rsx
+	}
+}

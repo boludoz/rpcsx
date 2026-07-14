@@ -1,6 +1,6 @@
 #pragma once
 
-#include "util/Config.h"
+#include "Utilities/Config.h"
 
 struct cfg_upnp : cfg::node
 {

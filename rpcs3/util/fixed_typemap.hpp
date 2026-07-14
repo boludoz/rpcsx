@@ -20,9 +20,7 @@ namespace utils
 
 namespace stx
 {
-	struct launch_retainer
-	{
-	};
+	struct launch_retainer{};
 
 	extern u16 serial_breathe_and_tag(utils::serial& ar, std::string_view name, bool tag_bit);
 
@@ -72,11 +70,11 @@ namespace stx
 		// Save default constructor and destructor and optional joining operation
 		struct typeinfo
 		{
-			bool (*create)(uchar* ptr, manual_typemap&, utils::serial*, std::string_view) noexcept = nullptr;
-			void (*thread_op)(void* ptr, thread_state) noexcept = nullptr;
-			void (*save)(void* ptr, utils::serial&) noexcept = nullptr;
-			bool (*saveable)(bool) noexcept = nullptr;
-			void (*destroy)(void* ptr) noexcept = nullptr;
+			bool(*create)(uchar* ptr, manual_typemap&, utils::serial*, std::string_view) noexcept = nullptr;
+			void(*thread_op)(void* ptr, thread_state) noexcept = nullptr;
+			void(*save)(void* ptr, utils::serial&) noexcept = nullptr;
+			bool(*saveable)(bool) noexcept = nullptr;
+			void(*destroy)(void* ptr) noexcept = nullptr;
 			bool is_trivial_and_nonsavable = false;
 			std::string_view name;
 
@@ -146,14 +144,13 @@ namespace stx
 			}
 
 			template <typename T>
-				requires requires(T& a, utils::serial& ar) { a.save(exact_t<utils::serial&>(ar)); }
+				requires requires(T& a, utils::serial& ar) { a.save(stx::exact_t<utils::serial&>(ar)); }
 			static void call_save(void* ptr, utils::serial& ar) noexcept
 			{
-				std::launder(static_cast<T*>(ptr))->save(exact_t<utils::serial&>(ar));
+				std::launder(static_cast<T*>(ptr))->save(stx::exact_t<utils::serial&>(ar));
 			}
 
-			template <typename T>
-				requires requires(const T&) { T::saveable(true); }
+			template <typename T> requires requires (const T&) { T::saveable(true); }
 			static bool call_saveable(bool is_writing) noexcept
 			{
 				return T::saveable(is_writing);
@@ -173,12 +170,12 @@ namespace stx
 					r.thread_op = &call_thread_op<T>;
 				}
 
-				if constexpr (!!(requires(T& a, utils::serial& ar) { a.save(exact_t<utils::serial&>(ar)); }))
+				if constexpr (!!(requires(T& a, utils::serial& ar) { a.save(stx::exact_t<utils::serial&>(ar)); }))
 				{
 					r.save = &call_save<T>;
 				}
 
-				if constexpr (!!(requires(const T&) { T::saveable(true); }))
+				if constexpr (!!(requires (const T&) { T::saveable(true); }))
 				{
 					r.saveable = &call_saveable<T>;
 				}
@@ -276,14 +273,14 @@ namespace stx
 			}
 
 			std::stable_sort(order.get(), order.get() + type_count, [](const auto& a, const auto& b)
+			{
+				if (a.second->is_trivial_and_nonsavable && !b.second->is_trivial_and_nonsavable)
 				{
-					if (a.second->is_trivial_and_nonsavable && !b.second->is_trivial_and_nonsavable)
-					{
-						return true;
-					}
+					return true;
+				}
 
-					return a.first < b.first;
-				});
+				return a.first < b.first;
+			});
 
 			const auto info_before = m_info;
 
@@ -403,8 +400,7 @@ namespace stx
 			}
 		}
 
-		template <typename T>
-			requires(std::is_same_v<T&, utils::serial&>)
+		template <typename T> requires (std::is_same_v<T&, utils::serial&>)
 		void save(T& ar)
 		{
 			if (!is_init())
@@ -439,8 +435,7 @@ namespace stx
 		}
 
 		// Check if object is not initialized but shall be initialized first (to use in initializing other objects)
-		template <typename T>
-			requires(!std::is_constructible_v<T, exact_t<utils::serial&>> && (std::is_constructible_v<T, exact_t<manual_typemap&>> || std::is_default_constructible_v<T>))
+		template <typename T> requires (!std::is_constructible_v<T, exact_t<utils::serial&>> && (std::is_constructible_v<T, exact_t<manual_typemap&>> || std::is_default_constructible_v<T>))
 		void need() noexcept
 		{
 			if (!m_init[stx::typeindex<typeinfo, std::decay_t<T>>()])
@@ -460,8 +455,7 @@ namespace stx
 		}
 
 		// Explicitly initialize object of type T possibly with dynamic type As and arguments
-		template <typename T, typename As = T, typename... Args>
-			requires(std::is_constructible_v<std::decay_t<As>, Args && ...>)
+		template <typename T, typename As = T, typename... Args> requires (std::is_constructible_v<std::decay_t<As>, Args&&...>)
 		As* init(Args&&... args) noexcept
 		{
 			if (m_init[stx::typeindex<typeinfo, std::decay_t<T>, std::decay_t<As>>()])
@@ -572,7 +566,8 @@ namespace stx
 
 		public:
 			iterator(const typeinfo** _info, void** _ptr)
-				: m_info(_info), m_ptr(_ptr)
+				: m_info(_info)
+				, m_ptr(_ptr)
 			{
 			}
 
@@ -611,4 +606,4 @@ namespace stx
 			return iterator{nullptr, nullptr};
 		}
 	};
-} // namespace stx
+}

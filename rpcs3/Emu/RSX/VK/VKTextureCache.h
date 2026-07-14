@@ -4,13 +4,10 @@
 #include "VKRenderTargets.h"
 #include "VKResourceManager.h"
 #include "VKRenderPass.h"
-#include "VKGSRenderTypes.hpp"
 #include "vkutils/image_helpers.h"
 
 #include "../Common/texture_cache.h"
 #include "../Common/tiled_dma_copy.hpp"
-
-#include "rx/align.hpp"
 
 #include <memory>
 #include <vector>
@@ -22,15 +19,15 @@ namespace vk
 
 	struct texture_cache_traits
 	{
-		using commandbuffer_type = vk::command_buffer;
-		using section_storage_type = vk::cached_texture_section;
-		using texture_cache_type = vk::texture_cache;
+		using commandbuffer_type      = vk::command_buffer;
+		using section_storage_type    = vk::cached_texture_section;
+		using texture_cache_type      = vk::texture_cache;
 		using texture_cache_base_type = rsx::texture_cache<texture_cache_type, texture_cache_traits>;
-		using image_resource_type = vk::image*;
-		using image_view_type = vk::image_view*;
-		using image_storage_type = vk::image;
-		using texture_format = VkFormat;
-		using viewable_image_type = vk::viewable_image*;
+		using image_resource_type     = vk::image*;
+		using image_view_type         = vk::image_view*;
+		using image_storage_type      = vk::image;
+		using texture_format          = VkFormat;
+		using viewable_image_type     = vk::viewable_image*;
 	};
 
 	class cached_texture_section : public rsx::cached_texture_section<vk::cached_texture_section, vk::texture_cache_traits>
@@ -40,7 +37,7 @@ namespace vk
 
 		std::unique_ptr<vk::viewable_image> managed_texture = nullptr;
 
-		// DMA relevant data
+		//DMA relevant data
 		std::unique_ptr<vk::event> dma_fence;
 		vk::render_device* m_device = nullptr;
 		vk::viewable_image* vram_texture = nullptr;
@@ -50,7 +47,10 @@ namespace vk
 
 		void create(u16 w, u16 h, u16 depth, u16 mipmaps, vk::image* image, u32 rsx_pitch, bool managed, u32 gcm_format, bool pack_swap_bytes = false)
 		{
-			if (vram_texture && !managed_texture && get_protection() == utils::protection::no)
+			auto new_texture = static_cast<vk::viewable_image*>(image);
+			ensure(!exists() || !is_managed() || vram_texture == new_texture);
+
+			if (vram_texture != new_texture && !managed_texture && get_protection() == utils::protection::no)
 			{
 				// In-place image swap, still locked. Likely a color buffer that got rebound as depth buffer or vice-versa.
 				vk::as_rtt(vram_texture)->on_swap_out();
@@ -62,8 +62,6 @@ namespace vk
 				}
 			}
 
-			auto new_texture = static_cast<vk::viewable_image*>(image);
-			ensure(!exists() || !is_managed() || vram_texture == new_texture);
 			vram_texture = new_texture;
 
 			ensure(rsx_pitch);
@@ -184,11 +182,11 @@ namespace vk
 
 		bool is_flushed() const
 		{
-			// This memory section was flushable, but a flush has already removed protection
+			//This memory section was flushable, but a flush has already removed protection
 			return flushed;
 		}
 
-		void dma_transfer(vk::command_buffer& cmd, vk::image* src, const areai& src_area, const utils::address_range& valid_range, u32 pitch);
+		void dma_transfer(vk::command_buffer& cmd, vk::image* src, const areai& src_area, const utils::address_range32& valid_range, u32 pitch);
 
 		void copy_texture(vk::command_buffer& cmd, bool miss)
 		{
@@ -234,8 +232,8 @@ namespace vk
 				const auto filter = (target->aspect() == VK_IMAGE_ASPECT_COLOR_BIT) ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
 
 				vk::copy_scaled_image(cmd, locked_resource, target,
-					{0, 0, static_cast<s32>(locked_resource->width()), static_cast<s32>(locked_resource->height())},
-					{0, 0, static_cast<s32>(transfer_width), static_cast<s32>(transfer_height)},
+					{ 0, 0, static_cast<s32>(locked_resource->width()), static_cast<s32>(locked_resource->height()) },
+					{ 0, 0, static_cast<s32>(transfer_width), static_cast<s32>(transfer_height) },
 					1, true, filter);
 
 				target->change_layout(cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -292,7 +290,7 @@ namespace vk
 			if (tiled_region)
 			{
 				const auto available_tile_size = tiled_region.tile->size - (range.start - tiled_region.base_address);
-				const auto max_content_size = tiled_region.tile->pitch * rx::alignUp(height, 64);
+				const auto max_content_size = tiled_region.tile->pitch * utils::align(height, 64);
 				flush_length = std::min(max_content_size, available_tile_size);
 			}
 
@@ -303,7 +301,7 @@ namespace vk
 			if (const auto tiled_region = rsx::get_current_renderer()->get_tiled_memory_region(range))
 			{
 				auto real_data = vm::get_super_ptr<u8>(range.start);
-				auto out_data = std::vector<u8>(tiled_region.tile->size);
+				auto out_data = rsx::simple_array<u8>(tiled_region.tile->size);
 				rsx::tile_texel_data<u32>(
 					out_data.data(),
 					real_data,
@@ -313,7 +311,8 @@ namespace vk
 					tiled_region.tile->bank,
 					tiled_region.tile->pitch,
 					width,
-					height);
+					height
+				);
 				std::memcpy(real_data, out_data.data(), flush_length);
 			}
 #endif
@@ -326,7 +325,7 @@ namespace vk
 
 				// Read-modify-write to avoid corrupting already resident memory outside texture region
 				void* data = get_ptr(range.start);
-				std::vector<u8> tmp_data(rsx_pitch * height);
+				rsx::simple_array<u8> tmp_data(rsx_pitch * height);
 				std::memcpy(tmp_data.data(), data, tmp_data.size());
 
 				switch (gcm_format)
@@ -351,8 +350,7 @@ namespace vk
 		}
 
 		void finish_flush()
-		{
-		}
+		{}
 
 		/**
 		 * Misc
@@ -368,7 +366,7 @@ namespace vk
 			rsx_pitch = pitch;
 		}
 
-		void sync_surface_memory(const std::vector<cached_texture_section*>& surfaces)
+		void sync_surface_memory(const rsx::simple_array<cached_texture_section*>& surfaces)
 		{
 			auto rtt = vk::as_rtt(vram_texture);
 			rtt->sync_tag();
@@ -411,7 +409,8 @@ namespace vk
 			std::unique_ptr<vk::viewable_image> data;
 
 			cached_image_t() = default;
-			cached_image_t(u64 key_, std::unique_ptr<vk::viewable_image>& data_) : key(key_), data(std::move(data_)) {}
+			cached_image_t(u64 key_, std::unique_ptr<vk::viewable_image>& data_) :
+				key(key_), data(std::move(data_)) {}
 		};
 
 	public:
@@ -419,12 +418,14 @@ namespace vk
 		{
 			initialize_image_contents = 1,
 			do_not_reuse = 2,
-			shareable = 4
+			shareable = 4,
+			mutable_format = 8
 		};
 
 		void on_section_destroyed(cached_texture_section& tex) override;
 
 	private:
+
 		// Vulkan internals
 		vk::render_device* m_device;
 		vk::memory_type_mapping m_memory_types;
@@ -435,7 +436,7 @@ namespace vk
 		// Stuff that has been dereferenced by the GPU goes into these
 		const u32 max_cached_image_pool_size = 256;
 		std::deque<cached_image_t> m_cached_images;
-		atomic_t<u64> m_cached_memory_size = {0};
+		atomic_t<u64> m_cached_memory_size = { 0 };
 		shared_mutex m_cached_pool_lock;
 
 		// Blocks some operations when exiting
@@ -445,9 +446,9 @@ namespace vk
 
 		VkComponentMapping apply_component_mapping_flags(u32 gcm_format, rsx::component_order flags, const rsx::texture_channel_remap_t& remap_vector) const;
 
-		void copy_transfer_regions_impl(vk::command_buffer& cmd, vk::image* dst, const std::vector<copy_region_descriptor>& sections_to_transfer) const;
+		void copy_transfer_regions_impl(vk::command_buffer& cmd, vk::image* dst, const rsx::simple_array<copy_region_descriptor>& sections_to_transfer) const;
 
-		vk::image* get_template_from_collection_impl(const std::vector<copy_region_descriptor>& sections_to_transfer) const;
+		vk::image* get_template_from_collection_impl(const rsx::simple_array<copy_region_descriptor>& sections_to_transfer) const;
 
 		std::unique_ptr<vk::viewable_image> find_cached_image(VkFormat format, u16 w, u16 h, u16 d, u16 mipmaps, VkImageType type, VkImageCreateFlags create_flags, VkImageUsageFlags usage, VkSharingMode sharing);
 
@@ -462,28 +463,28 @@ namespace vk
 			u16 x, u16 y, u16 w, u16 h, const rsx::texture_channel_remap_t& remap_vector) override;
 
 		vk::image_view* generate_cubemap_from_images(vk::command_buffer& cmd, u32 gcm_format, u16 size,
-			const std::vector<copy_region_descriptor>& sections_to_copy, const rsx::texture_channel_remap_t& remap_vector) override;
+			const rsx::simple_array<copy_region_descriptor>& sections_to_copy, const rsx::texture_channel_remap_t& remap_vector) override;
 
 		vk::image_view* generate_3d_from_2d_images(vk::command_buffer& cmd, u32 gcm_format, u16 width, u16 height, u16 depth,
-			const std::vector<copy_region_descriptor>& sections_to_copy, const rsx::texture_channel_remap_t& remap_vector) override;
+			const rsx::simple_array<copy_region_descriptor>& sections_to_copy, const rsx::texture_channel_remap_t& remap_vector) override;
 
 		vk::image_view* generate_atlas_from_images(vk::command_buffer& cmd, u32 gcm_format, u16 width, u16 height,
-			const std::vector<copy_region_descriptor>& sections_to_copy, const rsx::texture_channel_remap_t& remap_vector) override;
+			const rsx::simple_array<copy_region_descriptor>& sections_to_copy, const rsx::texture_channel_remap_t& remap_vector) override;
 
 		vk::image_view* generate_2d_mipmaps_from_images(vk::command_buffer& cmd, u32 gcm_format, u16 width, u16 height,
-			const std::vector<copy_region_descriptor>& sections_to_copy, const rsx::texture_channel_remap_t& remap_vector) override;
+			const rsx::simple_array<copy_region_descriptor>& sections_to_copy, const rsx::texture_channel_remap_t& remap_vector) override;
 
 		void release_temporary_subresource(vk::image_view* view) override;
 
 		void update_image_contents(vk::command_buffer& cmd, vk::image_view* dst_view, vk::image* src, u16 width, u16 height) override;
 
-		cached_texture_section* create_new_texture(vk::command_buffer& cmd, const utils::address_range& rsx_range, u16 width, u16 height, u16 depth, u16 mipmaps, u32 pitch,
+		cached_texture_section* create_new_texture(vk::command_buffer& cmd, const utils::address_range32& rsx_range, u16 width, u16 height, u16 depth, u16 mipmaps, u32 pitch,
 			u32 gcm_format, rsx::texture_upload_context context, rsx::texture_dimension_extended type, bool swizzled, rsx::component_order swizzle_flags, rsx::flags32_t flags) override;
 
-		cached_texture_section* create_nul_section(vk::command_buffer& cmd, const utils::address_range& rsx_range, const rsx::image_section_attributes_t& attrs,
+		cached_texture_section* create_nul_section(vk::command_buffer& cmd, const utils::address_range32& rsx_range, const rsx::image_section_attributes_t& attrs,
 			const rsx::GCM_tile_reference& tile, bool memory_load) override;
 
-		cached_texture_section* upload_image_from_cpu(vk::command_buffer& cmd, const utils::address_range& rsx_range, u16 width, u16 height, u16 depth, u16 mipmaps, u32 pitch, u32 gcm_format,
+		cached_texture_section* upload_image_from_cpu(vk::command_buffer& cmd, const utils::address_range32& rsx_range, u16 width, u16 height, u16 depth, u16 mipmaps, u32 pitch, u32 gcm_format,
 			rsx::texture_upload_context context, const std::vector<rsx::subresource_layout>& subresource_layout, rsx::texture_dimension_extended type, bool swizzled) override;
 
 		void set_component_order(cached_texture_section& section, u32 gcm_format, rsx::component_order expected_flags) override;
@@ -526,4 +527,4 @@ namespace vk
 
 		bool is_overallocated() const;
 	};
-} // namespace vk
+}

@@ -11,8 +11,15 @@ namespace gl
 		mutable bool signaled = false;
 
 	public:
+
 		fence() = default;
 		~fence() = default;
+
+		fence(const fence&) = delete;
+		fence& operator = (const fence&) = delete;
+
+		fence(fence&&) noexcept = default;
+		fence& operator = (fence&&) noexcept = default;
 
 		void create()
 		{
@@ -125,4 +132,4 @@ namespace gl
 			glWaitSync(m_value, 0, GL_TIMEOUT_IGNORED);
 		}
 	};
-} // namespace gl
+}

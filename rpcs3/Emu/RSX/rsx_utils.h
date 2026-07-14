@@ -1,8 +1,8 @@
 #pragma once
 
 #include "../system_config.h"
-#include "util/address_range.h"
-#include "util/geometry.h"
+#include "Utilities/address_range.h"
+#include "Utilities/geometry.h"
 #include "gcm_enums.h"
 
 extern "C"
@@ -14,13 +14,13 @@ extern "C"
 
 namespace rsx
 {
-	// Import address_range utilities
-	using utils::address_range;
-	using utils::address_range_vector;
-	using utils::next_page;
-	using utils::page_end;
+	// Import address_range32 utilities
+	using utils::address_range32;
+	using utils::address_range_vector32;
 	using utils::page_for;
 	using utils::page_start;
+	using utils::page_end;
+	using utils::next_page;
 
 	using flags64_t = u64;
 	using flags32_t = u32;
@@ -37,12 +37,43 @@ namespace rsx
 		fatal
 	};
 
+	namespace limits
+	{
+		enum
+		{
+			fragment_textures_count = 16,
+			vertex_textures_count = 4,
+			vertex_count = 16,
+			fragment_count = 32,
+			tiles_count = 15,
+			zculls_count = 8,
+			color_buffers_count = 4
+		};
+	}
+
+	namespace constants
+	{
+		constexpr std::array<const char*, 16> fragment_texture_names =
+		{
+			"tex0", "tex1", "tex2", "tex3", "tex4", "tex5", "tex6", "tex7",
+			"tex8", "tex9", "tex10", "tex11", "tex12", "tex13", "tex14", "tex15",
+		};
+
+		constexpr std::array<const char*, 4> vertex_texture_names =
+		{
+			"vtex0", "vtex1", "vtex2", "vtex3",
+		};
+
+		// Local RSX memory base (known as constant)
+		constexpr u32 local_mem_base = 0xC0000000;
+	}
+
 	// Base for resources with reference counting
 	class ref_counted
 	{
 	protected:
-		atomic_t<s32> ref_count{0}; // References held
-		atomic_t<u8> idle_time{0};  // Number of times the resource has been tagged idle
+		atomic_t<s32> ref_count{ 0 }; // References held
+		atomic_t<u8> idle_time{ 0 };  // Number of times the resource has been tagged idle
 
 	public:
 		void add_ref()
@@ -73,57 +104,9 @@ namespace rsx
 		}
 	};
 
-	namespace limits
-	{
-		enum
-		{
-			fragment_textures_count = 16,
-			vertex_textures_count = 4,
-			vertex_count = 16,
-			fragment_count = 32,
-			tiles_count = 15,
-			zculls_count = 8,
-			color_buffers_count = 4
-		};
-	}
-
-	namespace constants
-	{
-		constexpr std::array<const char*, 16> fragment_texture_names =
-			{
-				"tex0",
-				"tex1",
-				"tex2",
-				"tex3",
-				"tex4",
-				"tex5",
-				"tex6",
-				"tex7",
-				"tex8",
-				"tex9",
-				"tex10",
-				"tex11",
-				"tex12",
-				"tex13",
-				"tex14",
-				"tex15",
-		};
-
-		constexpr std::array<const char*, 4> vertex_texture_names =
-			{
-				"vtex0",
-				"vtex1",
-				"vtex2",
-				"vtex3",
-		};
-
-		// Local RSX memory base (known as constant)
-		constexpr u32 local_mem_base = 0xC0000000;
-	} // namespace constants
-
 	/**
-	 * Holds information about a framebuffer
-	 */
+	* Holds information about a framebuffer
+	*/
 	struct gcm_framebuffer_info
 	{
 		u32 address = 0;
@@ -134,10 +117,10 @@ namespace rsx
 
 		u16 width = 0;
 		u16 height = 0;
-		u8 bpp = 0;
-		u8 samples = 0;
+		u8  bpp = 0;
+		u8  samples = 0;
 
-		address_range range{};
+		address_range32 range{};
 
 		gcm_framebuffer_info() = default;
 
@@ -148,16 +131,16 @@ namespace rsx
 			// Account for the last line of the block not reaching the end
 			const u32 block_size = pitch * (height - 1) * aa_factor_v;
 			const u32 line_size = width * aa_factor_u * bpp;
-			range = address_range::start_length(address, block_size + line_size);
+			range = address_range32::start_length(address, block_size + line_size);
 		}
 
-		address_range get_memory_range(const u32* aa_factors)
+		address_range32 get_memory_range(const u32* aa_factors)
 		{
 			calculate_memory_range(aa_factors[0], aa_factors[1]);
 			return range;
 		}
 
-		address_range get_memory_range() const
+		address_range32 get_memory_range() const
 		{
 			ensure(range.start == address);
 			return range;
@@ -166,16 +149,16 @@ namespace rsx
 
 	struct avconf
 	{
-		stereo_render_mode_options stereo_mode = stereo_render_mode_options::disabled; // Stereo 3D display mode
-		u8 format = 0;                                                                 // XRGB
-		u8 aspect = 0;                                                                 // AUTO
-		u8 resolution_id = 2;                                                          // 720p
-		u32 scanline_pitch = 0;                                                        // PACKED
-		atomic_t<f32> gamma = 1.f;                                                     // NO GAMMA CORRECTION
-		u32 resolution_x = 1280;                                                       // X RES
-		u32 resolution_y = 720;                                                        // Y RES
-		atomic_t<u32> state = 0;                                                       // 1 after cellVideoOutConfigure was called
-		u8 scan_mode = 1;                                                              // CELL_VIDEO_OUT_SCAN_MODE_PROGRESSIVE
+		bool stereo_enabled = false; // Stereo 3D display mode
+		u8 format = 0;               // XRGB
+		u8 aspect = 0;               // AUTO
+		u8 resolution_id = 2;        // 720p
+		u32 scanline_pitch = 0;      // PACKED
+		atomic_t<f32> gamma = 1.f;   // NO GAMMA CORRECTION
+		u32 resolution_x = 1280;     // X RES
+		u32 resolution_y = 720;      // Y RES
+		atomic_t<u32> state = 0;     // 1 after cellVideoOutConfigure was called
+		u8 scan_mode = 1;            // CELL_VIDEO_OUT_SCAN_MODE_PROGRESSIVE
 
 		ENABLE_BITWISE_SERIALIZATION;
 		SAVESTATE_INIT_POS(12);
@@ -188,6 +171,8 @@ namespace rsx
 		u32 get_compatible_gcm_format() const;
 		u8 get_bpp() const;
 		double get_aspect_ratio() const;
+
+		size2u video_frame_size() const;
 
 		areau aspect_convert_region(const size2u& image_dimensions, const size2u& output_dimensions) const;
 		size2u aspect_convert_dimensions(const size2u& image_dimensions) const;
@@ -202,10 +187,10 @@ namespace rsx
 		u16 width;
 		u16 height;
 		u32 pitch;
-		u8 bpp;
+		u8  bpp;
 		u32 dma;
 		u32 rsx_address;
-		u8* pixels;
+		u8 *pixels;
 	};
 
 	struct blit_dst_info
@@ -222,18 +207,32 @@ namespace rsx
 		f32 scale_x;
 		f32 scale_y;
 		u32 pitch;
-		u8 bpp;
+		u8  bpp;
 		u32 dma;
 		u32 rsx_address;
-		u8* pixels;
+		u8 *pixels;
 		bool swizzled;
+	};
+
+	struct surface_scaling_config_t
+	{
+		u16 scale_percent = 100;
+		u16 min_scalable_dimension = 0;
+
+		f32 scale_factor() const { return scale_percent * 0.01f; }
+
+		bool operator == (const surface_scaling_config_t& that) const
+		{
+			return this->scale_percent == that.scale_percent &&
+				this->min_scalable_dimension == that.min_scalable_dimension;
+		}
 	};
 
 	template <typename T>
 	void pad_texture(const void* input_pixels, void* output_pixels, u16 input_width, u16 input_height, u16 output_width, u16 /*output_height*/)
 	{
-		const T* src = static_cast<const T*>(input_pixels);
-		T* dst = static_cast<T*>(output_pixels);
+		const T *src = static_cast<const T*>(input_pixels);
+		T *dst = static_cast<T*>(output_pixels);
 
 		for (u16 h = 0; h < input_height; ++h)
 		{
@@ -258,8 +257,7 @@ namespace rsx
 
 	static constexpr u32 next_pow2(u32 x)
 	{
-		if (x <= 2)
-			return x;
+		if (x <= 2) return x;
 
 		return static_cast<u32>((1ULL << 32) >> std::countl_zero(x - 1));
 	}
@@ -278,10 +276,10 @@ namespace rsx
 	static inline u32 get_location(u32 addr)
 	{
 		// We don't really care about the actual memory map, it shouldn't be possible to use the mmio bar region anyway
-		constexpr address_range local_mem_range = address_range::start_length(rsx::constants::local_mem_base, 0x1000'0000);
+		constexpr address_range32 local_mem_range = address_range32::start_length(rsx::constants::local_mem_base, 0x1000'0000);
 		return local_mem_range.overlaps(addr) ?
-		           CELL_GCM_LOCATION_LOCAL :
-		           CELL_GCM_LOCATION_MAIN;
+			CELL_GCM_LOCATION_LOCAL :
+			CELL_GCM_LOCATION_MAIN;
 	}
 
 	// General purpose alignment without power-of-2 constraint
@@ -339,17 +337,18 @@ namespace rsx
 				z >>= 1;
 				log2_depth--;
 			}
-		} while (x | y | z);
+		}
+		while (x | y | z);
 
 		return offset;
 	}
 
 	/*   Note: What the ps3 calls swizzling in this case is actually z-ordering / morton ordering of pixels
-	 *       - Input can be swizzled or linear, bool flag handles conversion to and from
-	 *       - It will handle any width and height that are a power of 2, square or non square
-	 *    Restriction: It has mixed results if the height or width is not a power of 2
-	 *    Restriction: Only works with 2D surfaces
-	 */
+	*       - Input can be swizzled or linear, bool flag handles conversion to and from
+	*       - It will handle any width and height that are a power of 2, square or non square
+	*    Restriction: It has mixed results if the height or width is not a power of 2
+	*    Restriction: Only works with 2D surfaces
+	*/
 	template <typename T, bool input_is_swizzled>
 	void convert_linear_swizzle(const void* input_pixels, void* output_pixels, u16 width, u16 height, u32 pitch)
 	{
@@ -365,14 +364,14 @@ namespace rsx
 		// double the limit mask to account for bits in both x and y
 		limit_mask = 1 << (limit_mask << 1);
 
-		// x_mask, bits above limit are 1's for x-carry
+		//x_mask, bits above limit are 1's for x-carry
 		x_mask = (x_mask | ~(limit_mask - 1));
-		// y_mask. bits above limit are 0'd, as we use a different method for y-carry over
+		//y_mask. bits above limit are 0'd, as we use a different method for y-carry over
 		y_mask = (y_mask & (limit_mask - 1));
 
 		u32 offs_y = 0;
 		u32 offs_x = 0;
-		u32 offs_x0 = 0; // total y-carry offset for x
+		u32 offs_x0 = 0; //total y-carry offset for x
 		const u32 y_incr = limit_mask;
 
 		// NOTE: The swizzled area is always a POT region and we must scan all of it to fill in the linear.
@@ -461,11 +460,11 @@ namespace rsx
 		}
 	}
 
-	void convert_scale_image(u8* dst, AVPixelFormat dst_format, int dst_width, int dst_height, int dst_pitch,
-		const u8* src, AVPixelFormat src_format, int src_width, int src_height, int src_pitch, int src_slice_h, bool bilinear);
+	void convert_scale_image(u8 *dst, AVPixelFormat dst_format, int dst_width, int dst_height, int dst_pitch,
+		const u8 *src, AVPixelFormat src_format, int src_width, int src_height, int src_pitch, int src_slice_h, bool bilinear);
 
-	void clip_image(u8* dst, const u8* src, int clip_x, int clip_y, int clip_w, int clip_h, int bpp, int src_pitch, int dst_pitch);
-	void clip_image_may_overlap(u8* dst, const u8* src, int clip_x, int clip_y, int clip_w, int clip_h, int bpp, int src_pitch, int dst_pitch, u8* buffer);
+	void clip_image(u8 *dst, const u8 *src, int clip_x, int clip_y, int clip_w, int clip_h, int bpp, int src_pitch, int dst_pitch);
+	void clip_image_may_overlap(u8 *dst, const u8 *src, int clip_x, int clip_y, int clip_w, int clip_h, int bpp, int src_pitch, int dst_pitch, u8* buffer);
 
 	std::array<float, 4> get_constant_blend_colors();
 
@@ -519,7 +518,7 @@ namespace rsx
 			{
 				if (clip_width >= parent_width)
 					width = parent_width;
-				// else
+				//else
 				//	width = clip_width; // Already initialized with clip_width
 
 				x = static_cast<T>(0);
@@ -539,7 +538,7 @@ namespace rsx
 			{
 				if (clip_height >= parent_height)
 					height = parent_height;
-				// else
+				//else
 				//	height = clip_height; // Already initialized with clip_height
 
 				y = static_cast<T>(0);
@@ -574,7 +573,7 @@ namespace rsx
 			const auto w = std::min<u32>(parent_w, std::max<u32>(child_w, dst_x) - dst_x); // Clamp negatives to 0!
 			const auto h = std::min<u32>(parent_h, std::max<u32>(child_h, dst_y) - dst_y);
 
-			return std::make_tuple<position2u, position2u, size2u>({src_x, src_y}, {dst_x, dst_y}, {w, h});
+			return std::make_tuple<position2u, position2u, size2u>({ src_x, src_y }, { dst_x, dst_y }, { w, h });
 		}
 		else
 		{
@@ -586,32 +585,27 @@ namespace rsx
 			const auto w = std::min<u32>(child_w, std::max<u32>(parent_w, src_x) - src_x);
 			const auto h = std::min<u32>(child_h, std::max<u32>(parent_h, src_y) - src_y);
 
-			return std::make_tuple<position2u, position2u, size2u>({src_x, src_y}, {dst_x, dst_y}, {w, h});
+			return std::make_tuple<position2u, position2u, size2u>({ src_x, src_y }, { dst_x, dst_y }, { w, h });
 		}
 	}
 
-	static inline f32 get_resolution_scale()
-	{
-		return g_cfg.video.strict_rendering_mode ? 1.f : (g_cfg.video.resolution_scale_percent / 100.f);
-	}
-
-	static inline int get_resolution_scale_percent()
-	{
-		return g_cfg.video.strict_rendering_mode ? 100 : g_cfg.video.resolution_scale_percent;
-	}
-
 	template <bool clamp = false>
-	static inline const std::pair<u16, u16> apply_resolution_scale(u16 width, u16 height, u16 ref_width = 0, u16 ref_height = 0)
+	static inline const std::pair<u16, u16> apply_resolution_scale(
+		const surface_scaling_config_t& config,
+		u16 width,
+		u16 height,
+		u16 ref_width = 0,
+		u16 ref_height = 0)
 	{
 		ref_width = (ref_width) ? ref_width : width;
 		ref_height = (ref_height) ? ref_height : height;
 		const u16 ref = std::max(ref_width, ref_height);
 
-		if (ref > g_cfg.video.min_scalable_dimension)
+		if (ref > config.min_scalable_dimension)
 		{
 			// Upscale both width and height
-			width = (get_resolution_scale_percent() * width) / 100;
-			height = (get_resolution_scale_percent() * height) / 100;
+			width = (config.scale_percent * width) / 100;
+			height = (config.scale_percent * height) / 100;
 
 			if constexpr (clamp)
 			{
@@ -620,15 +614,18 @@ namespace rsx
 			}
 		}
 
-		return {width, height};
+		return { width, height };
 	}
 
 	template <bool clamp = false>
-	static inline const std::pair<u16, u16> apply_inverse_resolution_scale(u16 width, u16 height)
+	static inline const std::pair<u16, u16> apply_inverse_resolution_scale(
+		const surface_scaling_config_t& config,
+		u16 width,
+		u16 height)
 	{
 		// Inverse scale
-		auto width_ = (width * 100) / get_resolution_scale_percent();
-		auto height_ = (height * 100) / get_resolution_scale_percent();
+		auto width_ = (width * 100) / config.scale_percent;
+		auto height_ = (height * 100) / config.scale_percent;
 
 		if constexpr (clamp)
 		{
@@ -636,12 +633,12 @@ namespace rsx
 			height_ = std::max<u16>(height_, 1);
 		}
 
-		if (std::max(width_, height_) > g_cfg.video.min_scalable_dimension)
+		if (std::max(width_, height_) > config.min_scalable_dimension)
 		{
-			return {width_, height_};
+			return { width_, height_ };
 		}
 
-		return {width, height};
+		return { width, height };
 	}
 
 	/**
@@ -723,14 +720,14 @@ namespace rsx
 				if (n == count)
 					return dst_index;
 
-				dst[dst_index++] = last_index; // Duplicate last
+				dst[dst_index++] = last_index; //Duplicate last
 
 				if ((dst_index & 1) == 0)
-					// Duplicate last again to fix face winding
+					//Duplicate last again to fix face winding
 					dst[dst_index++] = last_index;
 
 				last_index = src[n];
-				dst[dst_index++] = last_index; // Duplicate next
+				dst[dst_index++] = last_index; //Duplicate next
 			}
 			else
 			{
@@ -765,12 +762,11 @@ namespace rsx
 		// Classic fixed point, see PGRAPH section of nouveau docs for TEX_FILTER (lod_bias) and TEX_CONTROL (min_lod, max_lod)
 		// Technically min/max lod are fixed 4.8 but a 5.8 decoder should work just as well since sign bit is 0
 
-		if constexpr (sign)
-			if (bits & (1 << (integer + frac)))
-			{
-				bits = (0 - bits) & (~0u >> (31 - (integer + frac)));
-				return bits / (-To(1u << frac));
-			}
+		if constexpr (sign) if (bits & (1 << (integer + frac)))
+		{
+			bits = (0 - bits) & (~0u >> (31 - (integer + frac)));
+			return bits / (-To(1u << frac));
+		}
 
 		return bits / To(1u << frac);
 	}
@@ -813,7 +809,7 @@ namespace rsx
 		return base * scale;
 	}
 
-	template <bool _signed = false>
+	template<bool _signed = false>
 	u16 encode_fx12(f32 value)
 	{
 		u16 raw = u16(std::abs(value) * 256.);
@@ -834,4 +830,4 @@ namespace rsx
 			}
 		}
 	}
-} // namespace rsx
+}

@@ -6,10 +6,10 @@
 #include "RSXOffload.h"
 #include "RSXThread.h"
 
-#include "util/lockless.h"
+#include "Utilities/lockless.h"
 
 #include <thread>
-#include "rx/asm.hpp"
+#include "util/asm.hpp"
 
 namespace rsx
 {
@@ -22,7 +22,7 @@ namespace rsx
 
 		thread_base* current_thread_ = nullptr;
 
-		void operator()()
+		void operator ()()
 		{
 			if (!g_cfg.video.multithreaded_rsx)
 			{
@@ -97,7 +97,7 @@ namespace rsx
 	}
 
 	// General transport
-	void dma_manager::copy(void* dst, std::vector<u8>& src, u32 length) const
+	void dma_manager::copy(void *dst, std::vector<u8>& src, u32 length) const
 	{
 		if (length <= max_immediate_transfer_size || !g_cfg.video.multithreaded_rsx)
 		{
@@ -110,7 +110,7 @@ namespace rsx
 		}
 	}
 
-	void dma_manager::copy(void* dst, void* src, u32 length) const
+	void dma_manager::copy(void *dst, void *src, u32 length) const
 	{
 		if (length <= max_immediate_transfer_size || !g_cfg.video.multithreaded_rsx)
 		{
@@ -126,7 +126,7 @@ namespace rsx
 	}
 
 	// Vertex utilities
-	void dma_manager::emulate_as_indexed(void* dst, rsx::primitive_type primitive, u32 count)
+	void dma_manager::emulate_as_indexed(void *dst, rsx::primitive_type primitive, u32 count)
 	{
 		if (!g_cfg.video.multithreaded_rsx)
 		{
@@ -181,13 +181,13 @@ namespace rsx
 			while (_thr.m_enqueued_count.load() > _thr.m_processed_count.load())
 			{
 				rsxthr->on_semaphore_acquire_wait();
-				rx::pause();
+				utils::pause();
 			}
 		}
 		else
 		{
 			while (_thr.m_enqueued_count.load() > _thr.m_processed_count.load())
-				rx::pause();
+				utils::pause();
 		}
 
 		return true;
@@ -212,11 +212,11 @@ namespace rsx
 	}
 
 	// Fault recovery
-	utils::address_range dma_manager::get_fault_range(bool writing) const
+	utils::address_range32 dma_manager::get_fault_range(bool writing) const
 	{
 		const auto m_current_job = ensure(m_thread->m_current_job);
 
-		void* address = nullptr;
+		void *address = nullptr;
 		u32 range = m_current_job->length;
 
 		switch (m_current_job->type)
@@ -237,6 +237,6 @@ namespace rsx
 			fmt::throw_exception("Unreachable");
 		}
 
-		return utils::address_range::start_length(vm::get_addr(address), range);
+		return utils::address_range32::start_length(vm::get_addr(address), range);
 	}
-} // namespace rsx
+}

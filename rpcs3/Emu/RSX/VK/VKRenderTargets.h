@@ -98,10 +98,10 @@ namespace vk
 		std::vector<VkBufferImageCopy> build_spill_transfer_descriptors(vk::image* target);
 
 	public:
-		u64 frame_tag = 0;          // frame id when invalidated, 0 if not invalid
-		u64 last_rw_access_tag = 0; // timestamp when this object was last used
-		u64 spill_request_tag = 0;  // timestamp when spilling was requested
-		bool is_bound = false;      // set when the surface is bound for rendering
+		u64 frame_tag = 0;              // frame id when invalidated, 0 if not invalid
+		u64 last_rw_access_tag = 0;     // timestamp when this object was last used
+		u64 spill_request_tag = 0;      // timestamp when spilling was requested
+		bool is_bound = false;          // set when the surface is bound for rendering
 
 		using viewable_image::viewable_image;
 
@@ -120,14 +120,8 @@ namespace vk
 		void texture_barrier(vk::command_buffer& cmd);
 		void post_texture_barrier(vk::command_buffer& cmd);
 		void memory_barrier(vk::command_buffer& cmd, rsx::surface_access access);
-		void read_barrier(vk::command_buffer& cmd)
-		{
-			memory_barrier(cmd, rsx::surface_access::shader_read);
-		}
-		void write_barrier(vk::command_buffer& cmd)
-		{
-			memory_barrier(cmd, rsx::surface_access::shader_write);
-		}
+		void read_barrier(vk::command_buffer& cmd) { memory_barrier(cmd, rsx::surface_access::shader_read); }
+		void write_barrier(vk::command_buffer& cmd) { memory_barrier(cmd, rsx::surface_access::shader_write); }
 	};
 
 	static inline vk::render_target* as_rtt(vk::image* t)
@@ -160,7 +154,7 @@ namespace vk
 			// If we have driver support for FBO loops, set the usage flag for it.
 			if (vk::get_current_renderer()->get_framebuffer_loops_support())
 			{
-				return {VK_IMAGE_USAGE_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT, 0};
+				return { VK_IMAGE_USAGE_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT, VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT };
 			}
 
 			// Workarounds to force transition to GENERAL to decompress.
@@ -172,7 +166,7 @@ namespace vk
 					format_features.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT)
 				{
 					// Only set if supported by hw
-					return {VK_IMAGE_USAGE_STORAGE_BIT, 0};
+					return { VK_IMAGE_USAGE_STORAGE_BIT, 0 };
 				}
 				break;
 			case driver_vendor::AMD:
@@ -180,12 +174,12 @@ namespace vk
 				if (vk::get_chip_family() >= chip_class::AMD_navi1x)
 				{
 					// Only needed for GFX10+
-					return {0, VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT};
+					return { 0, VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT };
 				}
 				break;
 			default:
 				rsx_log.error("Unknown driver vendor!");
-				[[fallthrough]];
+				[[ fallthrough ]];
 			case driver_vendor::NVIDIA:
 			case driver_vendor::INTEL:
 			case driver_vendor::MVK:
@@ -206,6 +200,7 @@ namespace vk
 			rsx::surface_color_format format,
 			usz width, usz height, usz pitch,
 			rsx::surface_antialiasing antialias,
+			const rsx::surface_scaling_config_t& resolution_scaling_config,
 			vk::render_device& device, vk::command_buffer& cmd)
 		{
 			const auto fmt = vk::get_compatible_surface_format(format);
@@ -237,7 +232,7 @@ namespace vk
 			}
 
 			std::unique_ptr<vk::render_target> rtt;
-			const auto [width_, height_] = rsx::apply_resolution_scale<true>(static_cast<u16>(width), static_cast<u16>(height));
+			const auto [width_, height_] = rsx::apply_resolution_scale<true>(resolution_scaling_config, static_cast<u16>(width), static_cast<u16>(height));
 
 			rtt = std::make_unique<vk::render_target>(device, device.get_memory_mapping().device_local,
 				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
@@ -257,6 +252,7 @@ namespace vk
 
 			rtt->set_format(format);
 			rtt->set_aa_mode(antialias);
+			rtt->set_resolution_scaling_config(resolution_scaling_config);
 			rtt->sample_layout = sample_layout;
 			rtt->memory_usage_flags = rsx::surface_usage_flags::attachment;
 			rtt->state_flags = rsx::surface_state_flags::erase_bkgnd;
@@ -276,6 +272,7 @@ namespace vk
 			rsx::surface_depth_format2 format,
 			usz width, usz height, usz pitch,
 			rsx::surface_antialiasing antialias,
+			const rsx::surface_scaling_config_t& resolution_scaling_config,
 			vk::render_device& device, vk::command_buffer& cmd)
 		{
 			const VkFormat requested_format = vk::get_compatible_depth_surface_format(device.get_formats_support(), format);
@@ -302,7 +299,7 @@ namespace vk
 			}
 
 			std::unique_ptr<vk::render_target> ds;
-			const auto [width_, height_] = rsx::apply_resolution_scale<true>(static_cast<u16>(width), static_cast<u16>(height));
+			const auto [width_, height_] = rsx::apply_resolution_scale<true>(resolution_scaling_config, static_cast<u16>(width), static_cast<u16>(height));
 
 			ds = std::make_unique<vk::render_target>(device, device.get_memory_mapping().device_local,
 				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
@@ -322,10 +319,11 @@ namespace vk
 
 			ds->set_format(format);
 			ds->set_aa_mode(antialias);
+			ds->set_resolution_scaling_config(resolution_scaling_config);
 			ds->sample_layout = sample_layout;
 			ds->memory_usage_flags = rsx::surface_usage_flags::attachment;
 			ds->state_flags = rsx::surface_state_flags::erase_bkgnd;
-			ds->native_component_map = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R};
+			ds->native_component_map = { VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R };
 			ds->native_pitch = static_cast<u32>(width) * get_format_block_size_in_bytes(format) * ds->samples_x;
 			ds->rsx_pitch = static_cast<u32>(pitch);
 			ds->surface_width = static_cast<u16>(width);
@@ -339,11 +337,14 @@ namespace vk
 		static void clone_surface(
 			vk::command_buffer& cmd,
 			std::unique_ptr<vk::render_target>& sink, vk::render_target* ref,
-			u32 address, barrier_descriptor_t& prev)
+			u32 address, barrier_descriptor_t& prev,
+			const rsx::surface_scaling_config_t& scaling_config)
 		{
 			if (!sink)
 			{
-				const auto [new_w, new_h] = rsx::apply_resolution_scale<true>(prev.width, prev.height,
+				const auto [new_w, new_h] = rsx::apply_resolution_scale<true>(
+					scaling_config,
+					prev.width, prev.height,
 					ref->get_surface_width<rsx::surface_metrics::pixels>(), ref->get_surface_height<rsx::surface_metrics::pixels>());
 
 				auto& dev = cmd.get_command_pool().get_owner();
@@ -361,6 +362,10 @@ namespace vk
 					ref->format_class());
 
 				sink->add_ref();
+
+				sink->sample_layout = ref->sample_layout;
+				sink->resolution_scaling_config = scaling_config;
+
 				sink->set_spp(ref->get_spp());
 				sink->format_info = ref->format_info;
 				sink->memory_usage_flags = rsx::surface_usage_flags::storage;
@@ -375,8 +380,8 @@ namespace vk
 				sink->queue_tag(address);
 
 				const auto best_layout = (ref->info.usage & VK_IMAGE_USAGE_SAMPLED_BIT) ?
-				                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL :
-				                             ref->current_layout;
+					VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL :
+					ref->current_layout;
 
 				sink->change_layout(cmd, best_layout);
 			}
@@ -413,9 +418,9 @@ namespace vk
 		static bool is_compatible_surface(const vk::render_target* surface, const vk::render_target* ref, u16 width, u16 height, u8 sample_count)
 		{
 			return (surface->format() == ref->format() &&
-					surface->get_spp() == sample_count &&
-					surface->get_surface_width() == width &&
-					surface->get_surface_height() == height);
+				surface->get_spp() == sample_count &&
+				surface->get_surface_width() == width &&
+				surface->get_surface_height() == height);
 		}
 
 		static void prepare_surface_for_drawing(vk::command_buffer& cmd, vk::render_target* surface)
@@ -492,8 +497,7 @@ namespace vk
 		static void notify_surface_invalidated(const std::unique_ptr<vk::render_target>& surface)
 		{
 			surface->frame_tag = vk::get_current_frame_id();
-			if (!surface->frame_tag)
-				surface->frame_tag = 1;
+			if (!surface->frame_tag) surface->frame_tag = 1;
 
 			if (!surface->old_contents.empty())
 			{
@@ -505,8 +509,7 @@ namespace vk
 		}
 
 		static void notify_surface_persist(const std::unique_ptr<vk::render_target>& /*surface*/)
-		{
-		}
+		{}
 
 		static void notify_surface_reused(const std::unique_ptr<vk::render_target>& surface)
 		{
@@ -519,6 +522,7 @@ namespace vk
 			VkFormat format,
 			usz width, usz height,
 			rsx::surface_antialiasing antialias,
+			const rsx::surface_scaling_config_t& scaling_config,
 			bool check_refs)
 		{
 			if (check_refs && surface->has_refs())
@@ -528,8 +532,9 @@ namespace vk
 			}
 
 			return (surface->info.format == format &&
-					surface->get_spp() == get_format_sample_count(antialias) &&
-					surface->matches_dimensions(static_cast<u16>(width), static_cast<u16>(height)));
+				surface->get_spp() == get_format_sample_count(antialias) &&
+				surface->matches_dimensions(static_cast<u16>(width), static_cast<u16>(height))) &&
+				surface->resolution_scaling_config == scaling_config;
 		}
 
 		static bool surface_matches_properties(
@@ -537,10 +542,11 @@ namespace vk
 			rsx::surface_color_format format,
 			usz width, usz height,
 			rsx::surface_antialiasing antialias,
+			const rsx::surface_scaling_config_t& scaling_config,
 			bool check_refs = false)
 		{
 			VkFormat vk_format = vk::get_compatible_surface_format(format).first;
-			return int_surface_matches_properties(surface, vk_format, width, height, antialias, check_refs);
+			return int_surface_matches_properties(surface, vk_format, width, height, antialias, scaling_config, check_refs);
 		}
 
 		static bool surface_matches_properties(
@@ -548,11 +554,12 @@ namespace vk
 			rsx::surface_depth_format2 format,
 			usz width, usz height,
 			rsx::surface_antialiasing antialias,
+			const rsx::surface_scaling_config_t& scaling_config,
 			bool check_refs = false)
 		{
 			auto device = vk::get_current_renderer();
 			VkFormat vk_format = vk::get_compatible_depth_surface_format(device->get_formats_support(), format);
-			return int_surface_matches_properties(surface, vk_format, width, height, antialias, check_refs);
+			return int_surface_matches_properties(surface, vk_format, width, height, antialias, scaling_config, check_refs);
 		}
 
 		static void spill_buffer(std::unique_ptr<vk::buffer>& /*bo*/)
@@ -578,8 +585,8 @@ namespace vk
 			const bool is_scaled = surface->width() != surface->surface_width;
 			if (is_scaled)
 			{
-				const areai src_rect = {0, 0, static_cast<int>(source->width()), static_cast<int>(source->height())};
-				const areai dst_rect = {0, 0, surface->get_surface_width<rsx::surface_metrics::samples, int>(), surface->get_surface_height<rsx::surface_metrics::samples, int>()};
+				const areai src_rect = { 0, 0, static_cast<int>(source->width()), static_cast<int>(source->height()) };
+				const areai dst_rect = { 0, 0, surface->get_surface_width<rsx::surface_metrics::samples, int>(), surface->get_surface_height<rsx::surface_metrics::samples, int>() };
 
 				auto scratch = vk::get_typeless_helper(source->format(), source->format_class(), dst_rect.x2, dst_rect.y2);
 				vk::copy_scaled_image(cmd, source, scratch, src_rect, dst_rect, 1, true, VK_FILTER_NEAREST);
@@ -591,34 +598,37 @@ namespace vk
 			const auto transfer_size = surface->get_memory_range().length();
 			if (transfer_size > max_copy_length || src_offset_in_buffer || surface->is_depth_surface())
 			{
-				auto scratch = vk::get_scratch_buffer(cmd, transfer_size * 4);
+				auto scratch = vk::get_scratch_buffer(cmd, transfer_size * 4, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
 				dest = scratch;
 			}
 
 			VkBufferImageCopy region =
-				{
-					.bufferOffset = (dest == bo) ? dst_offset_in_buffer : 0,
-					.bufferRowLength = surface->rsx_pitch / surface->get_bpp(),
-					.bufferImageHeight = 0,
-					.imageSubresource = {source->aspect(), 0, 0, 1},
-					.imageOffset = {},
-					.imageExtent = {
-						.width = source->width(),
-						.height = source->height(),
-						.depth = 1}};
+			{
+				.bufferOffset = (dest == bo) ? dst_offset_in_buffer : 0,
+				.bufferRowLength = surface->rsx_pitch / surface->get_bpp(),
+				.bufferImageHeight = 0,
+				.imageSubresource = { source->aspect(), 0, 0, 1 },
+				.imageOffset = {},
+				.imageExtent = {
+					.width = source->width(),
+					.height = source->height(),
+					.depth = 1
+				}
+			};
 
 			// inject post-transfer barrier
 			image_readback_options_t options{};
 			options.sync_region =
-				{
-					.offset = src_offset_in_buffer,
-					.length = max_copy_length};
+			{
+				.offset = src_offset_in_buffer,
+				.length = max_copy_length
+			};
 			vk::copy_image_to_buffer(cmd, source, dest, region, options);
 
 			if (dest != bo)
 			{
-				VkBufferCopy copy = {src_offset_in_buffer, dst_offset_in_buffer, max_copy_length};
-				VK_GET_SYMBOL(vkCmdCopyBuffer)(cmd, dest->value, bo->value, 1, &copy);
+				VkBufferCopy copy = { src_offset_in_buffer, dst_offset_in_buffer, max_copy_length };
+				vkCmdCopyBuffer(cmd, dest->value, bo->value, 1, &copy);
 
 				vk::insert_buffer_memory_barrier(cmd,
 					bo->value, dst_offset_in_buffer, max_copy_length,
@@ -656,9 +666,9 @@ namespace vk
 					continue;
 				}
 
-				VkBufferCopy copy = {0, offset, ::size32(*bo)};
+				VkBufferCopy copy = { 0, offset, ::size32(*bo) };
 				offset += ::size32(*bo);
-				VK_GET_SYMBOL(vkCmdCopyBuffer)(cmd, bo->value, dst->value, 1, &copy);
+				vkCmdCopyBuffer(cmd, bo->value, dst->value, 1, &copy);
 
 				// Cleanup
 				vk::surface_cache_utils::dispose(bo);
@@ -687,5 +697,4 @@ namespace vk
 		bool handle_memory_pressure(vk::command_buffer& cmd, rsx::problem_severity severity) override;
 		void trim(vk::command_buffer& cmd, rsx::problem_severity memory_pressure);
 	};
-} // namespace vk
-// h
+}

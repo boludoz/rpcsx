@@ -1,7 +1,6 @@
 #include "GLCompute.h"
 #include "GLTexture.h"
-#include "util/StrUtil.h"
-#include "rx/align.hpp"
+#include "Utilities/StrUtil.h"
 
 namespace gl
 {
@@ -107,8 +106,7 @@ namespace gl
 			invocations_x = optimal_length;
 			invocations_y = invocations_x;
 
-			if (num_invocations % invocations_x)
-				invocations_y++;
+			if (num_invocations % invocations_x) invocations_y++;
 		}
 
 		run(cmd, invocations_x, invocations_y);
@@ -132,23 +130,23 @@ namespace gl
 		// Initialize to allow detecting optimal settings
 		initialize();
 
-		kernel_size = _kernel_size ? _kernel_size : optimal_kernel_size;
+		kernel_size = _kernel_size? _kernel_size : optimal_kernel_size;
 
 		m_src =
-#include "../Program/GLSLSnippets/ShuffleBytes.glsl"
-			;
+		#include "../Program/GLSLSnippets/ShuffleBytes.glsl"
+		;
 
 		const std::pair<std::string_view, std::string> syntax_replace[] =
-			{
-				{"%set, ", ""},
-				{"%loc", std::to_string(GL_COMPUTE_BUFFER_SLOT(0))},
-				{"%ws", std::to_string(optimal_group_size)},
-				{"%ks", std::to_string(kernel_size)},
-				{"%vars", variables},
-				{"%f", function_name},
-				{"%ub", uniforms},
-				{"%md", method_declarations},
-			};
+		{
+			{ "%set, ", ""},
+			{ "%loc", std::to_string(GL_COMPUTE_BUFFER_SLOT(0)) },
+			{ "%ws", std::to_string(optimal_group_size) },
+			{ "%ks", std::to_string(kernel_size) },
+			{ "%vars", variables },
+			{ "%f", function_name },
+			{ "%ub", uniforms },
+			{ "%md", method_declarations },
+		};
 
 		m_src = fmt::replace_all(m_src, syntax_replace);
 		work_kernel = fmt::replace_all(work_kernel, syntax_replace);
@@ -161,9 +159,11 @@ namespace gl
 		{
 			work_kernel += loop_advance + "\n";
 
-			m_src += std::string(
+			m_src += std::string
+			(
 				"	//Unrolled loop\n"
-				"	{\n");
+				"	{\n"
+			);
 
 			// Assemble body with manual loop unroll to try loweing GPR usage
 			for (u32 n = 0; n < kernel_size; ++n)
@@ -197,15 +197,14 @@ namespace gl
 		m_data_length = data_length;
 
 		const auto num_bytes_per_invocation = optimal_group_size * kernel_size * 4;
-		const auto num_bytes_to_process = rx::alignUp(data_length, num_bytes_per_invocation);
+		const auto num_bytes_to_process = utils::align(data_length, num_bytes_per_invocation);
 		const auto num_invocations = num_bytes_to_process / num_bytes_per_invocation;
 
 		if ((num_bytes_to_process + data_offset) > data->size())
 		{
 			// Technically robust buffer access should keep the driver from crashing in OOB situations
 			rsx_log.error("Inadequate buffer length submitted for a compute operation."
-						  "Required=%d bytes, Available=%d bytes",
-				num_bytes_to_process, data->size());
+				"Required=%d bytes, Available=%d bytes", num_bytes_to_process, data->size());
 		}
 
 		compute_task::run(cmd, num_invocations);
@@ -325,22 +324,24 @@ namespace gl
 		initialize();
 
 		const auto raw_data =
-#include "../Program/GLSLSnippets/CopyD24x8ToBuffer.glsl"
-			;
+		#include "../Program/GLSLSnippets/CopyD24x8ToBuffer.glsl"
+		;
 
 		const std::pair<std::string_view, std::string> repl_list[] =
-			{
-				{"%set, ", ""},
-				{"%loc", std::to_string(GL_COMPUTE_BUFFER_SLOT(0))},
-				{"%ws", std::to_string(optimal_group_size)},
-				{"%wks", std::to_string(optimal_kernel_size)}};
+		{
+			{ "%set, ", "" },
+			{ "%loc", std::to_string(GL_COMPUTE_BUFFER_SLOT(0)) },
+			{ "%ws", std::to_string(optimal_group_size) },
+			{ "%wks", std::to_string(optimal_kernel_size) }
+		};
 
 		m_src = fmt::replace_all(raw_data, repl_list);
 	}
 
 	void cs_d24x8_to_ssbo::run(gl::command_context& cmd, gl::viewable_image* src, const gl::buffer* dst, u32 out_offset, const coordu& region, const gl::pixel_buffer_layout& layout)
 	{
-		const auto row_pitch = region.width;
+		const auto row_pitch = layout.row_length ? layout.row_length : region.width;
+		ensure(row_pitch >= region.width);
 
 		m_program.uniforms["swap_bytes"] = layout.swap_bytes;
 		m_program.uniforms["output_pitch"] = row_pitch;
@@ -365,7 +366,7 @@ namespace gl
 
 		dst->bind_range(gl::buffer::target::ssbo, GL_COMPUTE_BUFFER_SLOT(2), out_offset, row_pitch * 4 * region.height);
 
-		const int num_invocations = rx::aligned_div(region.width * region.height, optimal_kernel_size * optimal_group_size);
+		const int num_invocations = utils::aligned_div(region.width * region.height, optimal_kernel_size * optimal_group_size);
 		compute_task::run(cmd, num_invocations);
 	}
 
@@ -374,29 +375,31 @@ namespace gl
 		initialize();
 
 		const auto raw_data =
-#include "../Program/GLSLSnippets/CopyRGBA8ToBuffer.glsl"
-			;
+		#include "../Program/GLSLSnippets/CopyRGBA8ToBuffer.glsl"
+		;
 
 		const std::pair<std::string_view, std::string> repl_list[] =
-			{
-				{"%set, ", ""},
-				{"%loc", std::to_string(GL_COMPUTE_BUFFER_SLOT(0))},
-				{"%ws", std::to_string(optimal_group_size)},
-				{"%wks", std::to_string(optimal_kernel_size)}};
+		{
+			{ "%set, ", "" },
+			{ "%loc", std::to_string(GL_COMPUTE_BUFFER_SLOT(0)) },
+			{ "%ws", std::to_string(optimal_group_size) },
+			{ "%wks", std::to_string(optimal_kernel_size) }
+		};
 
 		m_src = fmt::replace_all(raw_data, repl_list);
 	}
 
 	void cs_rgba8_to_ssbo::run(gl::command_context& cmd, gl::viewable_image* src, const gl::buffer* dst, u32 out_offset, const coordu& region, const gl::pixel_buffer_layout& layout)
 	{
-		const auto row_pitch = region.width;
+		const auto row_pitch = layout.row_length ? layout.row_length : region.width;
+		ensure(row_pitch >= region.width);
 
 		m_program.uniforms["swap_bytes"] = layout.swap_bytes;
 		m_program.uniforms["output_pitch"] = row_pitch;
 		m_program.uniforms["region_offset"] = color2i(region.x, region.y);
 		m_program.uniforms["region_size"] = color2i(region.width, region.height);
 		m_program.uniforms["is_bgra"] = (layout.format == static_cast<GLenum>(gl::texture::format::bgra));
-		m_program.uniforms["block_width"] = static_cast<u32>(layout.size);
+		m_program.uniforms["block_width"] = static_cast<u32>(layout.block_size);
 
 		auto data_view = src->get_view(rsx::default_remap_vector.with_encoding(GL_REMAP_IDENTITY), gl::image_aspect::color);
 
@@ -412,7 +415,7 @@ namespace gl
 
 		dst->bind_range(gl::buffer::target::ssbo, GL_COMPUTE_BUFFER_SLOT(1), out_offset, row_pitch * 4 * region.height);
 
-		const int num_invocations = rx::aligned_div(region.width * region.height, optimal_kernel_size * optimal_group_size);
+		const int num_invocations = utils::aligned_div(region.width * region.height, optimal_kernel_size * optimal_group_size);
 		compute_task::run(cmd, num_invocations);
 	}
 
@@ -421,16 +424,17 @@ namespace gl
 		initialize();
 
 		const auto raw_data =
-#include "../Program/GLSLSnippets/CopyBufferToColorImage.glsl"
-			;
+		#include "../Program/GLSLSnippets/CopyBufferToColorImage.glsl"
+		;
 
 		const std::pair<std::string_view, std::string> repl_list[] =
-			{
-				{"%set, ", ""},
-				{"%image_slot", std::to_string(GL_COMPUTE_IMAGE_SLOT(0))},
-				{"%ssbo_slot", std::to_string(GL_COMPUTE_BUFFER_SLOT(0))},
-				{"%ws", std::to_string(optimal_group_size)},
-				{"%wks", std::to_string(optimal_kernel_size)}};
+		{
+			{ "%set, ", "" },
+			{ "%image_slot", std::to_string(GL_COMPUTE_IMAGE_SLOT(0)) },
+			{ "%ssbo_slot", std::to_string(GL_COMPUTE_BUFFER_SLOT(0)) },
+			{ "%ws", std::to_string(optimal_group_size) },
+			{ "%wks", std::to_string(optimal_kernel_size) }
+		};
 
 		m_src = fmt::replace_all(raw_data, repl_list);
 	}
@@ -438,7 +442,8 @@ namespace gl
 	void cs_ssbo_to_color_image::run(gl::command_context& cmd, const buffer* src, const texture_view* dst, const u32 src_offset, const coordu& dst_region, const pixel_buffer_layout& layout)
 	{
 		const u32 bpp = dst->image()->pitch() / dst->image()->width();
-		const u32 row_length = rx::alignUp(dst_region.width * bpp, std::max<int>(layout.alignment, 1)) / bpp;
+		const u32 row_length = utils::align(dst_region.width * bpp, std::max<int>(layout.alignment, 1)) / bpp;
+		ensure(row_length >= dst_region.width);
 
 		m_program.uniforms["swap_bytes"] = layout.swap_bytes;
 		m_program.uniforms["src_pitch"] = row_length;
@@ -449,7 +454,7 @@ namespace gl
 		src->bind_range(gl::buffer::target::ssbo, GL_COMPUTE_BUFFER_SLOT(0), src_offset, row_length * bpp * dst_region.height);
 		glBindImageTexture(GL_COMPUTE_IMAGE_SLOT(0), dst->id(), 0, GL_FALSE, 0, GL_WRITE_ONLY, dst->view_format());
 
-		const int num_invocations = rx::aligned_div(dst_region.width * dst_region.height, optimal_kernel_size * optimal_group_size);
+		const int num_invocations = utils::aligned_div(dst_region.width * dst_region.height, optimal_kernel_size * optimal_group_size);
 		compute_task::run(cmd, num_invocations);
 	}
 
@@ -458,4 +463,4 @@ namespace gl
 		gl::nil_texture_view view(dst);
 		run(cmd, src, &view, src_offset, dst_region, layout);
 	}
-} // namespace gl
+}

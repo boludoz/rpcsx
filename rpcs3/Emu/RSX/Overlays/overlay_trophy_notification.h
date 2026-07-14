@@ -1,7 +1,7 @@
 #pragma once
 
 #include "overlays.h"
-#include "rpcsx/fw/ps3/sceNpTrophy.h"
+#include "Emu/Cell/Modules/sceNpTrophy.h"
 
 namespace rsx
 {
@@ -30,5 +30,5 @@ namespace rsx
 
 			s32 show(const SceNpTrophyDetails& trophy, const std::vector<uchar>& trophy_icon_buffer);
 		};
-	} // namespace overlays
-} // namespace rsx
+	}
+}

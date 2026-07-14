@@ -2,8 +2,8 @@
 
 #include "util/types.hpp"
 #include "util/logs.hpp"
-#include "util/mutex.h"
-#include "util/StrFmt.h"
+#include "Utilities/mutex.h"
+#include "Utilities/StrFmt.h"
 #include "Emu/system_config_types.h"
 #include <numbers>
 
@@ -397,5 +397,5 @@ protected:
 	bool m_playing = false;
 
 private:
-	static constexpr f32 VOLUME_CHANGE_DURATION = 0.016f; // sec
+	static constexpr f32 VOLUME_CHANGE_DURATION = 0.032f; // sec - Increased for smoother transitions
 };

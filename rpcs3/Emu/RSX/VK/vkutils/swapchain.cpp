@@ -5,9 +5,9 @@ namespace vk
 {
 	// Swapchain image RPCS3
 	swapchain_image_RPCS3::swapchain_image_RPCS3(render_device& dev, const memory_type_mapping& memory_map, u32 width, u32 height)
-		: image(dev, memory_map.device_local, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_IMAGE_TYPE_2D, VK_FORMAT_B8G8R8A8_UNORM, width, height, 1, 1, 1,
-			  VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_TILING_OPTIMAL,
-			  VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, 0, VMM_ALLOCATION_POOL_SWAPCHAIN)
+		:image(dev, memory_map.device_local, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_IMAGE_TYPE_2D, VK_FORMAT_B8G8R8A8_UNORM, width, height, 1, 1, 1,
+			VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_TILING_OPTIMAL,
+			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, 0, VMM_ALLOCATION_POOL_SWAPCHAIN)
 	{
 		m_width = width;
 		m_height = height;
@@ -23,12 +23,12 @@ namespace vk
 		copyRegion.bufferOffset = 0;
 		copyRegion.bufferRowLength = m_width;
 		copyRegion.bufferImageHeight = m_height;
-		copyRegion.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+		copyRegion.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
 		copyRegion.imageOffset = {};
-		copyRegion.imageExtent = {m_width, m_height, 1};
+		copyRegion.imageExtent = { m_width, m_height, 1 };
 
 		change_layout(cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-		VK_GET_SYMBOL(vkCmdCopyImageToBuffer)(cmd, value, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_dma_buffer->value, 1, &copyRegion);
+		vkCmdCopyImageToBuffer(cmd, value, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_dma_buffer->value, 1, &copyRegion);
 		change_layout(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 	}
 
@@ -89,8 +89,7 @@ namespace vk
 		u32 nb_swap_images = 0;
 		_vkGetSwapchainImagesKHR(dev, m_vk_swapchain, &nb_swap_images, nullptr);
 
-		if (!nb_swap_images)
-			fmt::throw_exception("Driver returned 0 images for swapchain");
+		if (!nb_swap_images) fmt::throw_exception("Driver returned 0 images for swapchain");
 
 		std::vector<VkImage> vk_images;
 		vk_images.resize(nb_swap_images);
@@ -106,11 +105,11 @@ namespace vk
 	swapchain_WSI::swapchain_WSI(vk::physical_device& gpu, u32 present_queue, u32 graphics_queue, u32 transfer_queue, VkFormat format, VkSurfaceKHR surface, VkColorSpaceKHR color_space, bool force_wm_reporting_off)
 		: WSI_swapchain_base(gpu, present_queue, graphics_queue, transfer_queue, format)
 	{
-		_vkCreateSwapchainKHR = reinterpret_cast<PFN_vkCreateSwapchainKHR>(VK_GET_SYMBOL(vkGetDeviceProcAddr)(dev, "vkCreateSwapchainKHR"));
-		_vkDestroySwapchainKHR = reinterpret_cast<PFN_vkDestroySwapchainKHR>(VK_GET_SYMBOL(vkGetDeviceProcAddr)(dev, "vkDestroySwapchainKHR"));
-		_vkGetSwapchainImagesKHR = reinterpret_cast<PFN_vkGetSwapchainImagesKHR>(VK_GET_SYMBOL(vkGetDeviceProcAddr)(dev, "vkGetSwapchainImagesKHR"));
-		_vkAcquireNextImageKHR = reinterpret_cast<PFN_vkAcquireNextImageKHR>(VK_GET_SYMBOL(vkGetDeviceProcAddr)(dev, "vkAcquireNextImageKHR"));
-		_vkQueuePresentKHR = reinterpret_cast<PFN_vkQueuePresentKHR>(VK_GET_SYMBOL(vkGetDeviceProcAddr)(dev, "vkQueuePresentKHR"));
+		_vkCreateSwapchainKHR = reinterpret_cast<PFN_vkCreateSwapchainKHR>(vkGetDeviceProcAddr(dev, "vkCreateSwapchainKHR"));
+		_vkDestroySwapchainKHR = reinterpret_cast<PFN_vkDestroySwapchainKHR>(vkGetDeviceProcAddr(dev, "vkDestroySwapchainKHR"));
+		_vkGetSwapchainImagesKHR = reinterpret_cast<PFN_vkGetSwapchainImagesKHR>(vkGetDeviceProcAddr(dev, "vkGetSwapchainImagesKHR"));
+		_vkAcquireNextImageKHR = reinterpret_cast<PFN_vkAcquireNextImageKHR>(vkGetDeviceProcAddr(dev, "vkAcquireNextImageKHR"));
+		_vkQueuePresentKHR = reinterpret_cast<PFN_vkQueuePresentKHR>(vkGetDeviceProcAddr(dev, "vkQueuePresentKHR"));
 
 		m_surface = surface;
 		m_color_space = color_space;
@@ -132,27 +131,6 @@ namespace vk
 				break;
 			}
 		}
-	}
-
-	void swapchain_WSI::create(display_handle_t& handle)
-	{
-#ifdef ANDROID
-		if (!dev)
-		{
-			return;
-		}
-
-		if (m_vk_swapchain)
-		{
-			_vkDestroySwapchainKHR(dev, m_vk_swapchain, nullptr);
-			m_vk_swapchain = nullptr;
-		}
-
-		swapchain_images.clear();
-
-		WSI_config config{};
-		m_surface = make_WSI_surface(dev.gpu(), handle, &config);
-#endif
 	}
 
 	void swapchain_WSI::destroy(bool)
@@ -195,11 +173,12 @@ namespace vk
 				pSurfaceInfo.pNext = &full_screen_exclusive_win32_info;
 
 				auto getPhysicalDeviceSurfaceCapabilities2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceCapabilities2KHR>(
-					VK_GET_SYMBOL(vkGetInstanceProcAddr)(dev.gpu(), "vkGetPhysicalDeviceSurfaceCapabilities2KHR"));
+					vkGetInstanceProcAddr(dev.gpu(), "vkGetPhysicalDeviceSurfaceCapabilities2KHR")
+					);
 				ensure(getPhysicalDeviceSurfaceCapabilities2KHR);
-				CHECK_RESULT(VK_GET_SYMBOL(getPhysicalDeviceSurfaceCapabilities2KHR)(dev.gpu(), &pSurfaceInfo, &pSurfaceCapabilities));
+				CHECK_RESULT(getPhysicalDeviceSurfaceCapabilities2KHR(dev.gpu(), &pSurfaceInfo, &pSurfaceCapabilities));
 
-				return {pSurfaceCapabilities.surfaceCapabilities, !!full_screen_exclusive_capabilities.fullScreenExclusiveSupported};
+				return { pSurfaceCapabilities.surfaceCapabilities, !!full_screen_exclusive_capabilities.fullScreenExclusiveSupported };
 			}
 			else
 			{
@@ -208,16 +187,8 @@ namespace vk
 		}
 #endif
 		VkSurfaceCapabilitiesKHR surface_descriptors = {};
-		auto result = VK_GET_SYMBOL(vkGetPhysicalDeviceSurfaceCapabilitiesKHR)(dev.gpu(), m_surface, &surface_descriptors);
-#ifdef ANDROID
-		if (result != VK_ERROR_SURFACE_LOST_KHR)
-		{
-			CHECK_RESULT(result);
-		}
-#else
-		CHECK_RESULT(result);
-#endif
-		return {surface_descriptors, false};
+		CHECK_RESULT(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(dev.gpu(), m_surface, &surface_descriptors));
+		return { surface_descriptors, false };
 	}
 
 	bool swapchain_WSI::init()
@@ -255,28 +226,33 @@ namespace vk
 		}
 
 		u32 nb_available_modes = 0;
-		CHECK_RESULT(VK_GET_SYMBOL(vkGetPhysicalDeviceSurfacePresentModesKHR)(gpu, m_surface, &nb_available_modes, nullptr));
+		CHECK_RESULT(vkGetPhysicalDeviceSurfacePresentModesKHR(gpu, m_surface, &nb_available_modes, nullptr));
 
 		std::vector<VkPresentModeKHR> present_modes(nb_available_modes);
-		CHECK_RESULT(VK_GET_SYMBOL(vkGetPhysicalDeviceSurfacePresentModesKHR)(gpu, m_surface, &nb_available_modes, present_modes.data()));
+		CHECK_RESULT(vkGetPhysicalDeviceSurfacePresentModesKHR(gpu, m_surface, &nb_available_modes, present_modes.data()));
 
 		VkPresentModeKHR swapchain_present_mode = VK_PRESENT_MODE_FIFO_KHR;
 		std::vector<VkPresentModeKHR> preferred_modes;
 
-		if (!g_cfg.video.vk.force_fifo)
+		switch (g_cfg.video.vsync)
 		{
-			// List of preferred modes in decreasing desirability
-			// NOTE: Always picks "triple-buffered vsync" types if possible
-			if (!g_cfg.video.vsync)
-			{
-				preferred_modes = {VK_PRESENT_MODE_IMMEDIATE_KHR, VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_FIFO_RELAXED_KHR};
-			}
+		case vsync_mode::off:
+			preferred_modes = { VK_PRESENT_MODE_IMMEDIATE_KHR, VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_FIFO_RELAXED_KHR };
+			break;
+		case vsync_mode::adaptive:
+			preferred_modes = { VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_FIFO_RELAXED_KHR };
+			break;
+		case vsync_mode::full:
+		default:
+			// FIFO is guaranteed to be supported, no need to go through a preference chain
+			preferred_modes = {};
+			break;
 		}
 
 		bool mode_found = false;
 		for (VkPresentModeKHR preferred_mode : preferred_modes)
 		{
-			// Search for this mode in supported modes
+			//Search for this mode in supported modes
 			for (VkPresentModeKHR mode : present_modes)
 			{
 				if (mode == preferred_mode)
@@ -296,8 +272,8 @@ namespace vk
 		u32 nb_swap_images = surface_descriptors.minImageCount + 1;
 		if (surface_descriptors.maxImageCount > 0)
 		{
-			// Try to negotiate for a triple buffer setup
-			// In cases where the front-buffer isnt available for present, its better to have a spare surface
+			//Try to negotiate for a triple buffer setup
+			//In cases where the front-buffer isnt available for present, its better to have a spare surface
 			nb_swap_images = std::max(surface_descriptors.minImageCount + 2u, 3u);
 
 			if (nb_swap_images > surface_descriptors.maxImageCount)
@@ -380,4 +356,4 @@ namespace vk
 
 		return _vkQueuePresentKHR(dev.get_present_queue(), &present);
 	}
-} // namespace vk
+}

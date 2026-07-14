@@ -8,7 +8,7 @@
 #include <netinet/in.h>
 #endif
 
-#include "cellos/sys_net/nt_p2p_port.h"
+#include "Emu/Cell/lv2/sys_net/nt_p2p_port.h"
 
 bool send_packet_from_p2p_port_ipv4(const std::vector<u8>& data, const sockaddr_in& addr);
 bool send_packet_from_p2p_port_ipv6(const std::vector<u8>& data, const sockaddr_in6& addr);
@@ -22,6 +22,6 @@ constexpr s32 VPORT_0_HEADER_SIZE = sizeof(u16) + sizeof(u8);
 // Subset 1: Signaling
 enum VPORT_0_SUBSET : u8
 {
-	SUBSET_RPCN = 0,
+	SUBSET_RPCN      = 0,
 	SUBSET_SIGNALING = 1,
 };

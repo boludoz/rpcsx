@@ -4,13 +4,10 @@
 
 #include "../rsx_utils.h"
 
-namespace rsx
-{
+namespace rsx {
 
-	class tex_cache_checker_t
-	{
-		struct per_page_info_t
-		{
+	class tex_cache_checker_t {
+		struct per_page_info_t {
 			u8 prot = 0;
 			u8 no = 0;
 			u8 ro = 0;
@@ -33,7 +30,7 @@ namespace rsx
 
 			FORCE_INLINE u16 sum() const
 			{
-				return u16{no} + ro;
+				return u16{ no } + ro;
 			}
 
 			FORCE_INLINE bool verify() const
@@ -52,14 +49,8 @@ namespace rsx
 			{
 				switch (prot)
 				{
-				case utils::protection::no:
-					if (no++ == umax)
-						fmt::throw_exception("add(protection::no) overflow");
-					return;
-				case utils::protection::ro:
-					if (ro++ == umax)
-						fmt::throw_exception("add(protection::ro) overflow");
-					return;
+				case utils::protection::no: if (no++ == umax) fmt::throw_exception("add(protection::no) overflow"); return;
+				case utils::protection::ro: if (ro++ == umax) fmt::throw_exception("add(protection::ro) overflow"); return;
 				default: fmt::throw_exception("Unreachable");
 				}
 			}
@@ -68,19 +59,14 @@ namespace rsx
 			{
 				switch (prot)
 				{
-				case utils::protection::no:
-					if (no-- == 0)
-						fmt::throw_exception("remove(protection::no) overflow with NO==0");
-					return;
-				case utils::protection::ro:
-					if (ro-- == 0)
-						fmt::throw_exception("remove(protection::ro) overflow with RO==0");
-					return;
+				case utils::protection::no: if (no-- == 0) fmt::throw_exception("remove(protection::no) overflow with NO==0"); return;
+				case utils::protection::ro: if (ro-- == 0) fmt::throw_exception("remove(protection::ro) overflow with RO==0"); return;
 				default: fmt::throw_exception("Unreachable");
 				}
 			}
 		};
 		static_assert(sizeof(per_page_info_t) <= 4, "page_info_elmnt must be less than 4-bytes in size");
+
 
 		// 4GB memory space / 4096 bytes per page = 1048576 pages
 		// Initialized to utils::protection::rw
@@ -126,7 +112,7 @@ namespace rsx
 		}
 
 	public:
-		void set_protection(const address_range& range, utils::protection prot)
+		void set_protection(const address_range32& range, utils::protection prot)
 		{
 			AUDIT(range.is_page_range());
 			AUDIT(prot == utils::protection::no || prot == utils::protection::ro || prot == utils::protection::rw);
@@ -137,7 +123,7 @@ namespace rsx
 			}
 		}
 
-		void discard(const address_range& range)
+		void discard(const address_range32& range)
 		{
 			set_protection(range, utils::protection::rw);
 		}
@@ -150,7 +136,7 @@ namespace rsx
 			}
 		}
 
-		void add(const address_range& range, utils::protection prot)
+		void add(const address_range32& range, utils::protection prot)
 		{
 			AUDIT(range.is_page_range());
 			AUDIT(prot == utils::protection::no || prot == utils::protection::ro);
@@ -161,7 +147,7 @@ namespace rsx
 			}
 		}
 
-		void remove(const address_range& range, utils::protection prot)
+		void remove(const address_range32& range, utils::protection prot)
 		{
 			AUDIT(range.is_page_range());
 			AUDIT(prot == utils::protection::no || prot == utils::protection::ro);
@@ -174,7 +160,7 @@ namespace rsx
 
 		// Returns the a lower bound as to how many locked sections are known to be within the given range with each protection {NA,RO}
 		// The assumption here is that the page in the given range with the largest number of refcounted sections represents the lower bound to how many there must be
-		std::pair<u8, u8> get_minimum_number_of_sections(const address_range& range) const
+		std::pair<u8,u8> get_minimum_number_of_sections(const address_range32& range) const
 		{
 			AUDIT(range.is_page_range());
 
@@ -186,10 +172,10 @@ namespace rsx
 				ro = std::max(ro, ptr->ro);
 			}
 
-			return {no, ro};
+			return { no,ro };
 		}
 
-		void check_unprotected(const address_range& range, bool allow_ro = false, bool must_be_empty = true) const
+		void check_unprotected(const address_range32& range, bool allow_ro = false, bool must_be_empty = true) const
 		{
 			AUDIT(range.is_page_range());
 			for (const per_page_info_t* ptr = rsx_address_to_info_pointer(range.start); ptr <= rsx_address_to_info_pointer(range.end); ptr++)
@@ -201,8 +187,10 @@ namespace rsx
 					fmt::throw_exception("Page at addr=0x%8x should be RW%s: Prot=%s, RO=%d, NA=%d", addr, allow_ro ? " or RO" : "", prot_to_str(prot), ptr->ro, ptr->no);
 				}
 
-				if (must_be_empty && (ptr->no > 0 ||
-										 (!allow_ro && ptr->ro > 0)))
+				if (must_be_empty && (
+						ptr->no > 0 ||
+						(!allow_ro && ptr->ro > 0)
+					))
 				{
 					const u32 addr = info_pointer_to_address(ptr);
 					fmt::throw_exception("Page at addr=0x%8x should not have any NA%s sections: Prot=%s, RO=%d, NA=%d", addr, allow_ro ? " or RO" : "", prot_to_str(prot), ptr->ro, ptr->no);
@@ -214,7 +202,7 @@ namespace rsx
 		{
 			for (usz idx = 0; idx < num_pages; idx++)
 			{
-				auto& elmnt = _info[idx];
+				auto &elmnt = _info[idx];
 				if (!elmnt.verify())
 				{
 					const u32 addr = index_to_rsx_address(idx);
@@ -227,4 +215,4 @@ namespace rsx
 
 	extern tex_cache_checker_t tex_cache_checker;
 }; // namespace rsx
-#endif // TEXTURE_CACHE_DEBUG
+#endif //TEXTURE_CACHE_DEBUG

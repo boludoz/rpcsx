@@ -21,7 +21,6 @@ enum class pad_handler
 #ifdef HAVE_LIBEVDEV
 	evdev,
 #endif
-	virtual_pad
 };
 
 enum class mouse_movement_mode : s32

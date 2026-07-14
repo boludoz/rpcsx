@@ -1,14 +1,16 @@
 #pragma once
 
 #include "io_buffer.h"
+#include "simple_array.hpp"
 #include "../color_utils.h"
 #include "../RSXTexture.h"
 
-#include <stack>
 #include <vector>
 
 namespace rsx
 {
+	using flags32_t = u32;
+
 	enum texture_upload_context : u32
 	{
 		shader_read = 1,
@@ -44,17 +46,17 @@ namespace rsx
 		// Publicly visible enumerators
 		enum
 		{
-			shader_read = (1 << 0),
-			shader_write = (1 << 1),
-			transfer_read = (1 << 2),
+			shader_read    = (1 << 0),
+			shader_write   = (1 << 1),
+			transfer_read  = (1 << 2),
 			transfer_write = (1 << 3),
 
 			// Arbitrary r/w flags, use with caution.
-			memory_write = (1 << 4),
-			memory_read = (1 << 5),
+			memory_write   = (1 << 4),
+			memory_read    = (1 << 5),
 
 			// Not r/w but signifies a GPU reference to this object.
-			gpu_reference = (1 << 6),
+			gpu_reference  = (1 << 6),
 		};
 
 	private:
@@ -71,8 +73,7 @@ namespace rsx
 	public:
 		// Ctor
 		surface_access(u32 value) : value_(value)
-		{
-		}
+		{}
 
 		// Quick helpers
 		inline bool is_read() const
@@ -95,12 +96,12 @@ namespace rsx
 			return !(value_ & ~(all_transfer | all_reads));
 		}
 
-		bool operator==(const surface_access& other) const
+		bool operator == (const surface_access& other) const
 		{
 			return value_ == other.value_;
 		}
 
-		bool operator==(u32 other) const
+		bool operator == (u32 other) const
 		{
 			return value_ == other;
 		}
@@ -122,9 +123,59 @@ namespace rsx
 			RSX_FORMAT_CLASS_DEPTH_FLOAT_MASK = (RSX_FORMAT_CLASS_DEPTH16_FLOAT | RSX_FORMAT_CLASS_DEPTH24_FLOAT_X8_PACK32),
 			RSX_FORMAT_CLASS_DONT_CARE = RSX_FORMAT_CLASS_UNDEFINED,
 		};
-	} // namespace format_class_
+	}
 
 	using namespace format_class_;
+
+	enum format_features : u8
+	{
+		RSX_FORMAT_FEATURE_SIGNED_COMPONENTS    = (1 << 0),
+		RSX_FORMAT_FEATURE_BIASED_NORMALIZATION = (1 << 1),
+		RSX_FORMAT_FEATURE_GAMMA_CORRECTION     = (1 << 2),
+		RSX_FORMAT_FEATURE_16BIT_CHANNELS       = (1 << 3),  // Complements RSX_FORMAT_FEATURE_SIGNED_COMPONENTS
+	};
+
+	enum host_format_features : u8
+	{
+		RSX_HOST_FORMAT_FEATURE_SNORM = (1 << 0),
+		RSX_HOST_FORMAT_FEATURE_SRGB  = (1 << 1),
+	};
+
+	using enum format_features;
+
+	struct texture_format_ex
+	{
+		texture_format_ex() = default;
+		texture_format_ex(u32 bits)
+			: format_bits(bits)
+		{}
+
+		bool valid() const { return format_bits != 0; }
+		u32 format() const { return format_bits & ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_UN); }
+
+		bool hw_SNORM_possible() const;
+		bool hw_SRGB_possible() const;
+
+		bool host_snorm_format_active() const { return host_features & RSX_HOST_FORMAT_FEATURE_SNORM; }
+		bool host_srgb_format_active() const { return host_features & RSX_HOST_FORMAT_FEATURE_SRGB; }
+
+		operator bool() const { return valid(); }
+
+		bool operator == (const texture_format_ex& that) const
+		{
+			return this->format_bits == that.format_bits &&
+				this->features == that.features &&
+				this->host_features == that.host_features &&
+				this->encoded_remap == that.encoded_remap;
+		}
+
+	//private:
+		u32 format_bits = 0;
+		u32 features = 0;
+		u32 encoded_remap = 0;
+		u32 texel_remap_control = 0;
+		u32 host_features = 0;
+	};
 
 	// Sampled image descriptor
 	class sampled_image_descriptor_base
@@ -141,7 +192,7 @@ namespace rsx
 #pragma pack(pop)
 
 		// Texure matrix stack
-		std::stack<texcoord_xform_t> m_texcoord_xform_stack;
+		rsx::simple_array<texcoord_xform_t> m_texcoord_xform_stack;
 
 	public:
 		virtual ~sampled_image_descriptor_base() = default;
@@ -149,14 +200,14 @@ namespace rsx
 
 		void push_texcoord_xform()
 		{
-			m_texcoord_xform_stack.push(texcoord_xform);
+			m_texcoord_xform_stack.push_back(texcoord_xform);
 		}
 
 		void pop_texcoord_xform()
 		{
 			ensure(!m_texcoord_xform_stack.empty());
-			std::memcpy(&texcoord_xform, &m_texcoord_xform_stack.top(), sizeof(texcoord_xform_t));
-			m_texcoord_xform_stack.pop();
+			std::memcpy(&texcoord_xform, &m_texcoord_xform_stack.back(), sizeof(texcoord_xform_t));
+			m_texcoord_xform_stack.pop_back();
 		}
 
 		texture_upload_context upload_context = texture_upload_context::shader_read;
@@ -168,6 +219,7 @@ namespace rsx
 		u64 surface_cache_tag = 0;
 
 		texcoord_xform_t texcoord_xform;
+		texture_format_ex format_ex;
 	};
 
 	struct typeless_xfer
@@ -199,8 +251,8 @@ namespace rsx
 		u16 depth;
 		u16 level;
 		u16 layer;
-		u8 border;
-		u8 reserved;
+		u8  border;
+		u8  reserved;
 		u32 pitch_in_block;
 	};
 
@@ -233,21 +285,21 @@ namespace rsx
 	};
 
 	/**
-	 * Get size to store texture in a linear fashion.
-	 * Storage is assumed to use a rowPitchAlignment boundary for every row of texture.
-	 */
+	* Get size to store texture in a linear fashion.
+	* Storage is assumed to use a rowPitchAlignment boundary for every row of texture.
+	*/
 	usz get_placed_texture_storage_size(u16 width, u16 height, u32 depth, u8 format, u16 mipmap, bool cubemap, usz row_pitch_alignment, usz mipmap_alignment);
-	usz get_placed_texture_storage_size(const rsx::fragment_texture& texture, usz row_pitch_alignment, usz mipmap_alignment = 0x200);
-	usz get_placed_texture_storage_size(const rsx::vertex_texture& texture, usz row_pitch_alignment, usz mipmap_alignment = 0x200);
+	usz get_placed_texture_storage_size(const rsx::fragment_texture &texture, usz row_pitch_alignment, usz mipmap_alignment = 0x200);
+	usz get_placed_texture_storage_size(const rsx::vertex_texture &texture, usz row_pitch_alignment, usz mipmap_alignment = 0x200);
 
 	/**
 	 * get all rsx::subresource_layout for texture.
 	 * The subresources are ordered per layer then per mipmap level (as in rsx memory).
 	 */
-	std::vector<subresource_layout> get_subresources_layout(const rsx::fragment_texture& texture);
-	std::vector<subresource_layout> get_subresources_layout(const rsx::vertex_texture& texture);
+	std::vector<subresource_layout> get_subresources_layout(const rsx::fragment_texture &texture);
+	std::vector<subresource_layout> get_subresources_layout(const rsx::vertex_texture &texture);
 
-	texture_memory_info upload_texture_subresource(rsx::io_buffer& dst_buffer, const subresource_layout& src_layout, int format, bool is_swizzled, texture_uploader_capabilities& caps);
+	texture_memory_info upload_texture_subresource(rsx::io_buffer& dst_buffer, const subresource_layout &src_layout, int format, bool is_swizzled, texture_uploader_capabilities& caps);
 
 	u8 get_format_block_size_in_bytes(int format);
 	u8 get_format_block_size_in_texel(int format);
@@ -258,7 +310,18 @@ namespace rsx
 	u8 get_format_sample_count(rsx::surface_antialiasing antialias);
 	u32 get_max_depth_value(rsx::surface_depth_format2 format);
 	bool is_depth_stencil_format(rsx::surface_depth_format2 format);
-	bool is_int8_remapped_format(u32 format); // Returns true if the format is treated as INT8 by the RSX remapper.
+
+	/**
+	* Format feature support. There is not simple format to determine what is supported here, results are from hw tests
+	* Returns a bitmask of supported features.
+	*/
+	rsx::flags32_t get_format_features(u32 texture_format);
+
+	/**
+	 * Returns a channel mask in ARGB that can be SNORM-converted
+	 * Some formats have a hardcoded constant in one lane which we cannot SNORM-interpret in hardware.
+	 */
+	u32 get_host_format_snorm_mask(u32 format);
 
 	/**
 	 * Returns number of texel rows encoded in one pitch-length line of bytes
@@ -266,19 +329,19 @@ namespace rsx
 	u8 get_format_texel_rows_per_line(u32 format);
 
 	/**
-	 * Get number of bytes occupied by texture in RSX mem
-	 */
-	usz get_texture_size(const rsx::fragment_texture& texture);
-	usz get_texture_size(const rsx::vertex_texture& texture);
+	* Get number of bytes occupied by texture in RSX mem
+	*/
+	usz get_texture_size(const rsx::fragment_texture &texture);
+	usz get_texture_size(const rsx::vertex_texture &texture);
 
 	/**
-	 * Get packed pitch
-	 */
+	* Get packed pitch
+	*/
 	u32 get_format_packed_pitch(u32 format, u16 width, bool border = false, bool swizzled = false);
 
 	/**
-	 * Reverse encoding
-	 */
+	* Reverse encoding
+	*/
 	u32 get_remap_encoding(const texture_channel_remap_t& remap);
 
 	/**
@@ -298,4 +361,4 @@ namespace rsx
 	{
 		return is_border_clamped_texture(tex.wrap_s(), tex.wrap_t(), tex.wrap_r(), tex.dimension());
 	}
-} // namespace rsx
+}

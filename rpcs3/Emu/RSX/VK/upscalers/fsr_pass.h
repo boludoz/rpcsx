@@ -19,9 +19,8 @@ namespace vk
 			size2u m_output_size;
 			u32 m_constants_buf[20];
 
-			std::vector<std::pair<VkDescriptorType, u8>> get_descriptor_layout() override;
-			void declare_inputs() override;
-			void bind_resources() override;
+			std::vector<glsl::program_input> get_inputs() override;
+			void bind_resources(const vk::command_buffer&) override;
 
 			virtual void configure(const vk::command_buffer& cmd) = 0;
 
@@ -45,7 +44,7 @@ namespace vk
 		public:
 			rcas_pass();
 		};
-	} // namespace FidelityFX
+	}
 
 	class fsr_upscale_pass : public upscaler
 	{
@@ -58,12 +57,12 @@ namespace vk
 
 	public:
 		vk::viewable_image* scale_output(
-			const vk::command_buffer& cmd,        // CB
-			vk::viewable_image* src,              // Source input
-			VkImage present_surface,              // Present target. May be VK_NULL_HANDLE for some passes
-			VkImageLayout present_surface_layout, // Present surface layout, or VK_IMAGE_LAYOUT_UNDEFINED if no present target is provided
-			const VkImageBlit& request,           // Scaling request information
-			rsx::flags32_t mode                   // Mode
-			) override;
+			const vk::command_buffer& cmd,          // CB
+			vk::viewable_image* src,                // Source input
+			VkImage present_surface,                // Present target. May be VK_NULL_HANDLE for some passes
+			VkImageLayout present_surface_layout,   // Present surface layout, or VK_IMAGE_LAYOUT_UNDEFINED if no present target is provided
+			const VkImageBlit& request,             // Scaling request information
+			rsx::flags32_t mode                     // Mode
+		) override;
 	};
-} // namespace vk
+}

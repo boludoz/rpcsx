@@ -5,6 +5,7 @@
 #include "Emu/localized_string.h"
 
 #include <memory>
+#include <span>
 
 // Definitions for common UI controls and their routines
 namespace rsx
@@ -14,11 +15,11 @@ namespace rsx
 		enum image_resource_id : u8
 		{
 			// NOTE: 1 - 252 are user defined
-			none = 0,        // No image
-			raw_image = 252, // Raw image data passed via image_info struct
-			font_file = 253, // Font file
-			game_icon = 254, // Use game icon
-			backbuffer = 255 // Use current backbuffer contents
+			none = 0,         // No image
+			raw_image = 252,  // Raw image data passed via image_info struct
+			font_file = 253,  // Font file
+			game_icon = 254,  // Use game icon
+			backbuffer = 255  // Use current backbuffer contents
 		};
 
 		enum class primitive_type : u8
@@ -30,15 +31,26 @@ namespace rsx
 			triangle_fan = 4
 		};
 
+		enum class sdf_function : u8
+		{
+			none = 0,
+			ellipse,
+			box,
+			rounded_box,
+		};
+
 		struct image_info_base
 		{
 			int w = 0, h = 0, channels = 0;
 			int bpp = 0;
-			bool dirty = false;
+			mutable bool dirty = false;
 
 			image_info_base() {}
 			virtual ~image_info_base() {}
 			virtual const u8* get_data() const = 0;
+			virtual usz size_bytes() const { return static_cast<usz>(w * h * 4); } // UI images get converted to RGBA8
+
+			std::span<const u8> as_span() const { return { get_data(), size_bytes() }; }
 		};
 
 		struct image_info : public image_info_base
@@ -55,11 +67,7 @@ namespace rsx
 			virtual ~image_info();
 
 			void load_data(const std::vector<u8>& bytes, bool grayscaled = false);
-			const u8* get_data() const override
-			{
-				return channels == 4 ? data : data_grey.empty() ? nullptr :
-				                                                  data_grey.data();
-			}
+			const u8* get_data() const override { return channels == 4 ? data : data_grey.empty() ? nullptr : data_grey.data(); }
 		};
 
 		struct resource_config
@@ -89,33 +97,56 @@ namespace rsx
 
 			void load_files();
 			void free_resources();
+
+			static std::unique_ptr<image_info> load_icon(std::string_view relative_path);
 		};
 
 		struct compiled_resource
 		{
+			struct sdf_config_t
+			{
+				sdf_function func = sdf_function::none;
+
+				f32 cx; // Center x
+				f32 cy; // Center y
+				f32 hx; // Half-size in X
+				f32 hy; // Half-size in Y
+				f32 br; // Border radius
+				f32 bw; // Border width
+
+				color4f border_color;
+
+				// Transform a SDF definition from one reference frame to another
+				// Target viewport - your actual render area
+				// Virtual viewport - the internal design viewport
+				void transform(const areaf& target_viewport, const sizef& virtual_viewport);
+			};
+
 			struct command_config
 			{
 				primitive_type primitives = primitive_type::quad_list;
 
-				color4f color = {1.f, 1.f, 1.f, 1.f};
+				color4f color = { 1.f, 1.f, 1.f, 1.f };
 				bool pulse_glow = false;
 				bool disable_vertex_snap = false;
 				f32 pulse_sinus_offset = 0.0f; // The current pulse offset
 				f32 pulse_speed_modifier = 0.005f;
+
+				sdf_config_t sdf_config;
 
 				areaf clip_rect = {};
 				bool clip_region = false;
 
 				u8 texture_ref = image_resource_id::none;
 				font* font_ref = nullptr;
-				void* external_data_ref = nullptr;
+				const void* external_data_ref = nullptr;
 
 				u8 blur_strength = 0;
 
 				command_config() = default;
 
 				void set_image_resource(u8 ref);
-				void set_font(font* ref);
+				void set_font(font *ref);
 
 				// Analog to overlay_element::set_sinus_offset
 				f32 get_sinus_value() const;
@@ -163,11 +194,14 @@ namespace rsx
 			bool wrap_text = false;
 			bool clip_text = true;
 
-			color4f back_color = {0.f, 0.f, 0.f, 1.f};
-			color4f fore_color = {1.f, 1.f, 1.f, 1.f};
+			color4f back_color = { 0.f, 0.f, 0.f, 1.f };
+			color4f fore_color = { 1.f, 1.f, 1.f, 1.f };
 			bool pulse_effect_enabled = false;
 			f32 pulse_sinus_offset = 0.0f; // The current pulse offset
 			f32 pulse_speed_modifier = 0.005f;
+
+			u8 border_size = 0;
+			color4f border_color = { 0.f, 0.f, 0.f, 1.f };
 
 			// Analog to command_config::get_sinus_value
 			// Apply modifier for sinus pulse. Resets the pulse. For example:
@@ -189,6 +223,7 @@ namespace rsx
 			u16 margin_left = 0;
 			u16 margin_top = 0;
 
+			// NOTE: These two only apply for text. Containers maintain their own scroll values.
 			f32 horizontal_scroll_offset = 0.0f;
 			f32 vertical_scroll_offset = 0.0f;
 
@@ -197,10 +232,7 @@ namespace rsx
 			virtual ~overlay_element() = default;
 
 			virtual void refresh();
-			virtual bool is_compiled()
-			{
-				return m_is_compiled;
-			}
+			virtual bool is_compiled() { return m_is_compiled; }
 			virtual void translate(s16 _x, s16 _y);
 			virtual void scale(f32 _x, f32 _y, bool origin_scaling);
 			virtual void set_pos(s16 _x, s16 _y);
@@ -210,9 +242,10 @@ namespace rsx
 			// NOTE: Functions as a simple position offset. Top left corner is the anchor.
 			virtual void set_margin(u16 left, u16 top);
 			virtual void set_margin(u16 margin);
-			virtual void set_text(const std::string& text);
-			virtual void set_unicode_text(const std::u32string& text);
+			virtual void set_text(std::string_view text);
+			virtual void set_unicode_text(std::u32string_view text);
 			void set_text(localized_string_id id);
+			void set_text(const localized_string& container);
 			virtual void set_font(const char* font_name, u16 font_size);
 			virtual void align_text(text_align align);
 			virtual void set_wrap_text(bool state);
@@ -220,13 +253,24 @@ namespace rsx
 			virtual std::vector<vertex> render_text(const char32_t* string, f32 x, f32 y);
 			virtual compiled_resource& get_compiled();
 			void measure_text(u16& width, u16& height, bool ignore_word_wrap = false) const;
-			virtual void set_selected(bool selected)
-			{
-				static_cast<void>(selected);
-			}
+			virtual void set_selected(bool selected) { static_cast<void>(selected); }
+			virtual void set_visible(bool visible) { this->visible = visible; m_is_compiled = false; }
+			virtual bool is_visible() const { return visible; }
+
+			// Calculate the vertical offset for an element of height Y if it were to be placed as a child of this element
+			u16 compute_vertically_centered(u16 element_height);
+
+			// Calculate the horizontal offset for an element of width X if it were to be placed as a child of this element
+			u16 compute_horizontally_centered(u16 element_width);
+
+			// Wrappers for the placement functions
+			u16 compute_vertically_centered(const overlay_element* other) { return compute_vertically_centered(other->h); }
+			u16 compute_horizontally_centered(const overlay_element* other) { return compute_horizontally_centered(other->w); }
 
 		protected:
 			bool m_is_compiled = false; // Only use m_is_compiled as a getter in is_compiled() if possible
+
+			void configure_sdf(compiled_resource::command_config& config, sdf_function func);
 		};
 
 		struct layout_container : public overlay_element
@@ -239,6 +283,23 @@ namespace rsx
 
 			virtual overlay_element* add_element(std::unique_ptr<overlay_element>&, int = -1) = 0;
 
+			template<typename T>
+				requires std::is_base_of_v<overlay_element, T>
+			T* add_element(std::unique_ptr<T>& ptr, int offset = -1)
+			{
+				auto _ptr = ensure(dynamic_cast<overlay_element*>(ptr.release()));
+				std::unique_ptr<overlay_element> e{ _ptr };
+				return static_cast<T*>(add_element(e, offset));
+			}
+
+			overlay_element* add_element()
+			{
+				auto ptr = std::make_unique<overlay_element>();
+				return add_element(ptr);
+			}
+
+			virtual void clear_items();
+
 			layout_container();
 
 			void translate(s16 _x, s16 _y) override;
@@ -249,11 +310,12 @@ namespace rsx
 			compiled_resource& get_compiled() override;
 
 			virtual u16 get_scroll_offset_px() = 0;
-			void add_spacer();
+			void add_spacer(u16 size = 0);
 		};
 
 		struct vertical_layout : public layout_container
 		{
+			using layout_container::add_element;
 			overlay_element* add_element(std::unique_ptr<overlay_element>& item, int offset = -1) override;
 			compiled_resource& get_compiled() override;
 			u16 get_scroll_offset_px() override;
@@ -261,9 +323,17 @@ namespace rsx
 
 		struct horizontal_layout : public layout_container
 		{
+			using layout_container::add_element;
 			overlay_element* add_element(std::unique_ptr<overlay_element>& item, int offset = -1) override;
 			compiled_resource& get_compiled() override;
 			u16 get_scroll_offset_px() override;
+		};
+
+		struct box_layout : public layout_container
+		{
+			using layout_container::add_element;
+			overlay_element* add_element(std::unique_ptr<overlay_element>& item, int offset = -1) override;
+			u16 get_scroll_offset_px() override { return 0; }
 		};
 
 		// Controls
@@ -280,10 +350,15 @@ namespace rsx
 
 		struct rounded_rect : public overlay_element
 		{
-			u8 radius = 5;
-			u8 num_control_points = 8; // Smoothness control
+			u16 border_radius = 5;
 
 			using overlay_element::overlay_element;
+			compiled_resource& get_compiled() override;
+		};
+
+		struct ellipse : public rounded_rect
+		{
+			using rounded_rect::rounded_rect;
 			compiled_resource& get_compiled() override;
 		};
 
@@ -291,7 +366,7 @@ namespace rsx
 		{
 		protected:
 			u8 image_resource_ref = image_resource_id::none;
-			void* external_ref = nullptr;
+			const void* external_ref = nullptr;
 
 			// Strength of blur effect
 			u8 blur_strength = 0;
@@ -302,7 +377,7 @@ namespace rsx
 			compiled_resource& get_compiled() override;
 
 			void set_image_resource(u8 resource_id);
-			void set_raw_image(image_info_base* raw_image);
+			void set_raw_image(const image_info_base* raw_image);
 			void clear_image();
 			void set_blur_strength(u8 strength);
 		};
@@ -325,7 +400,7 @@ namespace rsx
 		struct label : public overlay_element
 		{
 			label() = default;
-			label(const std::string& text);
+			label(std::string_view text);
 
 			bool auto_resize(bool grow_only = false, u16 limit_w = -1, u16 limit_h = -1);
 		};
@@ -366,5 +441,5 @@ namespace rsx
 			void update();
 			compiled_resource& get_compiled() override;
 		};
-	} // namespace overlays
-} // namespace rsx
+	}
+}

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Emu/Io/usb_device.h"
-#include "util/mutex.h"
+#include "Utilities/mutex.h"
 #include <array>
 #include <optional>
 #include <queue>
@@ -76,9 +76,7 @@ public:
 
 	void control_transfer(u8 bmRequestType, u8 bRequest, u16 wValue, u16 wIndex, u16 wLength, u32 buf_size, u8* buf, UsbTransfer* transfer) override;
 	void interrupt_transfer(u32 buf_size, u8* buf, u32 endpoint, UsbTransfer* transfer) override;
-	void isochronous_transfer(UsbTransfer* transfer) override;
 
 protected:
-	shared_mutex m_query_mutex;
 	std::queue<std::array<u8, 32>> m_queries;
 };

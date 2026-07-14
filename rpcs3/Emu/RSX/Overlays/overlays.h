@@ -4,18 +4,34 @@
 
 #include "Emu/Io/pad_types.h"
 
-#include "util/Timer.h"
+#include "Utilities/Timer.h"
 
 #include "../Common/bitfield.hpp"
 
 #include <mutex>
 #include <set>
 
+
 // Definition of user interface implementations
 namespace rsx
 {
 	namespace overlays
 	{
+		enum class sound_effect
+		{
+			cursor,
+			accept,
+			cancel,
+			osk_accept,
+			osk_cancel,
+			dialog_ok,
+			dialog_error,
+			trophy,
+		};
+
+		std::string get_sound_filepath(sound_effect sound);
+		void play_sound(sound_effect sound, std::optional<f32> volume = std::nullopt);
+
 		// Bitfield of UI signals to overlay manager
 		enum status_bits : u32
 		{
@@ -30,6 +46,7 @@ namespace rsx
 
 			static constexpr u16 virtual_width = 1280;
 			static constexpr u16 virtual_height = 720;
+			bool use_window_space = false;
 
 			u32 min_refresh_duration_us = 16600;
 			atomic_t<bool> visible = false;
@@ -41,6 +58,9 @@ namespace rsx
 			virtual compiled_resource get_compiled() = 0;
 
 			void refresh() const;
+			virtual u16 get_virtual_width() const { return virtual_width; }
+			virtual u16 get_virtual_height() const { return virtual_height; }
+			virtual void set_render_viewport(u16 /*width*/, u16 /*height*/) {}
 		};
 
 		// Interactable UI element
@@ -75,7 +95,8 @@ namespace rsx
 				pad_button::ls_up,
 				pad_button::ls_down,
 				pad_button::ls_left,
-				pad_button::ls_right};
+				pad_button::ls_right
+			};
 
 			atomic_t<bool> m_stop_input_loop = false;
 			atomic_t<bool> m_interactive = false;
@@ -83,7 +104,7 @@ namespace rsx
 			atomic_t<bool> m_stop_pad_interception = false;
 			atomic_t<bool> m_input_thread_detached = false;
 			atomic_t<u32> thread_bits = 0;
-			bool m_keyboard_input_enabled = false;     // Allow keyboard input
+			bool m_keyboard_input_enabled = false; // Allow keyboard input
 			bool m_keyboard_pad_handler_active = true; // Initialized as true to prevent keyboard input until proven otherwise.
 			bool m_allow_input_on_pause = false;
 
@@ -113,18 +134,11 @@ namespace rsx
 				user_interface* m_parent;
 				u32 m_thread_bit;
 			};
-
 		public:
 			s32 return_code = 0; // CELL_OK
 
-			bool is_detached() const
-			{
-				return m_input_thread_detached;
-			}
-			void detach_input()
-			{
-				m_input_thread_detached.store(true);
-			}
+			bool is_detached() const { return m_input_thread_detached; }
+			void detach_input() { m_input_thread_detached.store(true); }
 
 			compiled_resource get_compiled() override = 0;
 
@@ -155,11 +169,11 @@ namespace rsx
 				{
 					std::lock_guard lock(mutex);
 					dirty = false;
-					return {true, std::move(text)};
+					return { true, std::move(text) };
 				}
 
-				return {false, {}};
+				return { false, {} };
 			}
 		};
-	} // namespace overlays
-} // namespace rsx
+	}
+}

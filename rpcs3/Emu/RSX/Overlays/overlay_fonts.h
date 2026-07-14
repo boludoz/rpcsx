@@ -16,9 +16,9 @@ namespace rsx
 	{
 		enum class language_class
 		{
-			default_ = 0, // Typically latin-1, extended latin, hebrew, arabic and cyrillic
-			cjk_base = 1, // The thousands of CJK glyphs occupying pages 2E-9F
-			hangul = 2    // Korean jamo
+			default_ = 0,   // Typically latin-1, extended latin, hebrew, arabic and cyrillic
+			cjk_base = 1,   // The thousands of CJK glyphs occupying pages 2E-9F
+			hangul = 2      // Korean jamo
 		};
 
 		struct glyph_load_setup
@@ -61,14 +61,16 @@ namespace rsx
 			{
 				char32_t codepage_id = 0;
 				codepage* page = nullptr;
-			} codepage_cache;
+			}
+			codepage_cache;
 
+			static char32_t get_page_id(char32_t c) { return c >> 8; }
 			static language_class classify(char32_t codepage_id);
 			glyph_load_setup get_glyph_files(language_class class_) const;
-			codepage* initialize_codepage(char32_t codepage_id);
-
+			codepage* initialize_codepage(char32_t c);
 		public:
-			font(const char* ttf_name, f32 size);
+
+			font(std::string_view ttf_name, f32 size);
 
 			stbtt_aligned_quad get_char(char32_t c, f32& x_advance, f32& y_advance);
 
@@ -76,34 +78,16 @@ namespace rsx
 
 			std::vector<vertex> render_text(const char32_t* text, u16 max_width = -1, bool wrap = false);
 
-			std::pair<f32, f32> get_char_offset(const char32_t* text, usz max_length, u16 max_width = -1, bool wrap = false);
+			void get_char_offset(f32& loc_x, f32& loc_y, const char32_t* text, usz max_length, u16 max_width = -1, bool wrap = false);
 
-			bool matches(const char* name, int size) const
-			{
-				return static_cast<int>(size_pt) == size && font_name == name;
-			}
-			std::string_view get_name() const
-			{
-				return font_name;
-			}
-			f32 get_size_pt() const
-			{
-				return size_pt;
-			}
-			f32 get_size_px() const
-			{
-				return size_px;
-			}
-			f32 get_em_size() const
-			{
-				return em_size;
-			}
+			bool matches(std::string_view name, int size) const { return static_cast<int>(size_pt) == size && font_name == name; }
+			std::string_view get_name() const { return font_name; }
+			f32 get_size_pt() const { return size_pt; }
+			f32 get_size_px() const { return size_px; }
+			f32 get_em_size() const { return em_size; }
 
 			// Renderer info
-			size3u get_glyph_data_dimensions() const
-			{
-				return {codepage::bitmap_width, codepage::bitmap_height, ::size32(m_glyph_map)};
-			}
+			size3u get_glyph_data_dimensions() const { return { codepage::bitmap_width, codepage::bitmap_height, ::size32(m_glyph_map) }; }
 			const std::vector<u8>& get_glyph_data() const;
 		};
 
@@ -114,7 +98,7 @@ namespace rsx
 			std::vector<std::unique_ptr<font>> fonts;
 			static fontmgr* m_instance;
 
-			font* find(const char* name, int size)
+			font* find(std::string_view name, int size)
 			{
 				for (const auto& f : fonts)
 				{
@@ -127,6 +111,7 @@ namespace rsx
 			}
 
 		public:
+
 			fontmgr() = default;
 			~fontmgr()
 			{
@@ -137,7 +122,7 @@ namespace rsx
 				}
 			}
 
-			static font* get(const char* name, int size)
+			static font* get(std::string_view name, int size)
 			{
 				if (m_instance == nullptr)
 					m_instance = new fontmgr;
@@ -145,5 +130,5 @@ namespace rsx
 				return m_instance->find(name, size);
 			}
 		};
-	} // namespace overlays
-} // namespace rsx
+	}
+}

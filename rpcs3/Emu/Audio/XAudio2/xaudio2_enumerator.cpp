@@ -4,13 +4,11 @@
 
 #include "Emu/Audio/XAudio2/xaudio2_enumerator.h"
 #include "util/logs.hpp"
-#include "util/StrUtil.h"
+#include "Utilities/StrUtil.h"
 #include <algorithm>
 
 #include <wrl/client.h>
-#include <windows.h>
-#include <combaseapi.h>
-#include <mmeapi.h>
+#include <Windows.h>
 #include <system_error>
 #include <mmdeviceapi.h>
 #include <Functiondiscoverykeys_devpkey.h>
@@ -147,9 +145,9 @@ std::vector<audio_device_enumerator::audio_device> xaudio2_enumerator::get_outpu
 	}
 
 	std::sort(device_list.begin(), device_list.end(), [](const audio_device_enumerator::audio_device& a, const audio_device_enumerator::audio_device& b)
-		{
-			return a.name < b.name;
-		});
+	{
+		return a.name < b.name;
+	});
 
 	return device_list;
 }

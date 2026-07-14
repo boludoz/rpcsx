@@ -19,7 +19,8 @@ namespace vk
 		{
 			dma_block* parent = nullptr;
 			u32 block_offset = 0;
-		} inheritance_info;
+		}
+		inheritance_info;
 
 		u32 base_address = 0;
 		u8* memory_mapping = nullptr;
@@ -27,18 +28,19 @@ namespace vk
 
 		virtual void allocate(const render_device& dev, usz size);
 		virtual void free();
-		virtual void* map_range(const utils::address_range& range);
+		virtual void* map_range(const utils::address_range32& range);
 		virtual void unmap();
 
 	public:
+
 		dma_block() = default;
 		virtual ~dma_block();
 
 		virtual void init(const render_device& dev, u32 addr, usz size);
 		virtual void init(dma_block* parent, u32 addr, usz size);
-		virtual void flush(const utils::address_range& range);
-		virtual void load(const utils::address_range& range);
-		std::pair<u32, buffer*> get(const utils::address_range& range);
+		virtual void flush(const utils::address_range32& range);
+		virtual void load(const utils::address_range32& range);
+		std::pair<u32, buffer*> get(const utils::address_range32& range);
 
 		u32 start() const;
 		u32 end() const;
@@ -50,15 +52,15 @@ namespace vk
 		virtual void extend(const render_device& dev, usz new_size);
 	};
 
-	class dma_block_EXT : public dma_block
+	class dma_block_EXT: public dma_block
 	{
 	private:
 		void allocate(const render_device& dev, usz size) override;
-		void* map_range(const utils::address_range& range) override;
+		void* map_range(const utils::address_range32& range) override;
 		void unmap() override;
 
 	public:
-		void flush(const utils::address_range& range) override;
-		void load(const utils::address_range& range) override;
+		void flush(const utils::address_range32& range) override;
+		void load(const utils::address_range32& range) override;
 	};
-} // namespace vk
+}

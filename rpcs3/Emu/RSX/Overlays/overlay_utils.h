@@ -1,7 +1,7 @@
 #pragma once
 
 #include "util/types.hpp"
-#include "util/geometry.h"
+#include "Utilities/geometry.h"
 
 #include <string>
 
@@ -80,7 +80,7 @@ struct vertex
 		values[3] = w;
 	}
 
-	void operator+=(const vertex& other)
+	void operator += (const vertex& other)
 	{
 		values[0] += other.values[0];
 		values[1] += other.values[1];
@@ -88,16 +88,63 @@ struct vertex
 		values[3] += other.values[3];
 	}
 
-	void operator-=(const vertex& other)
+	void operator -= (const vertex& other)
 	{
 		values[0] -= other.values[0];
 		values[1] -= other.values[1];
 		values[2] -= other.values[2];
 		values[3] -= other.values[3];
 	}
+
+	void operator /= (const vertex& other)
+	{
+		values[0] /= other.values[0];
+		values[1] /= other.values[1];
+		values[2] /= other.values[2];
+		values[3] /= other.values[3];
+	}
+
+	void operator /= (float rhs)
+	{
+		values[0] /= rhs;
+		values[1] /= rhs;
+		values[2] /= rhs;
+		values[3] /= rhs;
+	}
+
+	void operator *= (const vertex& other)
+	{
+		values[0] *= other.values[0];
+		values[1] *= other.values[1];
+		values[2] *= other.values[2];
+		values[3] *= other.values[3];
+	}
+
+	void operator *= (float rhs)
+	{
+		values[0] *= rhs;
+		values[1] *= rhs;
+		values[2] *= rhs;
+		values[3] *= rhs;
+	}
+
+	vertex operator + (const vertex& other) const
+	{
+		vertex result = *this;
+		result += other;
+		return result;
+	}
+
+	vertex operator - (const vertex& other) const
+	{
+		vertex result = *this;
+		result -= other;
+		return result;
+	}
 };
 
-template <typename T>
+
+template<typename T>
 struct vector3_base : public position3_base<T>
 {
 	using position3_base<T>::position3_base;
@@ -128,42 +175,42 @@ struct vector3_base : public position3_base<T>
 	}
 };
 
-template <typename T>
-vector3_base<T> operator*(const vector3_base<T>& lhs, const vector3_base<T>& rhs)
+template<typename T>
+vector3_base<T> operator * (const vector3_base<T>& lhs, const vector3_base<T>& rhs)
 {
-	return {lhs.x * rhs.x, lhs.y * rhs.y, lhs.z * rhs.z};
+	return { lhs.x * rhs.x, lhs.y * rhs.y, lhs.z * rhs.z };
 }
 
-template <typename T>
-vector3_base<T> operator*(const vector3_base<T>& lhs, T rhs)
+template<typename T>
+vector3_base<T> operator * (const vector3_base<T>& lhs, T rhs)
 {
-	return {lhs.x * rhs, lhs.y * rhs, lhs.z * rhs};
+	return { lhs.x * rhs, lhs.y * rhs, lhs.z * rhs };
 }
 
-template <typename T>
-vector3_base<T> operator*(T lhs, const vector3_base<T>& rhs)
+template<typename T>
+vector3_base<T> operator * (T lhs, const vector3_base<T>& rhs)
 {
-	return {lhs * rhs.x, lhs * rhs.y, lhs * rhs.z};
+	return { lhs * rhs.x, lhs * rhs.y, lhs * rhs.z };
 }
 
-template <typename T>
-void operator*=(const vector3_base<T>& lhs, const vector3_base<T>& rhs)
+template<typename T>
+void operator *= (const vector3_base<T>& lhs, const vector3_base<T>& rhs)
 {
 	lhs.x *= rhs.x;
 	lhs.y *= rhs.y;
 	lhs.z *= rhs.z;
 }
 
-template <typename T>
-void operator*=(const vector3_base<T>& lhs, T rhs)
+template<typename T>
+void operator *= (const vector3_base<T>& lhs, T rhs)
 {
 	lhs.x *= rhs;
 	lhs.y *= rhs;
 	lhs.z *= rhs;
 }
 
-template <typename T>
-void operator<(const vector3_base<T>& lhs, T rhs)
+template<typename T>
+void operator < (const vector3_base<T>& lhs, T rhs)
 {
 	return lhs.x < rhs.x && lhs.y < rhs.y && lhs.z < rhs.z;
 }
@@ -171,9 +218,9 @@ void operator<(const vector3_base<T>& lhs, T rhs)
 using vector3i = vector3_base<int>;
 using vector3f = vector3_base<float>;
 
-std::string utf8_to_ascii8(const std::string& utf8_string);
-std::string utf16_to_ascii8(const std::u16string& utf16_string);
-std::u16string ascii8_to_utf16(const std::string& ascii_string);
-std::u32string utf8_to_u32string(const std::string& utf8_string);
-std::u16string u32string_to_utf16(const std::u32string& utf32_string);
-std::u32string utf16_to_u32string(const std::u16string& utf16_string);
+std::string utf8_to_ascii8(std::string_view utf8_string);
+std::string utf16_to_ascii8(std::u16string_view utf16_string);
+std::u16string ascii8_to_utf16(std::string_view ascii_string);
+std::u32string utf8_to_u32string(std::string_view utf8_string);
+std::u16string u32string_to_utf16(std::u32string_view utf32_string);
+std::u32string utf16_to_u32string(std::u16string_view utf16_string);

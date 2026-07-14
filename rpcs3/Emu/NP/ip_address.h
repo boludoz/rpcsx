@@ -1,12 +1,11 @@
 #pragma once
 
 #include <array>
+#include <string>
 #include <unordered_map>
 
-#include <flatbuffers/vector.h>
-
 #include "util/types.hpp"
-#include "util/mutex.h"
+#include "Utilities/mutex.h"
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -67,7 +66,7 @@ namespace np
 		std::vector<std::array<u8, 16>> ipv4_to_ipv6;
 	};
 
-	u32 register_ip(const flatbuffers::Vector<std::uint8_t>* vec);
+	u32 register_ip(const std::string& ip_bytes);
 
 	enum class IPV6_SUPPORT : u8
 	{

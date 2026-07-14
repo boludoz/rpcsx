@@ -86,14 +86,12 @@ namespace rsx
 	{
 	public:
 		RSXDMAWriter(void* mem)
-			: m_host_context_ptr(new(mem) host_gpu_context_t)
-		{
-		}
+			: m_host_context_ptr(new (mem)host_gpu_context_t)
+		{}
 
 		RSXDMAWriter(host_gpu_context_t* pctx)
 			: m_host_context_ptr(pctx)
-		{
-		}
+		{}
 
 		void update();
 
@@ -114,4 +112,4 @@ namespace rsx
 
 		std::deque<host_gpu_write_op_t> m_job_queue;
 	};
-} // namespace rsx
+}

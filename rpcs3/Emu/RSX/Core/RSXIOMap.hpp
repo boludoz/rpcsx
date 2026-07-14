@@ -1,7 +1,7 @@
 #pragma once
 
 #include <util/types.hpp>
-#include "util/mutex.h"
+#include "Utilities/mutex.h"
 #include "Emu/CPU/CPUThread.h"
 
 namespace rsx
@@ -15,8 +15,7 @@ namespace rsx
 
 			io_lock(shared_mutex& obj)
 				: ref(obj)
-			{
-			}
+			{}
 
 			bool try_lock()
 			{
@@ -39,7 +38,7 @@ namespace rsx
 				ref.lock();
 			}
 		};
-	} // namespace iomap_helper
+	}
 
 	struct rsx_iomap_table
 	{
@@ -61,8 +60,7 @@ namespace rsx
 		template <bool IsFullLock, uint Stride>
 		bool lock(u32 addr, u32 len, cpu_thread* self = nullptr) noexcept
 		{
-			if (len <= 1)
-				return false;
+			if (len <= 1) return false;
 			const u32 end = addr + len - 1;
 
 			bool added_wait = false;
@@ -71,7 +69,7 @@ namespace rsx
 			{
 				auto mutex_ = iomap_helper::io_lock<!IsFullLock>(rs[block]);
 
-				if (!mutex_.try_lock()) [[unlikely]]
+				if (!mutex_.try_lock()) [[ unlikely ]]
 				{
 					if (self)
 					{
@@ -118,4 +116,4 @@ namespace rsx
 			}
 		}
 	};
-} // namespace rsx
+}

@@ -1,11 +1,9 @@
 #include "stdafx.h"
 #include "cache_utils.hpp"
-
-#include <algorithm>
 #include "system_utils.hpp"
 #include "system_config.h"
 #include "IdManager.h"
-#include "cellos/sys_sync.h"
+#include "Emu/Cell/lv2/sys_sync.h"
 #include "Emu/Cell/PPUAnalyser.h"
 #include "Emu/Cell/PPUThread.h"
 
@@ -69,7 +67,7 @@ namespace rpcs3::cache
 		}
 
 		// retrieve items to delete
-		for (const auto& item : cache_dir)
+		for (const auto &item : cache_dir)
 		{
 			if (item.name != "." && item.name != "..")
 				file_list.push_back(item);
@@ -78,15 +76,15 @@ namespace rpcs3::cache
 		cache_dir.close();
 
 		// sort oldest first
-		std::ranges::sort(file_list, FN(x.mtime < y.mtime));
+		std::sort(file_list.begin(), file_list.end(), FN(x.mtime < y.mtime));
 
 		// keep removing until cache is empty or enough bytes have been cleared
 		// cache is cleared down to 80% of limit to increase interval between clears
 		const u64 to_remove = static_cast<u64>(size - max_size * 0.8);
 		u64 removed = 0;
-		for (const auto& item : file_list)
+		for (const auto &item : file_list)
 		{
-			const std::string& name = cache_location + "/" + item.name;
+			const std::string &name = cache_location + "/" + item.name;
 			const bool is_dir = fs::is_dir(name);
 			const u64 item_size = is_dir ? fs::get_dir_size(name) : item.size;
 
@@ -109,4 +107,4 @@ namespace rpcs3::cache
 
 		sys_log.success("Cleaned disk cache, removed %.2f MB", size / 1024.0 / 1024.0);
 	}
-} // namespace rpcs3::cache
+}

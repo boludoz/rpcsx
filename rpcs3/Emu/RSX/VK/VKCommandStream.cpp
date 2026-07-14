@@ -28,7 +28,8 @@ namespace vk
 	{
 		ensure(submit_info.pfence);
 		acquire_global_submit_lock();
-		VkSubmitInfo info{
+		VkSubmitInfo info
+		{
 			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
 			.pNext = nullptr,
 			.waitSemaphoreCount = submit_info.wait_semaphores_count,
@@ -37,9 +38,10 @@ namespace vk
 			.commandBufferCount = 1,
 			.pCommandBuffers = &submit_info.commands,
 			.signalSemaphoreCount = submit_info.signal_semaphores_count,
-			.pSignalSemaphores = submit_info.signal_semaphores.data()};
+			.pSignalSemaphores = submit_info.signal_semaphores.data()
+		};
 
-		VK_GET_SYMBOL(vkQueueSubmit)(submit_info.queue, 1, &info, submit_info.pfence->handle);
+		vkQueueSubmit(submit_info.queue, 1, &info, submit_info.pfence->handle);
 		release_global_submit_lock();
 
 		// Signal fence
@@ -70,4 +72,4 @@ namespace vk
 		// Flush-only version used by asynchronous submit processing (MTRSX)
 		queue_submit_impl(*packet);
 	}
-} // namespace vk
+}

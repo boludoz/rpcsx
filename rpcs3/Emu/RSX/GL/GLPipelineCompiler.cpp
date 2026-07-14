@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "GLPipelineCompiler.h"
-#include "util/Thread.h"
+#include "Utilities/Thread.h"
 #include "util/sysinfo.hpp"
 
 namespace gl
@@ -140,4 +140,4 @@ namespace gl
 
 		return g_pipe_compilers.get()->begin() + (thread_index % g_num_pipe_compilers);
 	}
-} // namespace gl
+}

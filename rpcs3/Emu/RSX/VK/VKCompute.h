@@ -5,9 +5,8 @@
 
 #include "Emu/IdManager.h"
 
-#include "util/StrUtil.h"
-#include "rx/asm.hpp"
-#include "rx/align.hpp"
+#include "Utilities/StrUtil.h"
+#include "util/asm.hpp"
 
 #include <unordered_map>
 
@@ -20,12 +19,6 @@ namespace vk
 		std::unique_ptr<vk::glsl::program> m_program;
 		std::unique_ptr<vk::buffer> m_param_buffer;
 
-		vk::descriptor_pool m_descriptor_pool;
-		descriptor_set m_descriptor_set;
-		VkDescriptorSetLayout m_descriptor_layout = nullptr;
-		VkPipelineLayout m_pipeline_layout = nullptr;
-		u32 m_used_descriptors = 0;
-
 		bool initialized = false;
 		bool unroll_loops = true;
 		bool use_push_constants = false;
@@ -36,20 +29,13 @@ namespace vk
 		u32 max_invocations_x = 65535;
 
 		compute_task() = default;
-		virtual ~compute_task()
-		{
-			destroy();
-		}
-
-		virtual std::vector<std::pair<VkDescriptorType, u8>> get_descriptor_layout();
-
-		void init_descriptors();
+		virtual ~compute_task() { destroy(); }
 
 		void create();
 		void destroy();
 
-		virtual void bind_resources() {}
-		virtual void declare_inputs() {}
+		virtual std::vector<glsl::program_input> get_inputs();
+		virtual void bind_resources(const vk::command_buffer& /*cmd*/) {}
 
 		void load_program(const vk::command_buffer& cmd);
 
@@ -64,6 +50,8 @@ namespace vk
 		u32 m_data_length = 0;
 		u32 kernel_size = 1;
 
+		rsx::simple_array<u32> m_params;
+
 		std::string variables, work_kernel, loop_advance, suffix;
 		std::string method_declarations;
 
@@ -71,9 +59,9 @@ namespace vk
 
 		void build(const char* function_name, u32 _kernel_size = 0);
 
-		void bind_resources() override;
+		void bind_resources(const vk::command_buffer& cmd) override;
 
-		void set_parameters(const vk::command_buffer& cmd, const u32* params, u8 count);
+		void set_parameters(const vk::command_buffer& cmd);
 
 		void run(const vk::command_buffer& cmd, const vk::buffer* data, u32 data_length, u32 data_offset = 0);
 	};
@@ -139,12 +127,12 @@ namespace vk
 
 		cs_interleave_task();
 
-		void bind_resources() override;
+		void bind_resources(const vk::command_buffer& cmd) override;
 
 		void run(const vk::command_buffer& cmd, const vk::buffer* data, u32 data_offset, u32 data_length, u32 zeta_offset, u32 stencil_offset);
 	};
 
-	template <bool _SwapBytes = false>
+	template<bool _SwapBytes = false>
 	struct cs_gather_d24x8 : cs_interleave_task
 	{
 		cs_gather_d24x8()
@@ -163,19 +151,19 @@ namespace vk
 			if constexpr (!_SwapBytes)
 			{
 				work_kernel +=
-					"		data[index] = value;\n";
+				"		data[index] = value;\n";
 			}
 			else
 			{
 				work_kernel +=
-					"		data[index] = bswap_u32(value);\n";
+				"		data[index] = bswap_u32(value);\n";
 			}
 
 			cs_shuffle_base::build("");
 		}
 	};
 
-	template <bool _SwapBytes = false, bool _DepthFloat = false>
+	template<bool _SwapBytes = false, bool _DepthFloat = false>
 	struct cs_gather_d32x8 : cs_interleave_task
 	{
 		cs_gather_d32x8()
@@ -188,12 +176,12 @@ namespace vk
 			if constexpr (!_DepthFloat)
 			{
 				work_kernel +=
-					"		depth = f32_to_d24(data[index + z_offset]);\n";
+				"		depth = f32_to_d24(data[index + z_offset]);\n";
 			}
 			else
 			{
 				work_kernel +=
-					"		depth = f32_to_d24f(data[index + z_offset]);\n";
+				"		depth = f32_to_d24f(data[index + z_offset]);\n";
 			}
 
 			work_kernel +=
@@ -206,12 +194,12 @@ namespace vk
 			if constexpr (!_SwapBytes)
 			{
 				work_kernel +=
-					"		data[index] = value;\n";
+				"		data[index] = value;\n";
 			}
 			else
 			{
 				work_kernel +=
-					"		data[index] = bswap_u32(value);\n";
+				"		data[index] = bswap_u32(value);\n";
 			}
 
 			cs_shuffle_base::build("");
@@ -223,7 +211,7 @@ namespace vk
 		cs_scatter_d24x8();
 	};
 
-	template <bool _DepthFloat = false>
+	template<bool _DepthFloat = false>
 	struct cs_scatter_d32x8 : cs_interleave_task
 	{
 		cs_scatter_d32x8()
@@ -237,12 +225,12 @@ namespace vk
 			if constexpr (!_DepthFloat)
 			{
 				work_kernel +=
-					"		data[index + z_offset] = d24_to_f32(value >> 8);\n";
+				"		data[index + z_offset] = d24_to_f32(value >> 8);\n";
 			}
 			else
 			{
 				work_kernel +=
-					"		data[index + z_offset] = d24f_to_f32(value >> 8);\n";
+				"		data[index + z_offset] = d24f_to_f32(value >> 8);\n";
 			}
 
 			work_kernel +=
@@ -255,7 +243,7 @@ namespace vk
 		}
 	};
 
-	template <typename From, typename To, bool _SwapSrc = false, bool _SwapDst = false>
+	template<typename From, typename To, bool _SwapSrc = false, bool _SwapDst = false>
 	struct cs_fconvert_task : cs_shuffle_base
 	{
 		u32 m_ssbo_length = 0;
@@ -356,9 +344,10 @@ namespace vk
 			cs_shuffle_base::build("");
 		}
 
-		void bind_resources() override
+		void bind_resources(const vk::command_buffer& cmd) override
 		{
-			m_program->bind_buffer({m_data->value, m_data_offset, m_ssbo_length}, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, m_descriptor_set);
+			set_parameters(cmd);
+			m_program->bind_uniform({ *m_data, m_data_offset, m_ssbo_length }, 0, 0);
 		}
 
 		void run(const vk::command_buffer& cmd, const vk::buffer* data, u32 src_offset, u32 src_length, u32 dst_offset)
@@ -375,8 +364,7 @@ namespace vk
 				data_offset = src_offset;
 			}
 
-			u32 parameters[4] = {src_length, src_offset - data_offset, dst_offset - data_offset, 0};
-			set_parameters(cmd, parameters, 4);
+			m_params = { src_length, src_offset - data_offset, dst_offset - data_offset, 0 };
 			cs_shuffle_base::run(cmd, data, src_length, data_offset);
 		}
 	};
@@ -404,7 +392,8 @@ namespace vk
 				u32 logd;
 				u32 mipmaps;
 			};
-		} params;
+		}
+		params;
 
 		const vk::buffer* src_buffer = nullptr;
 		const vk::buffer* dst_buffer = nullptr;
@@ -414,8 +403,6 @@ namespace vk
 
 		cs_deswizzle_3d()
 		{
-			ensure((sizeof(_BlockType) & 3) == 0); // "Unsupported block type"
-
 			ssbo_count = 2;
 			use_push_constants = true;
 			push_constants_size = 28;
@@ -423,8 +410,8 @@ namespace vk
 			create();
 
 			m_src =
-#include "../Program/GLSLSnippets/GPUDeswizzle.glsl"
-				;
+			#include "../Program/GLSLSnippets/GPUDeswizzle.glsl"
+			;
 
 			std::string transform;
 			if constexpr (_SwapBytes)
@@ -444,26 +431,31 @@ namespace vk
 			}
 
 			const std::pair<std::string_view, std::string> syntax_replace[] =
-				{
-					{"%loc", "0"},
-					{"%set", "set = 0"},
-					{"%push_block", "push_constant"},
-					{"%ws", std::to_string(optimal_group_size)},
-					{"%_wordcount", std::to_string(sizeof(_BlockType) / 4)},
-					{"%f", transform}};
+			{
+				{ "%loc", "0" },
+				{ "%set", "set = 0" },
+				{ "%push_block", "push_constant" },
+				{ "%ws", std::to_string(optimal_group_size) },
+				{ "%_wordcount", std::to_string(std::max<u32>(sizeof(_BlockType) / 4u, 1u)) },
+				{ "%f", transform },
+				{ "%_8bit", sizeof(_BlockType) == 1 ? "1" : "0" },
+				{ "%_16bit", sizeof(_BlockType) == 2 ? "1" : "0" },
+			};
 
 			m_src = fmt::replace_all(m_src, syntax_replace);
 		}
 
-		void bind_resources() override
+		void bind_resources(const vk::command_buffer& cmd) override
 		{
-			m_program->bind_buffer({src_buffer->value, in_offset, block_length}, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, m_descriptor_set);
-			m_program->bind_buffer({dst_buffer->value, out_offset, block_length}, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, m_descriptor_set);
+			set_parameters(cmd);
+
+			m_program->bind_uniform({ *src_buffer, in_offset, block_length }, 0, 0);
+			m_program->bind_uniform({ *dst_buffer, out_offset, block_length }, 0, 1);
 		}
 
 		void set_parameters(const vk::command_buffer& cmd)
 		{
-			VK_GET_SYMBOL(vkCmdPushConstants)(cmd, m_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, push_constants_size, params.data);
+			vkCmdPushConstants(cmd, m_program->layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, push_constants_size, params.data);
 		}
 
 		void run(const vk::command_buffer& cmd, const vk::buffer* dst, u32 out_offset, const vk::buffer* src, u32 in_offset, u32 data_length, u32 width, u32 height, u32 depth, u32 mipmaps) override
@@ -482,11 +474,11 @@ namespace vk
 			params.logw = rsx::ceil_log2(width);
 			params.logh = rsx::ceil_log2(height);
 			params.logd = rsx::ceil_log2(depth);
-			set_parameters(cmd);
 
-			const u32 num_bytes_per_invocation = (sizeof(_BlockType) * optimal_group_size);
-			const u32 linear_invocations = rx::aligned_div(data_length, num_bytes_per_invocation);
-			compute_task::run(cmd, linear_invocations);
+			const u32 word_count_per_invocation = std::max<u32>(sizeof(_BlockType) / 4u, 1u);
+			const u32 num_bytes_per_invocation = (word_count_per_invocation * 4u * optimal_group_size);
+			const u32 workgroup_invocations = utils::aligned_div(data_length, num_bytes_per_invocation);
+			compute_task::run(cmd, workgroup_invocations);
 		}
 	};
 
@@ -499,7 +491,7 @@ namespace vk
 
 		cs_aggregator();
 
-		void bind_resources() override;
+		void bind_resources(const vk::command_buffer& cmd) override;
 
 		void run(const vk::command_buffer& cmd, const vk::buffer* dst, const vk::buffer* src, u32 num_words);
 	};
@@ -527,13 +519,13 @@ namespace vk
 		u16 image_width;
 		u16 image_height;
 		u32 image_pitch;
-		u8 image_bpp;
+		u8  image_bpp;
 	};
 
 	template <RSX_detiler_op Op>
 	struct cs_tile_memcpy : compute_task
 	{
-#pragma pack(push, 1)
+#pragma pack (push, 1)
 		struct
 		{
 			u32 prime;
@@ -550,7 +542,7 @@ namespace vk
 			u32 image_pitch;
 			u32 image_bpp;
 		} params;
-#pragma pack(pop)
+#pragma pack (pop)
 
 		const vk::buffer* src_buffer = nullptr;
 		const vk::buffer* dst_buffer = nullptr;
@@ -568,30 +560,33 @@ namespace vk
 			create();
 
 			m_src =
-#include "../Program/GLSLSnippets/RSXMemoryTiling.glsl"
+			#include "../Program/GLSLSnippets/RSXMemoryTiling.glsl"
 				;
 
 			const std::pair<std::string_view, std::string> syntax_replace[] =
-				{
-					{"%loc", "0"},
-					{"%set", "set = 0"},
-					{"%push_block", "push_constant"},
-					{"%ws", std::to_string(optimal_group_size)},
-					{"%op", std::to_string(Op)}};
+			{
+				{ "%loc", "0" },
+				{ "%set", "set = 0" },
+				{ "%push_block", "push_constant" },
+				{ "%ws", std::to_string(optimal_group_size) },
+				{ "%op", std::to_string(Op) }
+			};
 
 			m_src = fmt::replace_all(m_src, syntax_replace);
 		}
 
-		void bind_resources() override
+		void bind_resources(const vk::command_buffer& cmd) override
 		{
-			const auto op = static_cast<int>(Op);
-			m_program->bind_buffer({src_buffer->value, in_offset, in_block_length}, 0 ^ op, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, m_descriptor_set);
-			m_program->bind_buffer({dst_buffer->value, out_offset, out_block_length}, 1 ^ op, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, m_descriptor_set);
+			set_parameters(cmd);
+
+			const auto op = static_cast<u32>(Op);
+			m_program->bind_uniform({ *src_buffer, in_offset, in_block_length }, 0u, 0u ^ op);
+			m_program->bind_uniform({ *dst_buffer, out_offset, out_block_length }, 0u, 1u ^ op);
 		}
 
 		void set_parameters(const vk::command_buffer& cmd)
 		{
-			VK_GET_SYMBOL(vkCmdPushConstants)(cmd, m_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, push_constants_size, &params);
+			vkCmdPushConstants(cmd, m_program->layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, push_constants_size, &params);
 		}
 
 		void run(const vk::command_buffer& cmd, const RSX_detiler_config& config)
@@ -603,8 +598,9 @@ namespace vk
 			this->out_offset = config.dst_offset;
 
 			const auto tile_aligned_height = std::min(
-				rx::alignUp<u32>(config.image_height, 64),
-				rx::aligned_div(config.tile_size - config.tile_base_offset, config.tile_pitch));
+				utils::align<u32>(config.image_height, 64),
+				utils::aligned_div(config.tile_size - config.tile_base_offset, config.tile_pitch)
+			);
 
 			if constexpr (Op == RSX_detiler_op::decode)
 			{
@@ -622,14 +618,14 @@ namespace vk
 				const u32 base = (pitch >> 8);
 				if ((pitch & (pitch - 1)) == 0)
 				{
-					return {1u, base};
+					return { 1u, base };
 				}
 
-				for (const auto prime : {3, 5, 7, 11, 13})
+				for (const auto prime : { 3, 5, 7, 11, 13 })
 				{
 					if ((base % prime) == 0)
 					{
-						return {prime, base / prime};
+						return { prime, base / prime };
 					}
 				}
 
@@ -653,11 +649,10 @@ namespace vk
 			params.image_height = (Op == RSX_detiler_op::decode) ? tile_aligned_height : config.image_height;
 			params.image_pitch = config.image_pitch;
 			params.image_bpp = config.image_bpp;
-			set_parameters(cmd);
 
 			const u32 subtexels_per_invocation = (config.image_bpp < 4) ? (4 / config.image_bpp) : 1;
 			const u32 virtual_width = config.image_width / subtexels_per_invocation;
-			const u32 invocations_x = rx::aligned_div(virtual_width, optimal_group_size);
+			const u32 invocations_x = utils::aligned_div(virtual_width, optimal_group_size);
 			compute_task::run(cmd, invocations_x, config.image_height, 1);
 		}
 	};
@@ -665,11 +660,11 @@ namespace vk
 	// TODO: Replace with a proper manager
 	extern std::unordered_map<u32, std::unique_ptr<vk::compute_task>> g_compute_tasks;
 
-	template <class T>
+	template<class T>
 	T* get_compute_task()
 	{
 		u32 index = stx::typeindex<id_manager::typeinfo, T>();
-		auto& e = g_compute_tasks[index];
+		auto &e = g_compute_tasks[index];
 
 		if (!e)
 		{
@@ -681,4 +676,4 @@ namespace vk
 	}
 
 	void reset_compute_tasks();
-} // namespace vk
+}

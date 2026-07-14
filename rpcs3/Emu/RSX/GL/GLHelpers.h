@@ -11,11 +11,11 @@
 #include "../Common/TextureUtils.h"
 #include "../Program/GLSLTypes.h"
 
-#include "util/mutex.h"
-#include "util/geometry.h"
-#include "util/File.h"
+#include "Utilities/mutex.h"
+#include "Utilities/geometry.h"
+#include "Utilities/File.h"
 #include "util/logs.hpp"
-#include "rx/asm.hpp"
+#include "util/asm.hpp"
 
 #include "glutils/common.h"
 // TODO: Include on use
@@ -30,9 +30,10 @@
 #define APIENTRY
 #endif
 
+
 namespace gl
 {
 	void enable_debugging();
 	bool is_primitive_native(rsx::primitive_type in);
 	GLenum draw_mode(rsx::primitive_type in);
-} // namespace gl
+}

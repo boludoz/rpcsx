@@ -3,9 +3,7 @@
 #include <algorithm>
 
 #ifdef _WIN32
-#include <windows.h>
-#include <combaseapi.h>
-#include <mmeapi.h>
+#include <Windows.h>
 #include <system_error>
 #endif
 
@@ -80,10 +78,11 @@ std::vector<audio_device_enumerator::audio_device> cubeb_enumerator::get_output_
 		}
 
 		audio_device dev =
-			{
-				.id = std::string{dev_info.device_id},
-				.name = std::string{dev_info.friendly_name},
-				.max_ch = dev_info.max_channels};
+		{
+			.id = std::string{dev_info.device_id},
+			.name = std::string{dev_info.friendly_name},
+			.max_ch = dev_info.max_channels
+		};
 
 		if (dev.id.empty())
 		{
@@ -106,9 +105,9 @@ std::vector<audio_device_enumerator::audio_device> cubeb_enumerator::get_output_
 	}
 
 	std::sort(device_list.begin(), device_list.end(), [](const audio_device_enumerator::audio_device& a, const audio_device_enumerator::audio_device& b)
-		{
-			return a.name < b.name;
-		});
+	{
+		return a.name < b.name;
+	});
 
 	return device_list;
 }

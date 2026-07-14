@@ -7,7 +7,7 @@ namespace rsx
 	class fragment_texture;
 	class vertex_texture;
 	class sampled_image_descriptor_base;
-} // namespace rsx
+}
 
 namespace gl
 {
@@ -18,6 +18,7 @@ namespace gl
 		std::unordered_map<GLenum, GLfloat> m_propertiesf;
 
 	public:
+
 		void create()
 		{
 			glGenSamplers(1, &sampler_handle);
@@ -74,15 +75,12 @@ namespace gl
 			return (prop == m_propertiesf.end()) ? 0 : prop->second;
 		}
 
-		void apply(const rsx::fragment_texture& tex, const rsx::sampled_image_descriptor_base* sampled_image);
+		void apply(const rsx::fragment_texture& tex, const rsx::sampled_image_descriptor_base* sampled_image, bool allow_mipmaps = true);
 		void apply(const rsx::vertex_texture& tex, const rsx::sampled_image_descriptor_base* sampled_image);
 
 		void apply_defaults(GLenum default_filter = GL_NEAREST);
 
-		operator bool() const
-		{
-			return sampler_handle != GL_NONE;
-		}
+		operator bool() const { return sampler_handle != GL_NONE; }
 	};
 
 	struct saved_sampler_state
@@ -106,4 +104,4 @@ namespace gl
 			glBindSampler(unit, saved);
 		}
 	};
-} // namespace gl
+}

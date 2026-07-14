@@ -250,7 +250,8 @@ namespace gl
 				u32 logd;
 				u32 mipmaps;
 			};
-		} params;
+		}
+		params;
 
 		gl::buffer param_buffer;
 
@@ -262,13 +263,11 @@ namespace gl
 
 		cs_deswizzle_3d()
 		{
-			ensure((sizeof(_BlockType) & 3) == 0); // "Unsupported block type"
-
 			initialize();
 
 			m_src =
-#include "../Program/GLSLSnippets/GPUDeswizzle.glsl"
-				;
+			#include "../Program/GLSLSnippets/GPUDeswizzle.glsl"
+			;
 
 			std::string transform;
 			if constexpr (_SwapBytes)
@@ -288,13 +287,16 @@ namespace gl
 			}
 
 			const std::pair<std::string_view, std::string> syntax_replace[] =
-				{
-					{"%set, ", ""},
-					{"%loc", std::to_string(GL_COMPUTE_BUFFER_SLOT(0))},
-					{"%push_block", fmt::format("binding=%d, std140", GL_COMPUTE_BUFFER_SLOT(2))},
-					{"%ws", std::to_string(optimal_group_size)},
-					{"%_wordcount", std::to_string(sizeof(_BlockType) / 4)},
-					{"%f", transform}};
+			{
+				{ "%set, ", ""},
+				{ "%loc", std::to_string(GL_COMPUTE_BUFFER_SLOT(0))},
+				{ "%push_block", fmt::format("binding=%d, std140", GL_COMPUTE_BUFFER_SLOT(2)) },
+				{ "%ws", std::to_string(optimal_group_size) },
+				{ "%_wordcount", std::to_string(std::max<u32>(sizeof(_BlockType) / 4u, 1u)) },
+				{ "%f", transform },
+				{ "%_8bit", sizeof(_BlockType) == 1 ? "1" : "0" },
+				{ "%_16bit", sizeof(_BlockType) == 2 ? "1" : "0" },
+			};
 
 			m_src = fmt::replace_all(m_src, syntax_replace);
 
@@ -336,9 +338,10 @@ namespace gl
 			params.logd = rsx::ceil_log2(depth);
 			set_parameters(cmd);
 
-			const u32 num_bytes_per_invocation = (sizeof(_BlockType) * optimal_group_size);
-			const u32 linear_invocations = rx::aligned_div(data_length, num_bytes_per_invocation);
-			compute_task::run(cmd, linear_invocations);
+			const u32 word_count_per_invocation = std::max<u32>(sizeof(_BlockType) / 4u, 1u);
+			const u32 num_bytes_per_invocation = (word_count_per_invocation * 4u * optimal_group_size);
+			const u32 workgroup_invocations = utils::aligned_div(data_length, num_bytes_per_invocation);
+			compute_task::run(cmd, workgroup_invocations);
 		}
 	};
 
@@ -350,11 +353,7 @@ namespace gl
 		gl::sampler_state m_sampler;
 
 	public:
-		void destroy() override
-		{
-			m_sampler.remove();
-			compute_task::destroy();
-		}
+		void destroy() override { m_sampler.remove(); compute_task::destroy(); }
 		virtual void run(gl::command_context& cmd, gl::viewable_image* src, const gl::buffer* dst, u32 out_offset, const coordu& region, const gl::pixel_buffer_layout& layout) = 0;
 	};
 
@@ -380,11 +379,11 @@ namespace gl
 	// TODO: Replace with a proper manager
 	extern std::unordered_map<u32, std::unique_ptr<gl::compute_task>> g_compute_tasks;
 
-	template <class T>
+	template<class T>
 	T* get_compute_task()
 	{
 		u32 index = stx::typeindex<id_manager::typeinfo, T>();
-		auto& e = g_compute_tasks[index];
+		auto &e = g_compute_tasks[index];
 
 		if (!e)
 		{
@@ -396,4 +395,4 @@ namespace gl
 	}
 
 	void destroy_compute_tasks();
-} // namespace gl
+}

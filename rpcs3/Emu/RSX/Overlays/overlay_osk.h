@@ -4,7 +4,7 @@
 #include "overlay_edit_text.hpp"
 #include "overlay_cursor.h"
 #include "overlay_osk_panel.h"
-#include "rpcsx/fw/ps3/cellOskDialog.h"
+#include "Emu/Cell/Modules/cellOskDialog.h"
 
 namespace rsx
 {
@@ -47,7 +47,7 @@ namespace rsx
 			osk_window_layout m_layout = {};
 			osk_window_layout m_input_layout = {}; // Only used with separate windows
 			osk_window_layout m_panel_layout = {}; // Only used with separate windows
-			u32 m_input_field_window_width = 0;    // Only used with separate windows
+			u32 m_input_field_window_width = 0; // Only used with separate windows
 			f32 m_scaling = 1.0f;
 
 			// Base UI
@@ -148,5 +148,5 @@ namespace rsx
 
 			compiled_resource get_compiled() override;
 		};
-	} // namespace overlays
-} // namespace rsx
+	}
+}

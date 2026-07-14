@@ -1,50 +1,50 @@
 #pragma once
 
-#include "util/Thread.h"
-#include "rx/EnumBitSet.hpp"
-#include "util/atomic_bit_set.h"
+#include "../Utilities/Thread.h"
+#include "../Utilities/bit_set.h"
 
 #include <vector>
 #include <any>
 
 template <typename Derived, typename Base>
 concept DerivedFrom = std::is_base_of_v<Base, Derived> &&
-                      std::is_convertible_v<const volatile Derived*, const volatile Base*>;
+	std::is_convertible_v<const volatile Derived*, const volatile Base*>;
 
 // Thread state flags
 enum class cpu_flag : u32
 {
-	stop,            // Thread not running (HLE, initial state)
-	exit,            // Irreversible exit
-	wait,            // Indicates waiting state, set by the thread itself
-	temp,            // Indicates that the thread cannot properly return after next check_state()
-	pause,           // Thread suspended by suspend_all technique
-	suspend,         // Thread suspended
-	ret,             // Callback return requested
-	again,           // Thread must complete the syscall after deserialization
-	signal,          // Thread received a signal (HLE)
-	memory,          // Thread must unlock memory mutex
-	pending,         // Thread has postponed work
+	stop, // Thread not running (HLE, initial state)
+	exit, // Irreversible exit
+	wait, // Indicates waiting state, set by the thread itself
+	temp, // Indicates that the thread cannot properly return after next check_state()
+	pause, // Thread suspended by suspend_all technique
+	suspend, // Thread suspended
+	ret, // Callback return requested
+	again, // Thread must complete the syscall after deserialization
+	signal, // Thread received a signal (HLE)
+	memory, // Thread must unlock memory mutex
+	pending, // Thread has postponed work
 	pending_recheck, // Thread needs to recheck if there is pending work before ::pending removal
-	notify,          // Flag meant solely to allow atomic notification on state without changing other flags
-	yield,           // Thread is being requested to yield its execution time if it's running
-	preempt,         // Thread is being requested to preempt the execution of all CPU threads
+	notify, // Flag meant solely to allow atomic notification on state without changing other flags
+	yield, // Thread is being requested to yield its execution time if it's running
+	preempt, // Thread is being requested to preempt the execution of all CPU threads
 
+	req_exit, // Request the thread to exit
 	dbg_global_pause, // Emulation paused
-	dbg_pause,        // Thread paused
-	dbg_step,         // Thread forced to pause after one step (one instruction, etc)
+	dbg_pause, // Thread paused
+	dbg_step, // Thread forced to pause after one step (one instruction, etc)
 
-	bitset_last = dbg_step,
+	__bitset_enum_max
 };
 
 // Test stopped state
-constexpr bool is_stopped(rx::EnumBitSet<cpu_flag> state)
+constexpr bool is_stopped(bs_t<cpu_flag> state)
 {
-	return !!(state & (cpu_flag::stop + cpu_flag::exit + cpu_flag::again));
+	return !!(state & (cpu_flag::stop + cpu_flag::exit + cpu_flag::again + cpu_flag::req_exit));
 }
 
 // Test paused state
-constexpr bool is_paused(rx::EnumBitSet<cpu_flag> state)
+constexpr bool is_paused(bs_t<cpu_flag> state)
 {
 	return !!(state & (cpu_flag::suspend + cpu_flag::dbg_global_pause + cpu_flag::dbg_pause)) && !is_stopped(state);
 }
@@ -88,12 +88,12 @@ public:
 	}
 
 	// Wrappers
-	static constexpr bool is_stopped(rx::EnumBitSet<cpu_flag> s)
+	static constexpr bool is_stopped(bs_t<cpu_flag> s)
 	{
 		return ::is_stopped(s);
 	}
 
-	static constexpr bool is_paused(rx::EnumBitSet<cpu_flag> s)
+	static constexpr bool is_paused(bs_t<cpu_flag> s)
 	{
 		return ::is_paused(s);
 	}
@@ -149,14 +149,14 @@ public:
 	}
 
 	u32 get_pc() const;
-	u32* get_pc2();             // Last PC before stepping for the debugger (may be null)
+	u32* get_pc2(); // Last PC before stepping for the debugger (may be null)
 	cpu_thread* get_next_cpu(); // Access next_cpu member if the is one
 
 	void notify();
 	cpu_thread& operator=(thread_state);
 
 	// Add/remove CPU state flags in an atomic operations, notifying if required
-	void add_remove_flags(rx::EnumBitSet<cpu_flag> to_add, rx::EnumBitSet<cpu_flag> to_remove);
+	void add_remove_flags(bs_t<cpu_flag> to_add, bs_t<cpu_flag> to_remove);
 
 	// Thread stats for external observation
 	static atomic_t<u64> g_threads_created, g_threads_deleted, g_suspend_counter;
@@ -177,7 +177,7 @@ public:
 	virtual std::vector<std::pair<u32, u32>> dump_callstack_list() const;
 
 	// Get CPU dump of misc information
-	virtual std::string dump_misc() const;
+	virtual void dump_misc(std::string& ret, std::any& /*custom_data*/) const;
 
 	// Thread entry point function
 	virtual void cpu_task() = 0;
@@ -186,16 +186,13 @@ public:
 	virtual void cpu_sleep() {}
 
 	// Callback for cpu_flag::pending
-	virtual void cpu_work()
-	{
-		state -= cpu_flag::pending + cpu_flag::pending_recheck;
-	}
+	virtual void cpu_work() { state -= cpu_flag::pending + cpu_flag::pending_recheck; }
 
 	// Callback for cpu_flag::ret
 	virtual void cpu_return() {}
 
 	// Callback for thread_ctrl::wait or RSX wait
-	virtual void cpu_wait(rx::EnumBitSet<cpu_flag> old);
+	virtual void cpu_wait(bs_t<cpu_flag> old);
 
 	// Callback for function abortion stats on Emu.Kill()
 	virtual void cpu_on_stop() {}
@@ -234,9 +231,9 @@ public:
 		if constexpr (std::is_void_v<std::invoke_result_t<F>>)
 		{
 			suspend_work work{prio, false, false, ::size32(hints), hints.begin(), &op, nullptr, [](void* func, void*)
-				{
-					std::invoke(*static_cast<F*>(func));
-				}};
+			{
+				std::invoke(*static_cast<F*>(func));
+			}};
 
 			work.push(_this);
 			return;
@@ -246,9 +243,9 @@ public:
 			std::invoke_result_t<F> result;
 
 			suspend_work work{prio, false, false, ::size32(hints), hints.begin(), &op, &result, [](void* func, void* res_buf)
-				{
-					*static_cast<std::invoke_result_t<F>*>(res_buf) = std::invoke(*static_cast<F*>(func));
-				}};
+			{
+				*static_cast<std::invoke_result_t<F>*>(res_buf) = std::invoke(*static_cast<F*>(func));
+			}};
 
 			work.push(_this);
 			return result;
@@ -263,9 +260,9 @@ public:
 		static_assert(std::is_void_v<std::invoke_result_t<F>>, "cpu_thread::suspend_post only supports void as return type");
 
 		return suspend_work{prio, false, true, ::size32(hints), hints.begin(), &op, nullptr, [](void* func, void*)
-			{
-				std::invoke(*static_cast<F*>(func));
-			}};
+		{
+			std::invoke(*static_cast<F*>(func));
+		}};
 	}
 
 	// Push the workload only if threads are being suspended by suspend_all()
@@ -278,9 +275,9 @@ public:
 
 		{
 			suspend_work work{prio, true, false, ::size32(hints), hints.begin(), &op, nullptr, [](void* func, void*)
-				{
-					std::invoke(*static_cast<F*>(func));
-				}};
+			{
+				std::invoke(*static_cast<F*>(func));
+			}};
 
 			return work.push(_this);
 		}

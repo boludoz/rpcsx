@@ -2,6 +2,7 @@
 
 #include <util/types.hpp>
 
+#include "Emu/RSX/Common/simple_array.hpp"
 #include "Emu/RSX/Core/RSXVertexTypes.h"
 #include "Emu/RSX/NV47/FW/draw_call.hpp"
 #include "Emu/RSX/Program/ProgramStateCache.h"
@@ -28,6 +29,12 @@ namespace rsx
 		std::array<push_buffer_vertex_info, 16> m_vertex_push_buffers;
 		rsx::simple_array<u32> m_element_push_buffer;
 
+		struct
+		{
+			rsx::simple_array<u32> u32buf;
+			rsx::simple_array<u128> u128buf;
+		} mutable m_scratch_buffers;
+
 	public:
 		draw_command_processor() = default;
 
@@ -44,7 +51,7 @@ namespace rsx
 
 		// Get compiled draw command for backend rendering
 		std::variant<draw_array_command, draw_indexed_array_command, draw_inlined_array>
-		get_draw_command(const rsx::rsx_state& state) const;
+			get_draw_command(const rsx::rsx_state& state) const;
 
 		// Push-buffers for immediate rendering (begin-end scopes)
 		void append_to_push_buffer(u32 attribute, u32 size, u32 subreg_index, vertex_base_type type, u32 value);
@@ -92,9 +99,9 @@ namespace rsx
 		void fill_user_clip_data(void* buffer) const;
 
 		/**
-		 * Fill buffer with vertex program constants.
-		 * Relocation table allows to do a partial fill with only selected registers.
-		 */
+		* Fill buffer with vertex program constants.
+		* Relocation table allows to do a partial fill with only selected registers.
+		*/
 		void fill_vertex_program_constants_data(void* buffer, const std::span<const u16>& reloc_table) const;
 
 		/**
@@ -107,4 +114,4 @@ namespace rsx
 		// Returns offsets to the index redirection lookup table and constants field array
 		void fill_constants_instancing_buffer(rsx::io_buffer& indirection_table_buf, rsx::io_buffer& constants_data_array_buffer, const VertexProgramBase* prog) const;
 	};
-} // namespace rsx
+}

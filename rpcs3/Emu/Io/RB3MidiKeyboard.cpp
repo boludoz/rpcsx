@@ -1,9 +1,8 @@
 // Rock Band 3 MIDI Pro Adapter Emulator (Keyboard Mode)
-#include "stdafx.h"
 
-#ifndef WITHOUT_RTMIDI
+#include "stdafx.h"
 #include "RB3MidiKeyboard.h"
-#include "cellos/sys_usbd.h"
+#include "Emu/Cell/lv2/sys_usbd.h"
 
 LOG_CHANNEL(rb3_midi_keyboard_log);
 
@@ -356,5 +355,3 @@ void usb_device_rb3_midi_keyboard::write_state(u8* buf)
 		buf[15] = std::min<u8>(std::max<u8>(0x5, wheel_pos), 0x75);
 	}
 }
-
-#endif

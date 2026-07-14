@@ -15,7 +15,9 @@
 #ifdef HAVE_SDL3
 #include "sdl_pad_handler.h"
 #endif
-#include "virtual_pad_handler.h"
+#ifndef ANDROID
+#include "keyboard_pad_handler.h"
+#endif
 #include "Emu/Io/Null/NullPadHandler.h"
 #include "Emu/Io/interception.h"
 #include "Emu/Io/PadHandler.h"
@@ -24,10 +26,10 @@
 #include "Emu/system_config.h"
 #include "Emu/RSX/Overlays/HomeMenu/overlay_home_menu.h"
 #include "Emu/RSX/Overlays/overlay_message.h"
-#include "cellos/sys_usbd.h"
-#include "rpcsx/fw/ps3/cellGem.h"
+#include "Emu/Cell/lv2/sys_usbd.h"
+#include "Emu/Cell/Modules/cellGem.h"
 #include "Emu/Cell/timers.hpp"
-#include "util/Thread.h"
+#include "Utilities/Thread.h"
 #include "util/atomic.hpp"
 
 LOG_CHANNEL(sys_log, "SYS");
@@ -45,7 +47,7 @@ namespace pad
 	atomic_t<bool> g_reset{false};
 	atomic_t<bool> g_enabled{true};
 	atomic_t<bool> g_home_menu_requested{false};
-} // namespace pad
+}
 
 namespace rsx
 {
@@ -79,6 +81,9 @@ void pad_thread::Init()
 {
 	std::lock_guard lock(pad::g_pad_mutex);
 
+	// Reset mouse-based gyro state
+	m_mouse_gyro.clear();
+
 	// Cache old settings if possible
 	std::array<pad_setting, CELL_PAD_MAX_PORT_NUM> pad_settings;
 	for (u32 i = 0; i < CELL_PAD_MAX_PORT_NUM; i++) // max 7 pads
@@ -86,26 +91,28 @@ void pad_thread::Init()
 		if (m_pads[i])
 		{
 			pad_settings[i] =
-				{
-					m_pads[i]->m_port_status,
-					m_pads[i]->m_device_capability,
-					m_pads[i]->m_device_type,
-					m_pads[i]->m_class_type,
-					m_pads[i]->m_vendor_id,
-					m_pads[i]->m_product_id,
-					m_pads[i]->ldd};
+			{
+				m_pads[i]->m_port_status,
+				m_pads[i]->m_device_capability,
+				m_pads[i]->m_device_type,
+				m_pads[i]->m_class_type,
+				m_pads[i]->m_vendor_id,
+				m_pads[i]->m_product_id,
+				m_pads[i]->ldd
+			};
 		}
 		else
 		{
 			pad_settings[i] =
-				{
-					CELL_PAD_STATUS_DISCONNECTED,
-					CELL_PAD_CAPABILITY_PS3_CONFORMITY | CELL_PAD_CAPABILITY_PRESS_MODE | CELL_PAD_CAPABILITY_ACTUATOR,
-					CELL_PAD_DEV_TYPE_STANDARD,
-					CELL_PAD_PCLASS_TYPE_STANDARD,
-					0,
-					0,
-					false};
+			{
+				CELL_PAD_STATUS_DISCONNECTED,
+				CELL_PAD_CAPABILITY_PS3_CONFORMITY | CELL_PAD_CAPABILITY_PRESS_MODE | CELL_PAD_CAPABILITY_ACTUATOR,
+				CELL_PAD_DEV_TYPE_STANDARD,
+				CELL_PAD_PCLASS_TYPE_STANDARD,
+				0,
+				0,
+				false
+			};
 		}
 	}
 
@@ -147,6 +154,10 @@ void pad_thread::Init()
 
 	input_log.trace("Using pad config:\n%s", g_cfg_input);
 
+#ifndef ANDROID
+	std::shared_ptr<keyboard_pad_handler> keyptr;
+#endif
+
 	// Always have a Null Pad Handler
 	std::shared_ptr<NullPadHandler> nullpad = std::make_shared<NullPadHandler>();
 	m_handlers.emplace(pad_handler::null, nullpad);
@@ -164,7 +175,21 @@ void pad_thread::Init()
 		}
 		else
 		{
-			cur_pad_handler = GetHandler(handler_type, m_curthread, m_curwindow);
+			if (handler_type == pad_handler::keyboard)
+			{
+#ifndef ANDROID
+				keyptr = std::make_shared<keyboard_pad_handler>();
+				keyptr->moveToThread(static_cast<QThread*>(m_curthread));
+				keyptr->SetTargetWindow(static_cast<QWindow*>(m_curwindow));
+				cur_pad_handler = keyptr;
+#else
+				cur_pad_handler = nullpad;
+#endif
+			}
+			else
+			{
+				cur_pad_handler = GetHandler(handler_type);
+			}
 			m_handlers.emplace(handler_type, cur_pad_handler);
 		}
 		cur_pad_handler->Init();
@@ -200,22 +225,58 @@ void pad_thread::Init()
 			}
 		}
 
-		pad->is_fake_pad = ((g_cfg.io.move == move_handler::real || g_cfg.io.move == move_handler::fake) && i >= (static_cast<u32>(CELL_PAD_MAX_PORT_NUM) - static_cast<u32>(CELL_GEM_MAX_NUM))) || (pad->m_class_type >= CELL_PAD_FAKE_TYPE_FIRST && pad->m_class_type < CELL_PAD_FAKE_TYPE_LAST);
+		pad->is_fake_pad = ((g_cfg.io.move == move_handler::real || g_cfg.io.move == move_handler::fake) && i >= (static_cast<u32>(CELL_PAD_MAX_PORT_NUM) - static_cast<u32>(CELL_GEM_MAX_NUM)))
+			|| (pad->m_class_type >= CELL_PAD_FAKE_TYPE_FIRST && pad->m_class_type < CELL_PAD_FAKE_TYPE_LAST);
 		connect_usb_controller(i, input::get_product_by_vid_pid(pad->m_vendor_id, pad->m_product_id));
+	}
+
+	// Set copilots
+	for (usz i = 0; i < m_pads.size(); i++)
+	{
+		auto& pad = m_pads[i];
+		if (!pad)
+			continue;
+
+		pad->copilots.clear();
+
+		if (pad->is_copilot())
+			continue;
+
+		for (usz j = 0; j < m_pads.size(); j++)
+		{
+			auto& other = m_pads[j];
+			if (i == j || !other || other->copilot_player() != i)
+				continue;
+
+			pad->copilots.push_back(other);
+		}
 	}
 
 	// Initialize active mouse and keyboard. Activate pad handler if one exists.
 	input::set_mouse_and_keyboard(m_handlers.contains(pad_handler::keyboard) ? input::active_mouse_and_keyboard::pad : input::active_mouse_and_keyboard::emulated);
 }
 
-void pad_thread::SetRumble(const u32 pad, u8 large_motor, bool small_motor)
+void pad_thread::SetRumble(u32 pad, u8 large_motor, u8 small_motor)
 {
-	if (pad >= m_pads.size())
+	if (pad >= m_pads.size() || !m_pads[pad])
 		return;
 
-	m_pads[pad]->m_last_rumble_time_us = get_system_time();
-	m_pads[pad]->m_vibrateMotors[0].m_value = large_motor;
-	m_pads[pad]->m_vibrateMotors[1].m_value = small_motor ? 255 : 0;
+	const u64 now_us = get_system_time();
+
+	m_pads[pad]->m_last_rumble_time_us = now_us;
+	m_pads[pad]->m_vibrate_motors[0].value = large_motor;
+	m_pads[pad]->m_vibrate_motors[1].value = small_motor;
+
+	// Rumble copilots as well
+	for (const auto& copilot : m_pads[pad]->copilots)
+	{
+		if (copilot && copilot->is_connected())
+		{
+			copilot->m_last_rumble_time_us = now_us;
+			copilot->m_vibrate_motors[0].value = large_motor;
+			copilot->m_vibrate_motors[1].value = small_motor;
+		}
+	}
 }
 
 void pad_thread::SetIntercepted(bool intercepted)
@@ -231,6 +292,106 @@ void pad_thread::SetIntercepted(bool intercepted)
 	}
 }
 
+void pad_thread::apply_copilots()
+{
+	const auto normalize = [](s32 value)
+	{
+		return (value - 128) / 127.0f;
+	};
+
+	std::lock_guard lock(pad::g_pad_mutex);
+
+	for (auto& pad : m_pads)
+	{
+		if (!pad || !pad->is_connected())
+		{
+			continue;
+		}
+
+		pad->m_buttons_external.resize(pad->m_buttons.size());
+
+		for (usz i = 0; i < pad->m_buttons.size(); i++)
+		{
+			const Button& src = pad->m_buttons[i];
+			ButtonExternal& dst = pad->m_buttons_external[i];
+
+			dst.m_offset = src.m_offset;
+			dst.m_outKeyCode = src.m_outKeyCode;
+			dst.m_value = src.m_value;
+			dst.m_pressed = src.m_pressed;
+		}
+
+		for (usz i = 0; i < pad->m_sticks.size(); i++)
+		{
+			const AnalogStick& src = pad->m_sticks[i];
+			AnalogStickExternal& dst = pad->m_sticks_external[i];
+
+			dst.m_offset = src.m_offset;
+			dst.m_value = src.m_value;
+		}
+
+		if (pad->copilots.empty() || pad->is_copilot())
+		{
+			continue;
+		}
+
+		// Merge buttons
+		for (const auto& copilot : pad->copilots)
+		{
+			if (!copilot || !copilot->is_connected())
+			{
+				continue;
+			}
+
+			for (ButtonExternal& button : pad->m_buttons_external)
+			{
+				for (const Button& other : copilot->m_buttons)
+				{
+					if (button.m_offset == other.m_offset && button.m_outKeyCode == other.m_outKeyCode)
+					{
+						if (other.m_pressed)
+						{
+							button.m_pressed = true;
+
+							if (button.m_value < other.m_value)
+							{
+								button.m_value = other.m_value;
+							}
+						}
+
+						break;
+					}
+				}
+			}
+		}
+
+		// Merge sticks
+		for (AnalogStickExternal& stick : pad->m_sticks_external)
+		{
+			f32 accumulated_value = normalize(stick.m_value);
+
+			for (const auto& copilot : pad->copilots)
+			{
+				if (!copilot || !copilot->is_connected())
+				{
+					continue;
+				}
+
+				for (const AnalogStick& other : copilot->m_sticks)
+				{
+					if (stick.m_offset == other.m_offset)
+					{
+						accumulated_value += normalize(other.m_value);
+						break;
+					}
+				}
+			}
+
+			stick.m_value = static_cast<u16>(std::round(std::clamp(accumulated_value * 127.0f + 128.0f, 0.0f, 255.0f)));
+		}
+	}
+}
+
 void pad_thread::update_pad_states()
 {
 	for (usz i = 0; i < m_pads.size(); i++)
@@ -240,7 +401,7 @@ void pad_thread::update_pad_states()
 		// Simulate unplugging and plugging in a new controller
 		if (pad && pad->m_disconnection_timer > 0)
 		{
-			const bool is_connected = pad->m_port_status & CELL_PAD_STATUS_CONNECTED;
+			const bool is_connected = pad->is_connected();
 			const u64 now = get_system_time();
 
 			if (is_connected && now < pad->m_disconnection_timer)
@@ -255,7 +416,7 @@ void pad_thread::update_pad_states()
 			}
 		}
 
-		const bool connected = pad && !pad->is_fake_pad && !!(pad->m_port_status & CELL_PAD_STATUS_CONNECTED);
+		const bool connected = pad && !pad->is_fake_pad && pad->is_connected();
 
 		if (m_pads_connected[i] == connected)
 			continue;
@@ -286,13 +447,10 @@ void pad_thread::operator()()
 
 		for (auto& thread : threads)
 		{
-			if (thread)
-			{
-				auto& enumeration_thread = *thread;
-				enumeration_thread = thread_state::aborting;
-				enumeration_thread();
-			}
+			// Join thread (ordered explicitly)
+			thread.reset();
 		}
+
 		threads.clear();
 
 		input_log.notice("Pad threads stopped");
@@ -307,35 +465,88 @@ void pad_thread::operator()()
 
 		input_log.notice("Starting pad threads...");
 
-		for (const auto& handler : m_handlers)
+#if defined(__APPLE__)
+		// Let's keep hid handlers on the same thread
+		std::vector<std::shared_ptr<PadHandlerBase>> hid_handlers;
+		std::vector<std::shared_ptr<PadHandlerBase>> handlers;
+
+		for (const auto& [type, handler] : m_handlers)
 		{
-			if (handler.first == pad_handler::null)
+			switch (type)
 			{
-				continue;
+			case pad_handler::null:
+				break;
+			case pad_handler::ds3:
+			case pad_handler::ds4:
+			case pad_handler::dualsense:
+			case pad_handler::skateboard:
+			case pad_handler::move:
+				hid_handlers.push_back(handler);
+				break;
+			default:
+				handlers.push_back(handler);
+				break;
 			}
+		}
 
-			threads.push_back(std::make_unique<named_thread<std::function<void()>>>(fmt::format("%s Thread", handler.second->m_type), [&handler = handler.second, &pad_mode]()
+		if (!hid_handlers.empty())
+		{
+			threads.push_back(std::make_unique<named_thread<std::function<void()>>>("HID Thread", [handlers = std::move(hid_handlers)]()
+			{
+				while (thread_ctrl::state() != thread_state::aborting)
 				{
-					while (thread_ctrl::state() != thread_state::aborting)
+					if (!pad::g_enabled || !is_input_allowed())
 					{
-						if (!pad::g_enabled || !is_input_allowed())
-						{
-							thread_ctrl::wait_for(30'000);
-							continue;
-						}
-
-						handler->process();
-
-						u64 pad_sleep = g_cfg.io.pad_sleep;
-
-						if (Emu.IsPaused())
-						{
-							pad_sleep = std::max<u64>(pad_sleep, 30'000);
-						}
-
-						thread_ctrl::wait_for(pad_sleep);
+						thread_ctrl::wait_for(30'000);
+						continue;
 					}
-				}));
+
+					for (auto& handler : handlers)
+					{
+						handler->process();
+					}
+
+					u64 pad_sleep = g_cfg.io.pad_sleep;
+
+					if (Emu.IsPaused())
+					{
+						pad_sleep = std::max<u64>(pad_sleep, 30'000);
+					}
+
+					thread_ctrl::wait_for(pad_sleep);
+				}
+			}));
+		}
+
+		for (const auto& handler : handlers)
+		{
+#else
+		for (const auto& [type, handler] : m_handlers)
+		{
+			if (type == pad_handler::null) continue;
+#endif
+			threads.push_back(std::make_unique<named_thread<std::function<void()>>>(fmt::format("%s Thread", handler->m_type), [handler]()
+			{
+				while (thread_ctrl::state() != thread_state::aborting)
+				{
+					if (!pad::g_enabled || !is_input_allowed())
+					{
+						thread_ctrl::wait_for(30'000);
+						continue;
+					}
+
+					handler->process();
+
+					u64 pad_sleep = g_cfg.io.pad_sleep;
+
+					if (Emu.IsPaused())
+					{
+						pad_sleep = std::max<u64>(pad_sleep, 30'000);
+					}
+
+					thread_ctrl::wait_for(pad_sleep);
+				}
+			}));
 		}
 
 		input_log.notice("Pad threads started");
@@ -393,9 +604,15 @@ void pad_thread::operator()()
 			}
 		}
 
+		apply_copilots();
+
 		if (Emu.IsRunning())
 		{
 			update_pad_states();
+
+			// Apply mouse-based gyro emulation.
+			// Intentionally bound to Player 1 only.
+			m_mouse_gyro.apply_gyro(m_pads[0]);
 		}
 
 		m_info.now_connect = connected_devices + num_ldd_pad;
@@ -411,17 +628,21 @@ void pad_thread::operator()()
 			{
 				const auto& pad = m_pads[i];
 
-				if (!(pad->m_port_status & CELL_PAD_STATUS_CONNECTED))
+				if (!pad->is_connected())
 					continue;
 
-				for (const auto& button : pad->m_buttons)
+				for (const Button& button : pad->m_buttons)
 				{
-					if (button.m_pressed && (button.m_outKeyCode == CELL_PAD_CTRL_CROSS ||
-												button.m_outKeyCode == CELL_PAD_CTRL_CIRCLE ||
-												button.m_outKeyCode == CELL_PAD_CTRL_TRIANGLE ||
-												button.m_outKeyCode == CELL_PAD_CTRL_SQUARE ||
-												button.m_outKeyCode == CELL_PAD_CTRL_START ||
-												button.m_outKeyCode == CELL_PAD_CTRL_SELECT))
+					if (button.m_pressed && (
+						(button.m_offset == CELL_PAD_BTN_OFFSET_DIGITAL1 && (
+							button.m_outKeyCode == CELL_PAD_CTRL_START ||
+							button.m_outKeyCode == CELL_PAD_CTRL_SELECT)) ||
+						(button.m_offset == CELL_PAD_BTN_OFFSET_DIGITAL2 && (
+							button.m_outKeyCode == CELL_PAD_CTRL_CROSS ||
+							button.m_outKeyCode == CELL_PAD_CTRL_CIRCLE ||
+							button.m_outKeyCode == CELL_PAD_CTRL_TRIANGLE ||
+							button.m_outKeyCode == CELL_PAD_CTRL_SQUARE))
+						))
 					{
 						any_button_pressed = true;
 						break;
@@ -447,18 +668,18 @@ void pad_thread::operator()()
 
 				const auto& pad = m_pads[i];
 
-				if (!(pad->m_port_status & CELL_PAD_STATUS_CONNECTED))
+				if (!pad->is_connected())
 					continue;
 
 				// Check if an LDD pad pressed the PS button (bit 0 of the first button)
 				// NOTE: Rock Band 3 doesn't seem to care about the len. It's always 0.
-				if (pad->ldd /*&& pad->ldd_data.len >= 1 */ && !!(pad->ldd_data.button[0] & CELL_PAD_CTRL_LDD_PS))
+				if (pad->ldd /*&& pad->ldd_data.len >= 1 */&& !!(pad->ldd_data.button[0] & CELL_PAD_CTRL_LDD_PS))
 				{
 					ps_button_pressed = true;
 					break;
 				}
 
-				for (const auto& button : pad->m_buttons)
+				for (const Button& button : pad->m_buttons)
 				{
 					if (button.m_offset == CELL_PAD_BTN_OFFSET_DIGITAL1 && button.m_outKeyCode == CELL_PAD_CTRL_PS && button.m_pressed)
 					{
@@ -496,9 +717,9 @@ void pad_thread::operator()()
 			m_resume_emulation_flag = false;
 
 			Emu.BlockingCallFromMainThread([]()
-				{
-					Emu.Resume();
-				});
+			{
+				Emu.Resume();
+			});
 		}
 
 		u64 pad_sleep = g_cfg.io.pad_sleep;
@@ -514,10 +735,10 @@ void pad_thread::operator()()
 			{
 				const auto& pad = m_pads[i];
 
-				if (!(pad->m_port_status & CELL_PAD_STATUS_CONNECTED))
+				if (!pad->is_connected())
 					continue;
 
-				for (const auto& button : pad->m_buttons)
+				for (const Button& button : pad->m_buttons)
 				{
 					if (button.m_offset == CELL_PAD_BTN_OFFSET_DIGITAL1 && button.m_outKeyCode == CELL_PAD_CTRL_START && button.m_pressed)
 					{
@@ -583,8 +804,10 @@ void pad_thread::InitLddPad(u32 handle, const u32* port_status)
 
 	static const input::product_info product = input::get_product_info(input::product_type::playstation_3_controller);
 
-	m_pads[handle]->ldd = true;
-	m_pads[handle]->Init(
+	auto& pad = m_pads[handle];
+	pad->ldd = true;
+	pad->Init
+	(
 		port_status ? *port_status : CELL_PAD_STATUS_CONNECTED | CELL_PAD_STATUS_ASSIGN_CHANGES | CELL_PAD_STATUS_CUSTOM_CONTROLLER,
 		CELL_PAD_CAPABILITY_PS3_CONFORMITY,
 		CELL_PAD_DEV_TYPE_LDD,
@@ -592,10 +815,11 @@ void pad_thread::InitLddPad(u32 handle, const u32* port_status)
 		product.pclass_profile,
 		product.vendor_id,
 		product.product_id,
-		50);
+		50
+	);
 
 	input_log.notice("Pad %d: LDD, VID=0x%x, PID=0x%x, class_type=0x%x, class_profile=0x%x",
-		handle, m_pads[handle]->m_vendor_id, m_pads[handle]->m_product_id, m_pads[handle]->m_class_type, m_pads[handle]->m_class_profile);
+		handle, pad->m_vendor_id, pad->m_product_id, pad->m_class_type, pad->m_class_profile);
 
 	num_ldd_pad++;
 }
@@ -617,28 +841,69 @@ s32 pad_thread::AddLddPad()
 
 void pad_thread::UnregisterLddPad(u32 handle)
 {
-	ensure(handle < m_pads.size());
+	auto& pad = ::at32(m_pads, handle);
 
-	m_pads[handle]->ldd = false;
-	m_pads[handle]->m_port_status &= ~CELL_PAD_STATUS_CONNECTED;
-	m_pads[handle]->m_port_status |= CELL_PAD_STATUS_ASSIGN_CHANGES;
+	pad->ldd = false;
+	pad->m_port_status &= ~CELL_PAD_STATUS_CONNECTED;
+	pad->m_port_status |= CELL_PAD_STATUS_ASSIGN_CHANGES;
 
 	num_ldd_pad--;
 }
 
-std::shared_ptr<PadHandlerBase> pad_thread::GetHandler(pad_handler type, void* thread, void* window)
+std::shared_ptr<PadHandlerBase> pad_thread::GetHandler(pad_handler type)
 {
-	return Emu.GetCallbacks().create_pad_handler(type, thread, window);
+	switch (type)
+	{
+	case pad_handler::null:
+		return std::make_shared<NullPadHandler>();
+	case pad_handler::keyboard:
+#ifdef ANDROID
+		return std::make_shared<NullPadHandler>();
+#else
+		return std::make_shared<keyboard_pad_handler>();
+#endif
+	case pad_handler::ds3:
+		return std::make_shared<ds3_pad_handler>();
+	case pad_handler::ds4:
+		return std::make_shared<ds4_pad_handler>();
+	case pad_handler::dualsense:
+		return std::make_shared<dualsense_pad_handler>();
+	case pad_handler::skateboard:
+		return std::make_shared<skateboard_pad_handler>();
+	case pad_handler::move:
+		return std::make_shared<ps_move_handler>();
+#ifdef _WIN32
+	case pad_handler::xinput:
+		return std::make_shared<xinput_pad_handler>();
+	case pad_handler::mm:
+		return std::make_shared<mm_joystick_handler>();
+#endif
+#ifdef HAVE_SDL3
+	case pad_handler::sdl:
+		return std::make_shared<sdl_pad_handler>();
+#endif
+#ifdef HAVE_LIBEVDEV
+	case pad_handler::evdev:
+		return std::make_shared<evdev_joystick_handler>();
+#endif
+	}
+
+	return nullptr;
 }
 
 void pad_thread::InitPadConfig(cfg_pad& cfg, pad_handler type, std::shared_ptr<PadHandlerBase>& handler)
 {
+	// We need to restore the original defaults first.
+	cfg.restore_defaults();
+
 	if (!handler)
 	{
-		handler = GetHandler(type, nullptr, nullptr);
+		handler = GetHandler(type);
 	}
 
 	ensure(!!handler);
+
+	// Set and apply actual defaults depending on pad handler
 	handler->init_config(&cfg);
 }
 
@@ -671,13 +936,13 @@ void pad_thread::open_home_menu()
 		input_log.notice("opening home menu...");
 
 		const error_code result = manager->create<rsx::overlays::home_menu_dialog>()->show([this](s32 status)
-			{
-				input_log.notice("closing home menu with status %d", status);
+		{
+			input_log.notice("closing home menu with status %d", status);
 
-				m_home_menu_open = false;
+			m_home_menu_open = false;
 
-				send_close_home_menu_cmds();
-			});
+			send_close_home_menu_cmds();
+		});
 
 		(result ? input_log.error : input_log.notice)("opened home menu with result %d", s32{result});
 	}

@@ -5,23 +5,21 @@
 
 #include "Emu/Memory/vm.h"
 #include "Emu/RSX/RSXThread.h"
-#include "util/mutex.h"
+#include "Utilities/mutex.h"
 
-#include "rx/asm.hpp"
-#include "rx/align.hpp"
-
+#include "util/asm.hpp"
 #include <unordered_map>
 
 namespace vk
 {
 	static constexpr usz s_dma_block_length = 0x00010000;
-	static constexpr u32 s_dma_block_mask = 0xFFFF0000;
+	static constexpr u32 s_dma_block_mask   = 0xFFFF0000;
 
 	std::unordered_map<u32, std::unique_ptr<dma_block>> g_dma_pool;
 	shared_mutex g_dma_mutex;
 
 	// Validation
-	atomic_t<u64> s_allocated_dma_pool_size{0};
+	atomic_t<u64> s_allocated_dma_pool_size{ 0 };
 
 	dma_block::~dma_block()
 	{
@@ -29,7 +27,7 @@ namespace vk
 		free();
 	}
 
-	void* dma_block::map_range(const utils::address_range& range)
+	void* dma_block::map_range(const utils::address_range32& range)
 	{
 		if (inheritance_info.parent)
 		{
@@ -79,7 +77,7 @@ namespace vk
 		auto src = vm::get_super_ptr<u8>(base_address);
 
 		if (rsx::get_location(base_address) == CELL_GCM_LOCATION_LOCAL ||
-			vm::check_addr(base_address, 0, static_cast<u32>(size))) [[likely]]
+			vm::check_addr(base_address, 0, static_cast<u32>(size))) [[ likely ]]
 		{
 			// Linear virtual memory space. Copy all at once.
 			std::memcpy(dst, src, size);
@@ -144,7 +142,7 @@ namespace vk
 		inheritance_info.block_offset = (addr - parent->base_address);
 	}
 
-	void dma_block::flush(const utils::address_range& range)
+	void dma_block::flush(const utils::address_range32& range)
 	{
 		if (inheritance_info.parent)
 		{
@@ -160,7 +158,7 @@ namespace vk
 		// NOTE: Do not unmap. This can be extremely slow on some platforms.
 	}
 
-	void dma_block::load(const utils::address_range& range)
+	void dma_block::load(const utils::address_range32& range)
 	{
 		if (inheritance_info.parent)
 		{
@@ -176,7 +174,7 @@ namespace vk
 		// NOTE: Do not unmap. This can be extremely slow on some platforms.
 	}
 
-	dma_mapping_handle dma_block::get(const utils::address_range& range)
+	dma_mapping_handle dma_block::get(const utils::address_range32& range)
 	{
 		if (inheritance_info.parent)
 		{
@@ -187,7 +185,7 @@ namespace vk
 		ensure(range.end <= end());
 
 		// mark_dirty(range);
-		return {(range.start - base_address), allocated_memory.get()};
+		return { (range.start - base_address), allocated_memory.get() };
 	}
 
 	dma_block* dma_block::head()
@@ -266,7 +264,7 @@ namespace vk
 		s_allocated_dma_pool_size += allocated_memory->size();
 	}
 
-	void* dma_block_EXT::map_range(const utils::address_range& range)
+	void* dma_block_EXT::map_range(const utils::address_range32& range)
 	{
 		return vm::get_super_ptr<void>(range.start);
 	}
@@ -276,12 +274,12 @@ namespace vk
 		// NOP
 	}
 
-	void dma_block_EXT::flush(const utils::address_range&)
+	void dma_block_EXT::flush(const utils::address_range32&)
 	{
 		// NOP
 	}
 
-	void dma_block_EXT::load(const utils::address_range&)
+	void dma_block_EXT::load(const utils::address_range32&)
 	{
 		// NOP
 	}
@@ -312,7 +310,7 @@ namespace vk
 				(vk::get_driver_vendor() == driver_vendor::NVIDIA) ?
 					test_host_pointer(base_address, expected_length) :
 #endif
-					true;
+				true;
 
 			if (!allow_host_buffers)
 			{
@@ -338,7 +336,7 @@ namespace vk
 		// Not much contention expected here, avoid searching twice
 		std::lock_guard lock(g_dma_mutex);
 
-		const auto map_range = utils::address_range::start_length(local_address, length);
+		const auto map_range = utils::address_range32::start_length(local_address, length);
 		auto first_block = (local_address & s_dma_block_mask);
 
 		if (auto found = g_dma_pool.find(first_block); found != g_dma_pool.end())
@@ -352,7 +350,7 @@ namespace vk
 		auto last_block = (map_range.end & s_dma_block_mask);
 		if (first_block == last_block) [[likely]]
 		{
-			auto& block_info = g_dma_pool[first_block];
+			auto &block_info = g_dma_pool[first_block];
 			ensure(!block_info);
 
 			create_dma_block(block_info, first_block, s_dma_block_length);
@@ -415,7 +413,7 @@ namespace vk
 		std::lock_guard lock(g_dma_mutex);
 
 		const u32 start = (local_address & s_dma_block_mask);
-		const u32 end = rx::alignUp(local_address + length, static_cast<u32>(s_dma_block_length));
+		const u32 end = utils::align(local_address + length, static_cast<u32>(s_dma_block_length));
 
 		for (u32 block = start; block < end;)
 		{
@@ -444,7 +442,7 @@ namespace vk
 		ensure(s_allocated_dma_pool_size == g_dma_pool.size() * s_dma_block_length);
 	}
 
-	template <bool load>
+	template<bool load>
 	void sync_dma_impl(u32 local_address, u32 length)
 	{
 		reader_lock lock(g_dma_mutex);
@@ -456,7 +454,7 @@ namespace vk
 			if (auto found = g_dma_pool.find(block); found != g_dma_pool.end())
 			{
 				const auto sync_end = std::min(limit, found->second->end());
-				const auto range = utils::address_range::start_end(local_address, sync_end);
+				const auto range = utils::address_range32::start_end(local_address, sync_end);
 
 				if constexpr (load)
 				{
@@ -503,4 +501,4 @@ namespace vk
 	{
 		g_dma_pool.clear();
 	}
-} // namespace vk
+}

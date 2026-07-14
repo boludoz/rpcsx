@@ -1,8 +1,7 @@
 #include "stdafx.h"
 #include "Emu/IdManager.h"
 #include "Loader/ELF.h"
-#include "rx/asm.hpp"
-#include "rx/align.hpp"
+#include "util/asm.hpp"
 
 #include "SPUThread.h"
 
@@ -15,16 +14,15 @@ inline void try_start(spu_thread& spu)
 		reader_lock lock(spu.run_ctrl_mtx);
 
 		if (spu.status_npc.fetch_op([](spu_thread::status_npc_sync_var& value)
-							  {
-								  if (value.status & SPU_STATUS_RUNNING)
-								  {
-									  return false;
-								  }
+		{
+			if (value.status & SPU_STATUS_RUNNING)
+			{
+				return false;
+			}
 
-								  value.status = SPU_STATUS_RUNNING | (value.status & SPU_STATUS_IS_ISOLATED);
-								  return true;
-							  })
-				.second)
+			value.status = SPU_STATUS_RUNNING | (value.status & SPU_STATUS_IS_ISOLATED);
+			return true;
+		}).second)
 		{
 			spu.state -= cpu_flag::stop;
 			notify = true;
@@ -132,6 +130,18 @@ bool spu_thread::read_reg(const u32 addr, u32& value)
 		return true;
 	}
 
+	case Prxy_QueryMask_offs:
+	{
+		value = mfc_prxy_mask;
+		return true;
+	}
+
+	case Prxy_QueryType_offs:
+	{
+		value = 0;
+		return true;
+	}
+
 	case SPU_Out_MBox_offs:
 	{
 		value = ch_out_mbox.pop();
@@ -140,7 +150,29 @@ bool spu_thread::read_reg(const u32 addr, u32& value)
 
 	case SPU_MBox_Status_offs:
 	{
-		value = (ch_out_mbox.get_count() & 0xff) | ((4 - ch_in_mbox.get_count()) << 8 & 0xff00) | (ch_out_intr_mbox.get_count() << 16 & 0xff0000);
+		// Load channel counts atomically
+		auto counts = std::make_tuple(ch_out_mbox.get_count(), ch_in_mbox.get_count(), ch_out_intr_mbox.get_count());
+
+		while (true)
+		{
+			atomic_fence_acquire();
+
+			const auto counts_check = std::make_tuple(ch_out_mbox.get_count(), ch_in_mbox.get_count(), ch_out_intr_mbox.get_count());
+
+			if (counts_check == counts)
+			{
+				break;
+			}
+
+			// Update and reload
+			counts = counts_check;
+		}
+
+		const u32 out_mbox = std::get<0>(counts);
+		const u32 in_mbox = 4 - std::get<1>(counts);
+		const u32 intr_mbox = std::get<2>(counts);
+
+		value = (out_mbox & 0xff) | ((in_mbox << 8) & 0xff00) | ((intr_mbox << 16) & 0xff0000);
 		return true;
 	}
 
@@ -307,15 +339,15 @@ bool spu_thread::write_reg(const u32 addr, const u32 value)
 	case SPU_NPC_offs:
 	{
 		status_npc.fetch_op([value = value & 0x3fffd](status_npc_sync_var& state)
+		{
+			if (!(state.status & SPU_STATUS_RUNNING))
 			{
-				if (!(state.status & SPU_STATUS_RUNNING))
-				{
-					state.npc = value;
-					return true;
-				}
+				state.npc = value;
+				return true;
+			}
 
-				return false;
-			});
+			return false;
+		});
 
 		return true;
 	}
@@ -347,6 +379,8 @@ bool spu_thread::test_is_problem_state_register_offset(u32 offset, bool for_read
 		case MFC_QStatus_offs:
 		case SPU_Out_MBox_offs:
 		case SPU_MBox_Status_offs:
+		case Prxy_QueryType_offs:
+		case Prxy_QueryMask_offs:
 		case SPU_Status_offs:
 		case Prxy_TagStatus_offs:
 		case SPU_NPC_offs:
@@ -393,6 +427,12 @@ void spu_load_exec(const spu_exec_object& elf)
 	{
 		if (prog.p_type == 0x1u /* LOAD */ && prog.p_memsz)
 		{
+			if (prog.p_vaddr >= SPU_LS_SIZE || prog.p_filesz > SPU_LS_SIZE - prog.p_vaddr)
+			{
+				spu_log.error("spu_load_exec: skipping segment with vaddr=0x%x filesz=0x%x (exceeds LS=0x%x)", prog.p_vaddr, prog.p_filesz, static_cast<u32>(SPU_LS_SIZE));
+				continue;
+			}
+
 			std::memcpy(spu->_ptr<void>(prog.p_vaddr), prog.bin.data(), prog.p_filesz);
 		}
 	}
@@ -402,7 +442,7 @@ void spu_load_exec(const spu_exec_object& elf)
 	spu->status_npc = {SPU_STATUS_RUNNING, elf.header.e_entry};
 	atomic_storage<u32>::release(spu->pc, elf.header.e_entry);
 
-	const auto funcs = spu->discover_functions(0, {spu->ls, SPU_LS_SIZE}, true, umax);
+	const auto funcs = spu->discover_functions(0, { spu->ls , SPU_LS_SIZE }, true, umax);
 
 	if (spu_log.notice && !funcs.empty())
 	{
@@ -451,7 +491,7 @@ void spu_load_rel_exec(const spu_rel_object& elf)
 	{
 		if (shdr.sh_type == sec_type::sht_progbits && shdr.sh_flags().all_of(sh_flag::shf_alloc))
 		{
-			total_memsize = rx::alignUp<u32>(total_memsize + shdr.sh_size, 4);
+			total_memsize = utils::align<u32>(total_memsize + shdr.sh_size, 4);
 		}
 	}
 
@@ -462,8 +502,14 @@ void spu_load_rel_exec(const spu_rel_object& elf)
 	{
 		if (shdr.sh_type == sec_type::sht_progbits && shdr.sh_flags().all_of(sh_flag::shf_alloc))
 		{
+			if (offs >= SPU_LS_SIZE || shdr.sh_size > SPU_LS_SIZE - offs)
+			{
+				spu_log.error("spu_load_rel_exec: skipping section at offs=0x%x sh_size=0x%x (exceeds LS=0x%x)", offs, shdr.sh_size, static_cast<u32>(SPU_LS_SIZE));
+				break;
+			}
+
 			std::memcpy(spu->_ptr<void>(offs), shdr.get_bin().data(), shdr.sh_size);
-			offs = rx::alignUp<u32>(offs + shdr.sh_size, 4);
+			offs = utils::align<u32>(offs + shdr.sh_size, 4);
 		}
 	}
 

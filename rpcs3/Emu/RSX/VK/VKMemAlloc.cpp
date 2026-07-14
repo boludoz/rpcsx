@@ -1,7 +1,8 @@
 #define VMA_IMPLEMENTATION
+#define VMA_VULKAN_VERSION 1002000
 
 #include "util/atomic.hpp"
-#include "util/mutex.h"
+#include "Utilities/mutex.h"
 
 // Protect some STL headers from macro (add more if it fails to compile)
 #include <atomic>
@@ -19,43 +20,15 @@
 class VmaRWMutex
 {
 public:
-	void LockRead()
-	{
-		m_mutex.lock_shared();
-	}
-	void UnlockRead()
-	{
-		m_mutex.unlock_shared();
-	}
-	bool TryLockRead()
-	{
-		return m_mutex.try_lock_shared();
-	}
-	void LockWrite()
-	{
-		m_mutex.lock();
-	}
-	void UnlockWrite()
-	{
-		m_mutex.unlock();
-	}
-	bool TryLockWrite()
-	{
-		return m_mutex.try_lock();
-	}
-	void Lock()
-	{
-		m_mutex.lock();
-	}
-	void Unlock()
-	{
-		m_mutex.unlock();
-	}
-	bool TryLock()
-	{
-		return m_mutex.try_lock();
-	}
-
+	void LockRead() { m_mutex.lock_shared(); }
+	void UnlockRead() { m_mutex.unlock_shared(); }
+	bool TryLockRead() { return m_mutex.try_lock_shared(); }
+	void LockWrite() { m_mutex.lock(); }
+	void UnlockWrite() { m_mutex.unlock(); }
+	bool TryLockWrite() { return m_mutex.try_lock(); }
+	void Lock() { m_mutex.lock(); }
+	void Unlock() { m_mutex.unlock(); }
+	bool TryLock() { return m_mutex.try_lock(); }
 private:
 	shared_mutex m_mutex;
 };
@@ -63,7 +36,7 @@ private:
 #define VMA_RW_MUTEX VmaRWMutex
 #define VMA_MUTEX VmaRWMutex
 
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(__clang__)
 #pragma warning(push, 0)
 #else
 #pragma GCC diagnostic push
@@ -77,11 +50,12 @@ private:
 #pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
 #ifdef __clang__
 #pragma clang diagnostic ignored "-Winconsistent-missing-override"
+#pragma clang diagnostic ignored "-Wnullability-completeness"
 #else
 #pragma GCC diagnostic ignored "-Wsuggest-attribute=noreturn"
 #endif
 #endif
-#include "3rdparty/GPUOpen/VulkanMemoryAllocator/src/vk_mem_alloc.h"
+#include <vk_mem_alloc.h>
 #ifdef _MSC_VER
 #pragma warning(pop)
 #else

@@ -1,9 +1,11 @@
 #pragma once
 #include "ShaderParam.h"
-#include "FragmentProgramRegister.h"
 #include "RSXFragmentProgram.h"
 
+#include "Assembler/CFG.h"
+
 #include <sstream>
+#include <unordered_map>
 
 /**
  * This class is used to translate RSX Fragment program to GLSL/HLSL code
@@ -36,22 +38,19 @@ class FragmentProgramDecompiler
 	SRC0 src0;
 	SRC1 src1;
 	SRC2 src2;
-	u32 opflags;
+	u32  opflags;
+
+	const rsx::assembler::Instruction* m_instruction;
 
 	std::string main;
 	u32& m_size;
 	u32 m_const_index = 0;
-	u32 m_offset;
 	u32 m_location = 0;
+	bool m_is_valid_ucode = true;
 
 	u32 m_loop_count;
 	int m_code_level;
-	std::vector<u32> m_end_offsets;
-	std::vector<u32> m_else_offsets;
-
-	bool m_is_valid_ucode = true;
-
-	std::array<rsx::MixedPrecisionRegister, 64> temp_registers;
+	std::unordered_map<u32, u32> m_constant_offsets;
 
 	std::string GetMask() const;
 
@@ -72,21 +71,17 @@ class FragmentProgramDecompiler
 	std::string ClampValue(const std::string& code, u32 precision);
 
 	/**
-	 * Returns true if the dst set is not a vector (i.e only a single component)
-	 */
+	* Returns true if the dst set is not a vector (i.e only a single component)
+	*/
 	bool DstExpectsSca() const;
 
 	void AddCodeCond(const std::string& lhs, const std::string& rhs);
 	std::string GetRawCond();
 	std::string GetCond();
-	template <typename T>
-	std::string GetSRC(T src);
+	template<typename T> std::string GetSRC(T src);
 	std::string BuildCode();
 
-	static u32 GetData(const u32 d)
-	{
-		return d << 16 | d >> 16;
-	}
+	static u32 GetData(const u32 d) { return d << 16 | d >> 16; }
 
 	/**
 	 * Emits code if opcode is an SCT/SCB one and returns true,
@@ -96,15 +91,14 @@ class FragmentProgramDecompiler
 	bool handle_sct_scb(u32 opcode);
 
 	/**
-	 * Emits code if opcode is an TEX SRB one and returns true,
-	 * otherwise do nothing and return false.
-	 * NOTE: What does TEX SRB means ???
-	 */
+	* Emits code if opcode is an TEX SRB one and returns true,
+	* otherwise do nothing and return false.
+	* NOTE: What does TEX SRB means ???
+	*/
 	bool handle_tex_srb(u32 opcode);
 
 protected:
-	const RSXFragmentProgram& m_prog;
-	u32 m_ctrl = 0;
+	const RSXFragmentProgram &m_prog;
 
 	/** returns the type name of float vectors.
 	 */
@@ -121,29 +115,29 @@ protected:
 
 	/** returns string calling comparison function on 2 args passed as strings.
 	 */
-	virtual std::string compareFunction(COMPARE, const std::string&, const std::string&) = 0;
+	virtual std::string compareFunction(COMPARE, const std::string &, const std::string &) = 0;
 
 	/** Insert header of shader file (eg #version, "system constants"...)
 	 */
-	virtual void insertHeader(std::stringstream& OS) = 0;
+	virtual void insertHeader(std::stringstream &OS) = 0;
 	/** Insert global declaration of fragments inputs.
 	 */
-	virtual void insertInputs(std::stringstream& OS) = 0;
+	virtual void insertInputs(std::stringstream &OS) = 0;
 	/** insert global declaration of fragments outputs.
-	 */
-	virtual void insertOutputs(std::stringstream& OS) = 0;
+	*/
+	virtual void insertOutputs(std::stringstream &OS) = 0;
 	/** insert declaration of shader constants.
-	 */
-	virtual void insertConstants(std::stringstream& OS) = 0;
+	*/
+	virtual void insertConstants(std::stringstream &OS) = 0;
 	/** insert helper function definitions.
-	 */
-	virtual void insertGlobalFunctions(std::stringstream& OS) = 0;
+	*/
+	virtual void insertGlobalFunctions(std::stringstream &OS) = 0;
 	/** insert beginning of main (signature, temporary declaration...)
-	 */
-	virtual void insertMainStart(std::stringstream& OS) = 0;
+	*/
+	virtual void insertMainStart(std::stringstream &OS) = 0;
 	/** insert end of main function (return value, output copy...)
 	 */
-	virtual void insertMainEnd(std::stringstream& OS) = 0;
+	virtual void insertMainEnd(std::stringstream &OS) = 0;
 
 public:
 	enum : u16
@@ -177,7 +171,6 @@ public:
 
 		// Decoded properties (out)
 		bool has_lit_op = false;
-		bool has_gather_op = false;
 		bool has_no_output = false;
 		bool has_discard_op = false;
 		bool has_tex_op = false;
@@ -193,17 +186,22 @@ public:
 		bool has_tex2D = false;
 		bool has_tex3D = false;
 		bool has_texShadowProj = false;
-	} properties;
+
+		// Literal offsets
+		std::vector<u32> constant_offsets;
+	}
+	properties;
 
 	struct
 	{
 		bool has_native_half_support = false;
 		bool emulate_depth_compare = false;
 		bool has_low_precision_rounding = false;
-	} device_props;
+	}
+	device_props;
 
 	ParamArray m_parr;
-	FragmentProgramDecompiler(const RSXFragmentProgram& prog, u32& size);
+	FragmentProgramDecompiler(const RSXFragmentProgram &prog, u32& size);
 	FragmentProgramDecompiler(const FragmentProgramDecompiler&) = delete;
 	FragmentProgramDecompiler(FragmentProgramDecompiler&&) = delete;
 	std::string Decompile();

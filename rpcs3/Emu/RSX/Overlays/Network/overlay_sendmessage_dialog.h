@@ -3,8 +3,7 @@
 #include "../overlays.h"
 #include "../overlay_list_view.hpp"
 #include "Emu/Cell/ErrorCodes.h"
-#include "rpcsx/fw/ps3/sceNp.h"
-#include "util/mutex.h"
+#include "Emu/Cell/Modules/sceNp.h"
 
 namespace rsx
 {
@@ -43,5 +42,5 @@ namespace rsx
 			error_code Exec(message_data& msg_data, std::set<std::string>& npids) override;
 			void callback_handler(rpcn::NotificationType ntype, const std::string& username, bool status) override;
 		};
-	} // namespace overlays
-} // namespace rsx
+	}
+}

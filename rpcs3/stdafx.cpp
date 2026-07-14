@@ -1,4 +1,4 @@
-#include "stdafx.h"
+#include "stdafx.h" // No BOM and only basic ASCII in this file, or a neko will die
 
 static_assert(std::endian::native == std::endian::little || std::endian::native == std::endian::big);
 
@@ -59,4 +59,4 @@ namespace
 	static_assert(!is_same_ptr<B, E>());
 	static_assert(is_same_ptr<F, C>());
 	static_assert(is_same_ptr<C, F>());
-} // namespace
+}

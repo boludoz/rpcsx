@@ -33,7 +33,7 @@ namespace rsx
 			// Get limit imposed by FIFO PUT (if put is behind get it will result in a number ignored by min)
 			const u32 fifo_read_limit = static_cast<u32>(((RSX(ctx)->ctrl->put & ~3ull) - (RSX(ctx)->fifo_ctrl->get_pos())) / 4);
 
-			u32 count = std::min<u32>({fifo_args_cnt, fifo_read_limit, method_range});
+			u32 count = std::min<u32>({ fifo_args_cnt, fifo_read_limit, method_range });
 
 			if (!count)
 			{
@@ -93,23 +93,21 @@ namespace rsx
 					// Move last 32 bits
 					reinterpret_cast<u32*>(dst)[0] = reinterpret_cast<const u32*>(src)[count - 1];
 					RSX(ctx)->invalidate_fragment_program(dst_dma, dst_offset, 4);
+					return;
+				}
+
+				if (dst_dma & CELL_GCM_LOCATION_MAIN)
+				{
+					// May overlap
+					std::memmove(dst, src, data_length);
 				}
 				else
 				{
-					if (dst_dma & CELL_GCM_LOCATION_MAIN)
-					{
-						// May overlap
-						std::memmove(dst, src, data_length);
-					}
-					else
-					{
-						// Never overlaps
-						std::memcpy(dst, src, data_length);
-					}
-
-					RSX(ctx)->invalidate_fragment_program(dst_dma, dst_offset, count * 4);
+					// Never overlaps
+					std::memcpy(dst, src, data_length);
 				}
 
+				RSX(ctx)->invalidate_fragment_program(dst_dma, dst_offset, count * 4);
 				break;
 			}
 			case blit_engine::transfer_destination_format::r5g6b5:
@@ -163,5 +161,5 @@ namespace rsx
 			}
 			}
 		}
-	} // namespace nv308a
-} // namespace rsx
+	}
+}

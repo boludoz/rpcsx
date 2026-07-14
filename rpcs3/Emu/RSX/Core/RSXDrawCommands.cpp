@@ -4,7 +4,6 @@
 #include "Emu/RSX/Common/BufferUtils.h"
 #include "Emu/RSX/Common/buffer_stream.hpp"
 #include "Emu/RSX/Common/io_buffer.h"
-#include "Emu/RSX/Common/simple_array.hpp"
 #include "Emu/RSX/NV47/HW/context_accessors.define.h"
 #include "Emu/RSX/Program/GLSLCommon.h"
 #include "Emu/RSX/rsx_methods.h"
@@ -36,7 +35,7 @@ namespace rsx
 				{
 					// Stride must be updated even if the stream is disabled
 					info.attribute_stride += rsx::get_vertex_type_size_on_host(vinfo.type(), vinfo.size());
-					info.locations.push_back({index, false, 1});
+					info.locations.push_back({ index, false, 1 });
 
 					if (input_mask & (1u << index))
 					{
@@ -64,7 +63,7 @@ namespace rsx
 		result.interleaved_blocks.reserve(16);
 		result.referenced_registers.reserve(16);
 
-		for (auto [ref_mask, index] = std::tuple{input_mask, u8(0)}; ref_mask; ++index, ref_mask >>= 1)
+		for (auto [ref_mask, index] = std::tuple{ input_mask, u8(0) }; ref_mask; ++index, ref_mask >>= 1)
 		{
 			ensure(index < rsx::limits::vertex_count);
 
@@ -159,7 +158,7 @@ namespace rsx
 					}
 
 					alloc_new_block = false;
-					block->locations.push_back({index, modulo, info.frequency()});
+					block->locations.push_back({ index, modulo, info.frequency() });
 					block->interleaved = true;
 					break;
 				}
@@ -171,7 +170,7 @@ namespace rsx
 					block.attribute_stride = info.stride();
 					block.memory_location = info.offset() >> 31;
 					block.locations.reserve(16);
-					block.locations.push_back({index, modulo, info.frequency()});
+					block.locations.push_back({ index, modulo, info.frequency() });
 
 					if (block.attribute_stride == 0)
 					{
@@ -193,10 +192,10 @@ namespace rsx
 
 	std::span<const std::byte> draw_command_processor::get_raw_index_array(const draw_clause& draw_indexed_clause) const
 	{
-		if (!m_element_push_buffer.empty()) [[unlikely]]
+		if (!m_element_push_buffer.empty()) [[ unlikely ]]
 		{
 			// Indices provided via immediate mode
-			return {reinterpret_cast<const std::byte*>(m_element_push_buffer.data()), ::narrow<u32>(m_element_push_buffer.size() * sizeof(u32))};
+			return { reinterpret_cast<const std::byte*>(m_element_push_buffer.data()), ::narrow<u32>(m_element_push_buffer.size() * sizeof(u32)) };
 		}
 
 		const rsx::index_array_type type = REGS(m_ctx)->index_type();
@@ -209,16 +208,18 @@ namespace rsx
 		const u32 count = draw_indexed_clause.get_elements_count();
 
 		const auto ptr = vm::_ptr<const std::byte>(address);
-		return {ptr + first * type_size, count * type_size};
+		return { ptr + first * type_size, count * type_size };
 	}
 
 	std::variant<draw_array_command, draw_indexed_array_command, draw_inlined_array>
-	draw_command_processor::get_draw_command(const rsx::rsx_state& state) const
+		draw_command_processor::get_draw_command(const rsx::rsx_state& state) const
 	{
-		if (REGS(m_ctx)->current_draw_clause.command == rsx::draw_command::indexed) [[likely]]
+		if (REGS(m_ctx)->current_draw_clause.command == rsx::draw_command::indexed) [[ likely ]]
 		{
-			return draw_indexed_array_command{
-				get_raw_index_array(state.current_draw_clause)};
+			return draw_indexed_array_command
+			{
+				get_raw_index_array(state.current_draw_clause)
+			};
 		}
 
 		if (REGS(m_ctx)->current_draw_clause.command == rsx::draw_command::array)
@@ -274,8 +275,8 @@ namespace rsx
 		{
 			for (auto& push_buf : m_vertex_push_buffers)
 			{
-				// Disabled, see https://github.com/RPCS3/rpcs3/issues/1932
-				// REGS(m_ctx)->register_vertex_info[index].size = 0;
+				//Disabled, see https://github.com/RPCS3/rpcs3/issues/1932
+				//REGS(m_ctx)->register_vertex_info[index].size = 0;
 
 				push_buf.clear();
 			}
@@ -571,10 +572,8 @@ namespace rsx
 		float scale_y = REGS(m_ctx)->viewport_scale_y() / (clip_h / 2.f);
 		float offset_y = (REGS(m_ctx)->viewport_offset_y() - (clip_h / 2.f));
 		offset_y /= clip_h / 2.f;
-		if (flip_y)
-			scale_y *= -1;
-		if (flip_y)
-			offset_y *= -1;
+		if (flip_y) scale_y *= -1;
+		if (flip_y) offset_y *= -1;
 
 		const float scale_z = REGS(m_ctx)->viewport_scale_z();
 		const float offset_z = REGS(m_ctx)->viewport_offset_z();
@@ -588,21 +587,34 @@ namespace rsx
 
 	void draw_command_processor::fill_user_clip_data(void* buffer) const
 	{
+		if (REGS(m_ctx)->clip_planes_mask() == 0) [[ likely ]]
+		{
+			*reinterpret_cast<u32*>(buffer) = 0b0101010101010101;
+			return;
+		}
+
 		const rsx::user_clip_plane_op clip_plane_control[6] =
-			{
-				REGS(m_ctx)->clip_plane_0_enabled(),
-				REGS(m_ctx)->clip_plane_1_enabled(),
-				REGS(m_ctx)->clip_plane_2_enabled(),
-				REGS(m_ctx)->clip_plane_3_enabled(),
-				REGS(m_ctx)->clip_plane_4_enabled(),
-				REGS(m_ctx)->clip_plane_5_enabled(),
-			};
+		{
+			REGS(m_ctx)->clip_plane_0_enabled(),
+			REGS(m_ctx)->clip_plane_1_enabled(),
+			REGS(m_ctx)->clip_plane_2_enabled(),
+			REGS(m_ctx)->clip_plane_3_enabled(),
+			REGS(m_ctx)->clip_plane_4_enabled(),
+			REGS(m_ctx)->clip_plane_5_enabled(),
+		};
 
-		u8 data_block[64];
-		s32* clip_enabled_flags = reinterpret_cast<s32*>(data_block);
-		f32* clip_distance_factors = reinterpret_cast<f32*>(data_block + 32);
+		/**
+		 * We encode the clip configuration
+		 * For each plane, we have 2 bits, encoding 0, 1, 2
+		 * 0 = LT
+		 * 1 = EQ (Disabled)
+		 * 2 = GT
+		 */
+		s32 clip_configuration_field = 0;
 
-		for (int index = 0; index < 6; ++index)
+#define CLIP_DISTANCE_FACTOR(x) (x + 1)
+
+		for (int index = 0, shift_offset = 0; index < 6; ++index, shift_offset += 2)
 		{
 			switch (clip_plane_control[index])
 			{
@@ -611,32 +623,31 @@ namespace rsx
 				[[fallthrough]];
 
 			case rsx::user_clip_plane_op::disable:
-				clip_enabled_flags[index] = 0;
-				clip_distance_factors[index] = 0.f;
+				clip_configuration_field |= CLIP_DISTANCE_FACTOR(0) << shift_offset;
 				break;
 
 			case rsx::user_clip_plane_op::greater_or_equal:
-				clip_enabled_flags[index] = 1;
-				clip_distance_factors[index] = 1.f;
+				clip_configuration_field |= CLIP_DISTANCE_FACTOR(1) << shift_offset;
 				break;
 
 			case rsx::user_clip_plane_op::less_than:
-				clip_enabled_flags[index] = 1;
-				clip_distance_factors[index] = -1.f;
+				clip_configuration_field |= CLIP_DISTANCE_FACTOR(-1) << shift_offset;
 				break;
 			}
 		}
 
-		memcpy(buffer, data_block, 2 * 8 * sizeof(u32));
+#undef CLIP_DISTANCE_FACTOR
+
+		*reinterpret_cast<s32*>(buffer) = clip_configuration_field;
 	}
 
 	/**
-	 * Fill buffer with vertex program constants.
-	 * Buffer must be at least 512 float4 wide.
-	 */
+	* Fill buffer with vertex program constants.
+	* Buffer must be at least 512 float4 wide.
+	*/
 	void draw_command_processor::fill_vertex_program_constants_data(void* buffer, const std::span<const u16>& reloc_table) const
 	{
-		if (!reloc_table.empty()) [[likely]]
+		if (!reloc_table.empty()) [[ likely ]]
 		{
 			char* dst = reinterpret_cast<char*>(buffer);
 			for (const auto& index : reloc_table)
@@ -653,102 +664,59 @@ namespace rsx
 
 	void draw_command_processor::fill_fragment_state_buffer(void* buffer, const RSXFragmentProgram& /*fragment_program*/) const
 	{
-		ROP_control_t rop_control{};
-
-		if (REGS(m_ctx)->alpha_test_enabled())
+#pragma pack(push, 1)
+		struct fragment_context_t
 		{
-			const u32 alpha_func = static_cast<u32>(REGS(m_ctx)->alpha_func());
-			rop_control.set_alpha_test_func(alpha_func);
-			rop_control.enable_alpha_test();
-		}
-
-		if (REGS(m_ctx)->polygon_stipple_enabled())
-		{
-			rop_control.enable_polygon_stipple();
-		}
-
-		auto can_use_hw_a2c = [&]() -> bool
-		{
-			const auto& config = RSX(m_ctx)->get_backend_config();
-			if (!config.supports_hw_a2c)
-			{
-				return false;
-			}
-
-			if (config.supports_hw_a2c_1spp)
-			{
-				return true;
-			}
-
-			return REGS(m_ctx)->surface_antialias() != rsx::surface_antialiasing::center_1_sample;
+			f32 fog_param0;
+			f32 fog_param1;
+			u32 rop_control;
+			f32 alpha_ref;
+			u32 fog_mode;
+			f32 wpos_scale;
+			f32 wpos_bias[2];
 		};
+#pragma pack(pop)
 
-		if (REGS(m_ctx)->msaa_alpha_to_coverage_enabled() && !can_use_hw_a2c())
-		{
-			// TODO: Properly support alpha-to-coverage and alpha-to-one behavior in shaders
-			// Alpha values generate a coverage mask for order independent blending
-			// Requires hardware AA to work properly (or just fragment sample stage in fragment shaders)
-			// Simulated using combined alpha blend and alpha test
-			rop_control.enable_alpha_to_coverage();
-			if (REGS(m_ctx)->msaa_sample_mask())
-			{
-				rop_control.enable_MSAA_writes();
-			}
+		ROP_control_t rop_control{};
+		alignas(16) fragment_context_t payload{};
 
-			// Sample configuration bits
-			switch (REGS(m_ctx)->surface_antialias())
-			{
-			case rsx::surface_antialiasing::center_1_sample:
-				break;
-			case rsx::surface_antialiasing::diagonal_centered_2_samples:
-				rop_control.set_msaa_control(1u);
-				break;
-			default:
-				rop_control.set_msaa_control(3u);
-				break;
-			}
-		}
-
-		const f32 fog0 = REGS(m_ctx)->fog_params_0();
-		const f32 fog1 = REGS(m_ctx)->fog_params_1();
-		const u32 fog_mode = static_cast<u32>(REGS(m_ctx)->fog_equation());
-
-		// Check if framebuffer is actually an XRGB format and not a WZYX format
-		switch (REGS(m_ctx)->surface_color())
-		{
-		case rsx::surface_color_format::w16z16y16x16:
-		case rsx::surface_color_format::w32z32y32x32:
-		case rsx::surface_color_format::x32:
-			// These behave very differently from "normal" formats.
-			break;
-		default:
-			// Integer framebuffer formats.
-			rop_control.enable_framebuffer_INT();
-
-			// Check if we want sRGB conversion.
-			if (REGS(m_ctx)->framebuffer_srgb_enabled())
-			{
-				rop_control.enable_framebuffer_sRGB();
-			}
-			break;
-		}
+		// Always encode the alpha function. Toggling alpha-test is not guaranteed to trigger context param reload anymore.
+		const u32 alpha_func = static_cast<u32>(REGS(m_ctx)->alpha_func());
+		rop_control.set_alpha_test_func(alpha_func);
 
 		// Generate wpos coefficients
-		// wpos equation is now as follows:
+		// wpos equation is now as follows (ignoring pixel center offset):
 		// wpos.y = (frag_coord / resolution_scale) * ((window_origin!=top)?-1.: 1.) + ((window_origin!=top)? window_height : 0)
 		// wpos.x = (frag_coord / resolution_scale)
 		// wpos.zw = frag_coord.zw
 
+		payload.fog_param0 = REGS(m_ctx)->fog_params_0();
+		payload.fog_param1 = REGS(m_ctx)->fog_params_1();
+		payload.fog_mode = static_cast<u32>(REGS(m_ctx)->fog_equation());
+		payload.rop_control = rop_control.value;
+		payload.alpha_ref = REGS(m_ctx)->alpha_ref();
+
 		const auto window_origin = REGS(m_ctx)->shader_window_origin();
 		const u32 window_height = REGS(m_ctx)->shader_window_height();
-		const f32 resolution_scale = (window_height <= static_cast<u32>(g_cfg.video.min_scalable_dimension)) ? 1.f : rsx::get_resolution_scale();
-		const f32 wpos_scale = (window_origin == rsx::window_origin::top) ? (1.f / resolution_scale) : (-1.f / resolution_scale);
-		const f32 wpos_bias = (window_origin == rsx::window_origin::top) ? 0.f : window_height;
-		const f32 alpha_ref = REGS(m_ctx)->alpha_ref();
+		const auto pixel_center = REGS(m_ctx)->pixel_center();
+		const f32 resolution_scale = (window_height <= RSX(m_ctx)->resolution_scaling_config.min_scalable_dimension)
+			? 1.f
+			: RSX(m_ctx)->resolution_scaling_config.scale_factor();
 
-		u32* dst = static_cast<u32*>(buffer);
-		utils::stream_vector(dst, std::bit_cast<u32>(fog0), std::bit_cast<u32>(fog1), rop_control.value, std::bit_cast<u32>(alpha_ref));
-		utils::stream_vector(dst + 4, 0u, fog_mode, std::bit_cast<u32>(wpos_scale), std::bit_cast<u32>(wpos_bias));
+		payload.wpos_scale = (window_origin == rsx::window_origin::top) ? (1.f / resolution_scale) : (-1.f / resolution_scale);
+		payload.wpos_bias[0] = 0.f;
+		payload.wpos_bias[1] = (window_origin == rsx::window_origin::top) ? 0.f : window_height;
+
+		if (pixel_center == window_pixel_center::integer)
+		{
+			// We could technically fix this shader side, but...
+			// 1. We have full control over gl_FragCoord consumption, so fix it using our own pipeline as it is an emulated input.
+			// 2. Vulkan does not support pixel_center_integer decoration. SPIR-V modules only permit pixel center at half offset.
+			payload.wpos_bias[0] -= 0.5f;
+			payload.wpos_bias[1] -= 0.5f;
+		}
+
+		utils::stream_vector_from_memory<2>(buffer, &payload);
 	}
 
 	void draw_command_processor::fill_constants_instancing_buffer(rsx::io_buffer& indirection_table_buf, rsx::io_buffer& constants_data_array_buffer, const VertexProgramBase* prog) const
@@ -759,7 +727,8 @@ namespace rsx
 		ensure(draw_call.is_trivial_instanced_draw);
 
 		// Temp indirection table. Used to track "running" updates.
-		rsx::simple_array<u32> instancing_indirection_table;
+		auto& instancing_indirection_table = m_scratch_buffers.u32buf;
+
 		// indirection table size
 		const auto full_reupload = !prog || prog->has_indexed_constants;
 		const auto reloc_table = full_reupload ? decltype(prog->constant_ids){} : prog->constant_ids;
@@ -767,7 +736,8 @@ namespace rsx
 		instancing_indirection_table.resize(redirection_table_size);
 
 		// Temp constants data
-		rsx::simple_array<u128> constants_data;
+		auto& constants_data = m_scratch_buffers.u128buf;
+		constants_data.clear();
 		constants_data.reserve(redirection_table_size * draw_call.pass_count());
 
 		// Allocate indirection buffer on GPU stream
@@ -804,7 +774,9 @@ namespace rsx
 				continue;
 			}
 
-			const int translated_offset = full_reupload ? instance_config.patch_load_offset : prog->translate_constants_range(instance_config.patch_load_offset, instance_config.patch_load_count);
+			const int translated_offset = full_reupload
+				? instance_config.patch_load_offset
+				: prog->translate_constants_range(instance_config.patch_load_offset, instance_config.patch_load_count);
 
 			if (translated_offset >= 0)
 			{
@@ -815,8 +787,8 @@ namespace rsx
 
 				// Update indirection table
 				for (auto i = translated_offset, count = 0;
-					static_cast<u32>(count) < instance_config.patch_load_count;
-					++i, ++count)
+					 static_cast<u32>(count) < instance_config.patch_load_count;
+					 ++i, ++count)
 				{
 					instancing_indirection_table[i] = redirection_loc + count;
 				}
@@ -855,4 +827,4 @@ namespace rsx
 		constants_data_array_buffer.reserve(constants_data.size_bytes());
 		std::memcpy(constants_data_array_buffer.data(), constants_data.data(), constants_data.size_bytes());
 	}
-} // namespace rsx
+}

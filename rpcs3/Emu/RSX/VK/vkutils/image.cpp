@@ -3,6 +3,7 @@
 #include "device.h"
 #include "image.h"
 #include "image_helpers.h"
+#include "sampler.h"
 
 #include "../VKResourceManager.h"
 #include <memory>
@@ -11,7 +12,7 @@ namespace vk
 {
 	void image::validate(const vk::render_device& dev, const VkImageCreateInfo& info) const
 	{
-		const auto gpu_limits = dev.gpu().get_limits();
+		const auto& gpu_limits = dev.gpu().get_limits();
 		u32 longest_dim, dim_limit;
 
 		switch (info.imageType)
@@ -22,10 +23,10 @@ namespace vk
 			break;
 		case VK_IMAGE_TYPE_2D:
 			longest_dim = std::max(info.extent.width, info.extent.height);
-			dim_limit = (info.flags == VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) ? gpu_limits.maxImageDimensionCube : gpu_limits.maxImageDimension2D;
+			dim_limit = (info.flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) ? gpu_limits.maxImageDimensionCube : gpu_limits.maxImageDimension2D;
 			break;
 		case VK_IMAGE_TYPE_3D:
-			longest_dim = std::max({info.extent.width, info.extent.height, info.extent.depth});
+			longest_dim = std::max({ info.extent.width, info.extent.height, info.extent.depth });
 			dim_limit = gpu_limits.maxImageDimension3D;
 			break;
 		default:
@@ -46,7 +47,7 @@ namespace vk
 		const memory_type_info& memory_type,
 		u32 access_flags,
 		VkImageType image_type,
-		VkFormat format,
+		const VkFormatEx& format,
 		u32 width, u32 height, u32 depth,
 		u32 mipmaps, u32 layers,
 		VkSampleCountFlagBits samples,
@@ -58,10 +59,9 @@ namespace vk
 		rsx::format_class format_class)
 		: m_device(dev)
 	{
-		info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 		info.imageType = image_type;
 		info.format = format;
-		info.extent = {width, height, depth};
+		info.extent = { width, height, depth };
 		info.mipLevels = mipmaps;
 		info.arrayLayers = layers;
 		info.samples = samples;
@@ -73,13 +73,24 @@ namespace vk
 
 		std::array<u32, 2> concurrency_queue_families = {
 			dev.get_graphics_queue_family(),
-			dev.get_transfer_queue_family()};
+			dev.get_transfer_queue_family()
+		};
 
 		if (image_flags & VK_IMAGE_CREATE_SHAREABLE_RPCS3)
 		{
 			info.sharingMode = VK_SHARING_MODE_CONCURRENT;
 			info.queueFamilyIndexCount = ::size32(concurrency_queue_families);
 			info.pQueueFamilyIndices = concurrency_queue_families.data();
+		}
+
+		VkImageFormatListCreateInfo format_list = { .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO };
+		if (format.is_mutable())
+		{
+			info.flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
+
+			format_list.pViewFormats = format.pViewFormats;
+			format_list.viewFormatCount = format.viewFormatCount;
+			info.pNext = &format_list;
 		}
 
 		create_impl(dev, access_flags, memory_type, allocation_pool);
@@ -98,13 +109,14 @@ namespace vk
 		}
 
 		m_format_class = format_class;
+		info.pNext = nullptr;
 	}
 
 	// TODO: Ctor that uses a provided memory heap
 
 	image::~image()
 	{
-		VK_GET_SYMBOL(vkDestroyImage)(m_device, value, nullptr);
+		vkDestroyImage(m_device, value, nullptr);
 	}
 
 	void image::create_impl(const vk::render_device& dev, u32 access_flags, const memory_type_info& memory_type, vmm_allocation_pool allocation_pool)
@@ -115,10 +127,10 @@ namespace vk
 		const bool nullable = !!(info.flags & VK_IMAGE_CREATE_ALLOW_NULL_RPCS3);
 		info.flags &= ~VK_IMAGE_CREATE_SPECIAL_FLAGS_RPCS3;
 
-		CHECK_RESULT(VK_GET_SYMBOL(vkCreateImage)(m_device, &info, nullptr, &value));
+		CHECK_RESULT(vkCreateImage(m_device, &info, nullptr, &value));
 
 		VkMemoryRequirements memory_req;
-		VK_GET_SYMBOL(vkGetImageMemoryRequirements)(m_device, value, &memory_req);
+		vkGetImageMemoryRequirements(m_device, value, &memory_req);
 
 		const auto allocation_type_info = memory_type.get(dev, access_flags, memory_req.memoryTypeBits);
 		if (!allocation_type_info)
@@ -126,17 +138,26 @@ namespace vk
 			fmt::throw_exception("No compatible memory type was found!");
 		}
 
-		memory = std::make_shared<vk::memory_block>(m_device, memory_req.size, memory_req.alignment, allocation_type_info, allocation_pool, nullable);
+		memory_allocation_request alloc_request
+		{
+			.size = memory_req.size,
+			.alignment = memory_req.alignment,
+			.memory_type = &allocation_type_info,
+			.pool = allocation_pool,
+			.throw_on_fail = !nullable
+		};
+		memory = std::make_shared<vk::memory_block>(m_device, alloc_request);
+
 		if (auto device_mem = memory->get_vk_device_memory();
 			device_mem != VK_NULL_HANDLE) [[likely]]
 		{
-			CHECK_RESULT(VK_GET_SYMBOL(vkBindImageMemory)(m_device, value, device_mem, memory->get_vk_device_memory_offset()));
+			CHECK_RESULT(vkBindImageMemory(m_device, value, device_mem, memory->get_vk_device_memory_offset()));
 			current_layout = info.initialLayout;
 		}
 		else
 		{
 			ensure(nullable);
-			VK_GET_SYMBOL(vkDestroyImage)(m_device, value, nullptr);
+			vkDestroyImage(m_device, value, nullptr);
 			value = VK_NULL_HANDLE;
 		}
 	}
@@ -196,6 +217,11 @@ namespace vk
 		return m_format_class;
 	}
 
+	std::string image::debug_name() const
+	{
+		return m_debug_name;
+	}
+
 	void image::push_layout(const command_buffer& cmd, VkImageLayout layout)
 	{
 		ensure(current_queue_family == VK_QUEUE_FAMILY_IGNORED || current_queue_family == cmd.get_queue_family());
@@ -229,7 +255,7 @@ namespace vk
 
 		if (info.sharingMode == VK_SHARING_MODE_EXCLUSIVE || current_layout != new_layout)
 		{
-			VkImageSubresourceRange range = {aspect(), 0, mipmaps(), 0, layers()};
+			VkImageSubresourceRange range = { aspect(), 0, mipmaps(), 0, layers() };
 			const u32 src_queue_family = info.sharingMode == VK_SHARING_MODE_EXCLUSIVE ? current_queue_family : VK_QUEUE_FAMILY_IGNORED;
 			const u32 dst_queue_family = info.sharingMode == VK_SHARING_MODE_EXCLUSIVE ? cmd.get_queue_family() : VK_QUEUE_FAMILY_IGNORED;
 			change_image_layout(cmd, value, current_layout, new_layout, range, src_queue_family, dst_queue_family, 0u, ~0u);
@@ -246,7 +272,7 @@ namespace vk
 
 		if (info.sharingMode == VK_SHARING_MODE_EXCLUSIVE || current_layout != new_layout)
 		{
-			VkImageSubresourceRange range = {aspect(), 0, mipmaps(), 0, layers()};
+			VkImageSubresourceRange range = { aspect(), 0, mipmaps(), 0, layers() };
 			const u32 src_queue_family = info.sharingMode == VK_SHARING_MODE_EXCLUSIVE ? current_queue_family : VK_QUEUE_FAMILY_IGNORED;
 			const u32 dst_queue_family2 = info.sharingMode == VK_SHARING_MODE_EXCLUSIVE ? dst_queue_family : VK_QUEUE_FAMILY_IGNORED;
 			change_image_layout(src_queue_cmd, value, current_layout, new_layout, range, src_queue_family, dst_queue_family2, ~0u, 0u);
@@ -291,8 +317,10 @@ namespace vk
 			name_info.objectHandle = reinterpret_cast<u64>(value);
 			name_info.pObjectName = name.c_str();
 
-			g_render_device->_vkSetDebugUtilsObjectNameEXT(m_device, &name_info);
+			_vkSetDebugUtilsObjectNameEXT(m_device, &name_info);
 		}
+
+		m_debug_name = name;
 	}
 
 	image_view::image_view(VkDevice dev, VkImage image, VkImageViewType view_type, VkFormat format, VkComponentMapping mapping, VkImageSubresourceRange range)
@@ -309,15 +337,16 @@ namespace vk
 	}
 
 	image_view::image_view(VkDevice dev, VkImageViewCreateInfo create_info)
-		: info(create_info), m_device(dev)
+		: info(create_info)
+		, m_device(dev)
 	{
 		create_impl();
 	}
 
-	image_view::image_view(VkDevice dev, vk::image* resource, VkImageViewType view_type, const VkComponentMapping& mapping, const VkImageSubresourceRange& range)
+	image_view::image_view(VkDevice dev, vk::image* resource, VkFormat format, VkImageViewType view_type, const VkComponentMapping& mapping, const VkImageSubresourceRange& range)
 		: m_device(dev), m_resource(resource)
 	{
-		info.format = resource->info.format;
+		info.format = format == VK_FORMAT_UNDEFINED ? resource->format() : format;
 		info.image = resource->value;
 		info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 		info.components = mapping;
@@ -331,7 +360,7 @@ namespace vk
 				info.viewType = VK_IMAGE_VIEW_TYPE_1D;
 				break;
 			case VK_IMAGE_TYPE_2D:
-				if (resource->info.flags == VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT)
+				if (resource->info.flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT)
 					info.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
 				else if (resource->info.arrayLayers == 1)
 					info.viewType = VK_IMAGE_VIEW_TYPE_2D;
@@ -357,12 +386,39 @@ namespace vk
 
 	image_view::~image_view()
 	{
-		VK_GET_SYMBOL(vkDestroyImageView)(m_device, value, nullptr);
+		vkDestroyImageView(m_device, value, nullptr);
+	}
+
+	image_view* image_view::as(VkFormat format)
+	{
+		if (this->format() == format)
+		{
+			return this;
+		}
+
+		auto self = this->m_root_view
+			? this->m_root_view
+			: this;
+
+		if (auto found = self->m_subviews.find(format);
+			found != self->m_subviews.end())
+		{
+			return found->second.get();
+		}
+
+		// Create a derived
+		auto view = std::make_unique<image_view>(m_device, info.image, info.viewType, format, info.components, info.subresourceRange);
+		view->m_resource = self->m_resource;
+		view->m_root_view = self;
+
+		auto ret = view.get();
+		self->m_subviews.emplace(format, std::move(view));
+		return ret;
 	}
 
 	u32 image_view::encoded_component_map() const
 	{
-#if (VK_DISABLE_COMPONENT_SWIZZLE)
+#if	(VK_DISABLE_COMPONENT_SWIZZLE)
 		u32 result = static_cast<u32>(info.components.a) - 1;
 		result |= (static_cast<u32>(info.components.r) - 1) << 3;
 		result |= (static_cast<u32>(info.components.g) - 1) << 6;
@@ -384,15 +440,23 @@ namespace vk
 #if (VK_DISABLE_COMPONENT_SWIZZLE)
 		// Force identity
 		const auto mapping = info.components;
-		info.components = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+		info.components = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY };
 #endif
 
-		CHECK_RESULT(VK_GET_SYMBOL(vkCreateImageView)(m_device, &info, nullptr, &value));
+		CHECK_RESULT(vkCreateImageView(m_device, &info, nullptr, &value));
 
 #if (VK_DISABLE_COMPONENT_SWIZZLE)
 		// Restore requested mapping
 		info.components = mapping;
 #endif
+
+		if (m_resource)
+		{
+			if (const auto name = m_resource->debug_name(); !name.empty())
+			{
+				set_debug_name(fmt::format("%p (%p) %s", value, m_resource->value, name));
+			}
+		}
 	}
 
 	viewable_image* viewable_image::clone()
@@ -435,22 +499,24 @@ namespace vk
 		switch (remap_encoding)
 		{
 		case VK_REMAP_IDENTITY:
-			real_mapping = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+			real_mapping = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY };
 			break;
 		case RSX_TEXTURE_REMAP_IDENTITY:
 			real_mapping = native_component_map;
 			break;
 		default:
-			real_mapping = vk::apply_swizzle_remap(
-				{native_component_map.a, native_component_map.r, native_component_map.g, native_component_map.b},
-				remap);
+			real_mapping = vk::apply_swizzle_remap
+			(
+				{ native_component_map.a, native_component_map.r, native_component_map.g, native_component_map.b },
+				remap
+			);
 			break;
 		}
 
-		const VkImageSubresourceRange range = {aspect() & mask, 0, info.mipLevels, 0, info.arrayLayers};
+		const VkImageSubresourceRange range = { aspect() & mask, 0, info.mipLevels, 0, info.arrayLayers };
 		ensure(range.aspectMask);
 
-		auto view = std::make_unique<vk::image_view>(*g_render_device, this, VK_IMAGE_VIEW_TYPE_MAX_ENUM, real_mapping, range);
+		auto view = std::make_unique<vk::image_view>(*g_render_device, this, format(), VK_IMAGE_VIEW_TYPE_MAX_ENUM, real_mapping, range);
 		auto result = view.get();
 		views.emplace(storage_key, std::move(view));
 		return result;
@@ -474,4 +540,18 @@ namespace vk
 			views.clear();
 		}
 	}
-} // namespace vk
+
+	void image_view::set_debug_name(std::string_view name)
+	{
+		if (g_render_device->get_debug_utils_support())
+		{
+			VkDebugUtilsObjectNameInfoEXT name_info{};
+			name_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+			name_info.objectType = VK_OBJECT_TYPE_IMAGE_VIEW;
+			name_info.objectHandle = reinterpret_cast<u64>(value);
+			name_info.pObjectName = name.data();
+
+			_vkSetDebugUtilsObjectNameEXT(m_device, &name_info);
+		}
+	}
+}

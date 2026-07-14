@@ -18,7 +18,8 @@ namespace vk
 
 	public:
 		framebuffer(VkDevice dev, VkRenderPass pass, u32 width, u32 height, std::vector<std::unique_ptr<vk::image_view>>&& atts)
-			: attachments(std::move(atts)), m_device(dev)
+			: attachments(std::move(atts))
+			, m_device(dev)
 		{
 			std::vector<VkImageView> image_view_array(attachments.size());
 			usz i = 0;
@@ -38,43 +39,43 @@ namespace vk
 			m_width = width;
 			m_height = height;
 
-			CHECK_RESULT(VK_GET_SYMBOL(vkCreateFramebuffer)(dev, &info, nullptr, &value));
+			CHECK_RESULT(vkCreateFramebuffer(dev, &info, nullptr, &value));
 		}
 
 		~framebuffer()
 		{
-			VK_GET_SYMBOL(vkDestroyFramebuffer)(m_device, value, nullptr);
+			vkDestroyFramebuffer(m_device, value, nullptr);
 		}
 
-		u32 width()
+		u32 width() const
 		{
 			return m_width;
 		}
 
-		u32 height()
+		u32 height() const
 		{
 			return m_height;
 		}
 
-		u8 samples()
+		u8 samples() const
 		{
 			ensure(!attachments.empty());
 			return attachments[0]->image()->samples();
 		}
 
-		VkFormat format()
+		VkFormat format() const
 		{
 			ensure(!attachments.empty());
 			return attachments[0]->image()->format();
 		}
 
-		VkFormat depth_format()
+		VkFormat depth_format() const
 		{
 			ensure(!attachments.empty());
 			return attachments.back()->image()->format();
 		}
 
-		bool matches(const std::vector<vk::image*>& fbo_images, u32 width, u32 height)
+		bool matches(const std::vector<vk::image*>& fbo_images, u32 width, u32 height) const
 		{
 			if (m_width != width || m_height != height)
 				return false;
@@ -98,4 +99,4 @@ namespace vk
 	private:
 		VkDevice m_device;
 	};
-} // namespace vk
+}

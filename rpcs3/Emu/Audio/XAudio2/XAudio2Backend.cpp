@@ -6,12 +6,10 @@
 #include "util/logs.hpp"
 #include "Emu/System.h"
 #include "Emu/Audio/audio_device_enumerator.h"
-#include "util/StrUtil.h"
+#include "Utilities/StrUtil.h"
 
 #include "XAudio2Backend.h"
-#include <windows.h>
-#include <combaseapi.h>
-#include <mmeapi.h>
+#include <Windows.h>
 #include <system_error>
 
 #ifndef XAUDIO2_USE_DEFAULT_PROCESSOR
@@ -24,34 +22,34 @@ template <>
 void fmt_class_string<ERole>::format(std::string& out, u64 arg)
 {
 	format_enum(out, arg, [](auto value)
+	{
+		switch (value)
 		{
-			switch (value)
-			{
-			case eConsole: return "eConsole";
-			case eMultimedia: return "eMultimedia";
-			case eCommunications: return "eCommunications";
-			case ERole_enum_count: return unknown;
-			}
+		case eConsole: return "eConsole";
+		case eMultimedia: return "eMultimedia";
+		case eCommunications: return "eCommunications";
+		case ERole_enum_count: return unknown;
+		}
 
-			return unknown;
-		});
+		return unknown;
+	});
 }
 
 template <>
 void fmt_class_string<EDataFlow>::format(std::string& out, u64 arg)
 {
 	format_enum(out, arg, [](auto value)
+	{
+		switch (value)
 		{
-			switch (value)
-			{
-			case eRender: return "eRender";
-			case eCapture: return "eCapture";
-			case eAll: return "eAll";
-			case EDataFlow_enum_count: return unknown;
-			}
+		case eRender: return "eRender";
+		case eCapture: return "eCapture";
+		case eAll: return "eAll";
+		case EDataFlow_enum_count: return unknown;
+		}
 
-			return unknown;
-		});
+		return unknown;
+	});
 }
 
 XAudio2Backend::XAudio2Backend()
@@ -137,8 +135,7 @@ void XAudio2Backend::Play()
 		return;
 	}
 
-	if (m_playing)
-		return;
+	if (m_playing) return;
 
 	std::lock_guard lock(m_cb_mutex);
 	m_playing = true;
@@ -187,8 +184,7 @@ void XAudio2Backend::Pause()
 		return;
 	}
 
-	if (!m_playing)
-		return;
+	if (!m_playing) return;
 
 	{
 		std::lock_guard lock(m_cb_mutex);
@@ -341,7 +337,7 @@ f64 XAudio2Backend::GetCallbackFrameLen()
 	return std::max<f64>(min_latency, _10ms); // 10ms is the minimum for XAudio
 }
 
-void XAudio2Backend::OnVoiceProcessingPassStart(UINT32 BytesRequired)
+void XAudio2Backend::OnVoiceProcessingPassStart(UINT32 BytesRequired) noexcept
 {
 	std::unique_lock lock(m_cb_mutex, std::defer_lock);
 	if (BytesRequired && !m_reset_req.observe() && lock.try_lock_for(std::chrono::microseconds{50}) && m_write_callback && m_playing)
@@ -370,7 +366,7 @@ void XAudio2Backend::OnVoiceProcessingPassStart(UINT32 BytesRequired)
 	}
 }
 
-void XAudio2Backend::OnCriticalError(HRESULT Error)
+void XAudio2Backend::OnCriticalError(HRESULT Error) noexcept
 {
 	XAudio.error("OnCriticalError() called: %s (0x%08x)", std::system_category().message(Error), static_cast<u32>(Error));
 

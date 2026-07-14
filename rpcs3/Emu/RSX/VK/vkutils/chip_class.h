@@ -28,6 +28,7 @@ namespace vk
 		NV_turing,
 		NV_ampere,
 		NV_lovelace,
+		NV_blackwell,
 		_NV_ENUM_MAX_, // Do not insert NV enums beyond this point
 
 		// APPLE
@@ -75,29 +76,11 @@ namespace vk
 	chip_class get_chip_family();
 	chip_class get_chip_family(u32 vendor_id, u32 device_id);
 
-	static inline bool is_NVIDIA(chip_class chip)
-	{
-		return chip >= chip_class::NV_generic && chip < chip_class::_NV_ENUM_MAX_;
-	}
-	static inline bool is_AMD(chip_class chip)
-	{
-		return chip >= chip_class::AMD_gcn_generic && chip < chip_class::_AMD_ENUM_MAX_;
-	}
-	static inline bool is_INTEL(chip_class chip)
-	{
-		return chip >= chip_class::INTEL_generic && chip < chip_class::_INTEL_ENUM_MAX_;
-	}
+	static inline bool is_NVIDIA(chip_class chip) { return chip >= chip_class::NV_generic && chip < chip_class::_NV_ENUM_MAX_; }
+	static inline bool is_AMD(chip_class chip) { return chip >= chip_class::AMD_gcn_generic && chip < chip_class::_AMD_ENUM_MAX_; }
+	static inline bool is_INTEL(chip_class chip) { return chip >= chip_class::INTEL_generic && chip < chip_class::_INTEL_ENUM_MAX_; }
 
-	static inline bool is_NVIDIA(driver_vendor vendor)
-	{
-		return vendor == driver_vendor::NVIDIA || vendor == driver_vendor::NVK;
-	}
-	static inline bool is_AMD(driver_vendor vendor)
-	{
-		return vendor == driver_vendor::AMD || vendor == driver_vendor::RADV;
-	}
-	static inline bool is_INTEL(driver_vendor vendor)
-	{
-		return vendor == driver_vendor::INTEL || vendor == driver_vendor::ANV;
-	}
-} // namespace vk
+	static inline bool is_NVIDIA(driver_vendor vendor) { return vendor == driver_vendor::NVIDIA || vendor == driver_vendor::NVK; }
+	static inline bool is_AMD(driver_vendor vendor) { return vendor == driver_vendor::AMD || vendor == driver_vendor::RADV; }
+	static inline bool is_INTEL(driver_vendor vendor) { return vendor == driver_vendor::INTEL || vendor == driver_vendor::ANV; }
+}

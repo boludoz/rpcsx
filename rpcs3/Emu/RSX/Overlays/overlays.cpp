@@ -15,21 +15,48 @@ namespace rsx
 {
 	namespace overlays
 	{
+		std::string get_sound_filepath(sound_effect sound)
+		{
+			const auto get_sound_filename = [sound]()
+			{
+				switch (sound)
+				{
+				case sound_effect::cursor:       return "snd_cursor"sv;
+				case sound_effect::accept:       return "snd_decide"sv;
+				case sound_effect::cancel:       return "snd_cancel"sv;
+				case sound_effect::osk_accept:   return "snd_oskenter"sv;
+				case sound_effect::osk_cancel:   return "snd_oskcancel"sv;
+				case sound_effect::dialog_ok:    return "snd_system_ok"sv;
+				case sound_effect::dialog_error: return "snd_system_ng"sv;
+				case sound_effect::trophy:       return "snd_trophy"sv;
+				}
+
+				fmt::throw_exception("Unreachable (sound=%d)", static_cast<u32>(sound));
+			};
+
+			return fmt::format("%ssounds/%s.wav", fs::get_config_dir(), get_sound_filename());
+		}
+
+		void play_sound(sound_effect sound, std::optional<f32> volume)
+		{
+			Emu.GetCallbacks().play_sound(get_sound_filepath(sound), volume);
+		}
+
 		thread_local DECLARE(user_interface::g_thread_bit) = 0;
 
 		u32 user_interface::alloc_thread_bit()
 		{
 			auto [_old, ok] = this->thread_bits.fetch_op([](u32& bits)
+			{
+				if (~bits)
 				{
-					if (~bits)
-					{
-						// Set lowest clear bit
-						bits |= bits + 1;
-						return true;
-					}
+					// Set lowest clear bit
+					bits |= bits + 1;
+					return true;
+				}
 
-					return false;
-				});
+				return false;
+			});
 
 			if (!ok)
 			{
@@ -99,7 +126,9 @@ namespace rsx
 					}
 					else if (is_auto_repeat_button)
 					{
-						if (last_auto_repeat_button[pad_index] == button_id && m_input_timer.GetMsSince(initial_timestamp[pad_index]) > ms_threshold && m_input_timer.GetMsSince(timestamp[pad_index]) > m_auto_repeat_ms_interval)
+						if (last_auto_repeat_button[pad_index] == button_id
+						    && m_input_timer.GetMsSince(initial_timestamp[pad_index]) > ms_threshold
+						    && m_input_timer.GetMsSince(timestamp[pad_index]) > m_auto_repeat_ms_interval)
 						{
 							// The auto-repeat button was pressed for at least the given threshold in ms and will trigger at an interval.
 							timestamp[pad_index] = steady_clock::now();
@@ -195,7 +224,7 @@ namespace rsx
 
 				const bool ignore_gamepad_input = (!rinfo.now_connect || !input::g_pads_intercepted);
 
-				const pad_button cross_button = g_cfg.sys.enter_button_assignment == enter_button_assign::circle ? pad_button::circle : pad_button::cross;
+				const pad_button cross_button  = g_cfg.sys.enter_button_assignment == enter_button_assign::circle ? pad_button::circle : pad_button::cross;
 				const pad_button circle_button = g_cfg.sys.enter_button_assignment == enter_button_assign::circle ? pad_button::cross : pad_button::circle;
 
 				m_keyboard_pad_handler_active = false;
@@ -223,7 +252,7 @@ namespace rsx
 						continue;
 					}
 
-					if (!(pad->m_port_status & CELL_PAD_STATUS_CONNECTED))
+					if (!pad->is_connected() || pad->is_copilot())
 					{
 						continue;
 					}
@@ -248,38 +277,38 @@ namespace rsx
 						// LDD pads get passed input data from the game itself.
 
 						// NOTE: Rock Band 3 doesn't seem to care about the len. It's always 0.
-						// if (pad->ldd_data.len > CELL_PAD_BTN_OFFSET_DIGITAL1)
+						//if (pad->ldd_data.len > CELL_PAD_BTN_OFFSET_DIGITAL1)
 						{
 							const u16 digital1 = pad->ldd_data.button[CELL_PAD_BTN_OFFSET_DIGITAL1];
 
-							handle_button_press(pad_button::dpad_left, !!(digital1 & CELL_PAD_CTRL_LEFT), pad_index);
-							handle_button_press(pad_button::dpad_right, !!(digital1 & CELL_PAD_CTRL_RIGHT), pad_index);
-							handle_button_press(pad_button::dpad_down, !!(digital1 & CELL_PAD_CTRL_DOWN), pad_index);
-							handle_button_press(pad_button::dpad_up, !!(digital1 & CELL_PAD_CTRL_UP), pad_index);
-							handle_button_press(pad_button::L3, !!(digital1 & CELL_PAD_CTRL_L3), pad_index);
-							handle_button_press(pad_button::R3, !!(digital1 & CELL_PAD_CTRL_R3), pad_index);
-							handle_button_press(pad_button::select, !!(digital1 & CELL_PAD_CTRL_SELECT), pad_index);
-							handle_button_press(pad_button::start, !!(digital1 & CELL_PAD_CTRL_START), pad_index);
+							handle_button_press(pad_button::dpad_left,  !!(digital1 & CELL_PAD_CTRL_LEFT),     pad_index);
+							handle_button_press(pad_button::dpad_right, !!(digital1 & CELL_PAD_CTRL_RIGHT),    pad_index);
+							handle_button_press(pad_button::dpad_down,  !!(digital1 & CELL_PAD_CTRL_DOWN),     pad_index);
+							handle_button_press(pad_button::dpad_up,    !!(digital1 & CELL_PAD_CTRL_UP),       pad_index);
+							handle_button_press(pad_button::L3,         !!(digital1 & CELL_PAD_CTRL_L3),       pad_index);
+							handle_button_press(pad_button::R3,         !!(digital1 & CELL_PAD_CTRL_R3),       pad_index);
+							handle_button_press(pad_button::select,     !!(digital1 & CELL_PAD_CTRL_SELECT),   pad_index);
+							handle_button_press(pad_button::start,      !!(digital1 & CELL_PAD_CTRL_START),    pad_index);
+							handle_button_press(pad_button::ps,         !!(digital1 & CELL_PAD_CTRL_PS),       pad_index);
 						}
 
-						// if (pad->ldd_data.len > CELL_PAD_BTN_OFFSET_DIGITAL2)
+						//if (pad->ldd_data.len > CELL_PAD_BTN_OFFSET_DIGITAL2)
 						{
 							const u16 digital2 = pad->ldd_data.button[CELL_PAD_BTN_OFFSET_DIGITAL2];
 
-							handle_button_press(pad_button::triangle, !!(digital2 & CELL_PAD_CTRL_TRIANGLE), pad_index);
-							handle_button_press(circle_button, !!(digital2 & CELL_PAD_CTRL_CIRCLE), pad_index);
-							handle_button_press(pad_button::square, !!(digital2 & CELL_PAD_CTRL_SQUARE), pad_index);
-							handle_button_press(cross_button, !!(digital2 & CELL_PAD_CTRL_CROSS), pad_index);
-							handle_button_press(pad_button::L1, !!(digital2 & CELL_PAD_CTRL_L1), pad_index);
-							handle_button_press(pad_button::R1, !!(digital2 & CELL_PAD_CTRL_R1), pad_index);
-							handle_button_press(pad_button::L2, !!(digital2 & CELL_PAD_CTRL_L2), pad_index);
-							handle_button_press(pad_button::R2, !!(digital2 & CELL_PAD_CTRL_R2), pad_index);
-							handle_button_press(pad_button::ps, !!(digital2 & CELL_PAD_CTRL_PS), pad_index);
+							handle_button_press(pad_button::triangle,   !!(digital2 & CELL_PAD_CTRL_TRIANGLE), pad_index);
+							handle_button_press(circle_button,          !!(digital2 & CELL_PAD_CTRL_CIRCLE),   pad_index);
+							handle_button_press(pad_button::square,     !!(digital2 & CELL_PAD_CTRL_SQUARE),   pad_index);
+							handle_button_press(cross_button,           !!(digital2 & CELL_PAD_CTRL_CROSS),    pad_index);
+							handle_button_press(pad_button::L1,         !!(digital2 & CELL_PAD_CTRL_L1),       pad_index);
+							handle_button_press(pad_button::R1,         !!(digital2 & CELL_PAD_CTRL_R1),       pad_index);
+							handle_button_press(pad_button::L2,         !!(digital2 & CELL_PAD_CTRL_L2),       pad_index);
+							handle_button_press(pad_button::R2,         !!(digital2 & CELL_PAD_CTRL_R2),       pad_index);
 						}
 
 						const auto handle_ldd_stick_input = [&](s32 offset, pad_button id_small, pad_button id_large)
 						{
-							// if (pad->ldd_data.len <= offset) return;
+							//if (pad->ldd_data.len <= offset) return;
 
 							constexpr u16 threshold = 20; // Let's be careful and use some threshold here
 							const u16 value = pad->ldd_data.button[offset];
@@ -312,7 +341,7 @@ namespace rsx
 						continue;
 					}
 
-					for (const Button& button : pad->m_buttons)
+					for (const ButtonExternal& button : pad->m_buttons_external)
 					{
 						pad_button button_id = pad_button::pad_button_max_enum;
 						if (button.m_offset == CELL_PAD_BTN_OFFSET_DIGITAL1)
@@ -342,6 +371,9 @@ namespace rsx
 								break;
 							case CELL_PAD_CTRL_START:
 								button_id = pad_button::start;
+								break;
+							case CELL_PAD_CTRL_PS:
+								button_id = pad_button::ps;
 								break;
 							default:
 								break;
@@ -375,9 +407,6 @@ namespace rsx
 							case CELL_PAD_CTRL_R2:
 								button_id = pad_button::R2;
 								break;
-							case CELL_PAD_CTRL_PS:
-								button_id = pad_button::ps;
-								break;
 							default:
 								break;
 							}
@@ -389,7 +418,7 @@ namespace rsx
 							break;
 					}
 
-					for (const AnalogStick& stick : pad->m_sticks)
+					for (const AnalogStickExternal& stick : pad->m_sticks_external)
 					{
 						pad_button button_id = pad_button::pad_button_max_enum;
 						pad_button release_id = pad_button::pad_button_max_enum;
@@ -447,7 +476,9 @@ namespace rsx
 				input::SetIntercepted(false);
 			}
 
-			return !m_stop_input_loop ? selection_code::interrupted : selection_code::ok;
+			return !m_stop_input_loop
+				? selection_code::interrupted
+				: selection_code::ok;
 		}
 
 		void user_interface::close(bool use_callback, bool stop_pad_interception)
@@ -494,7 +525,7 @@ namespace rsx
 			}
 
 			if (auto rsxthr = rsx::get_current_renderer(); rsxthr &&
-														   (min_refresh_duration_us + rsxthr->last_host_flip_timestamp) < get_system_time())
+				(min_refresh_duration_us + rsxthr->last_host_flip_timestamp) < get_system_time())
 			{
 				rsxthr->async_flip_requested |= rsx::thread::flip_request::native_ui;
 			}

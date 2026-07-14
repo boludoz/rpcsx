@@ -8,13 +8,13 @@
 #include "Emu/Cell/PPUThread.h"
 #include "Emu/RSX/RSXDisAsm.h"
 #include "Emu/Memory/vm.h"
-#include "util/Thread.h"
+#include "Utilities/Thread.h"
 
 bool is_using_interpreter(thread_class t_class)
 {
 	switch (t_class)
 	{
-	case thread_class::ppu: return g_cfg.core.ppu_decoder != ppu_decoder_type::llvm_legacy;
+	case thread_class::ppu: return g_cfg.core.ppu_decoder != ppu_decoder_type::llvm;
 	case thread_class::spu: return g_cfg.core.spu_decoder != spu_decoder_type::asmjit && g_cfg.core.spu_decoder != spu_decoder_type::llvm;
 	default: return true;
 	}

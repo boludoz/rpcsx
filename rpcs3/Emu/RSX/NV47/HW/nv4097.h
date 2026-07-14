@@ -14,33 +14,12 @@ namespace rsx
 
 	namespace nv4097
 	{
-		template <typename Type>
-		struct vertex_data_type_from_element_type;
-		template <>
-		struct vertex_data_type_from_element_type<float>
-		{
-			static const vertex_base_type type = vertex_base_type::f;
-		};
-		template <>
-		struct vertex_data_type_from_element_type<f16>
-		{
-			static const vertex_base_type type = vertex_base_type::sf;
-		};
-		template <>
-		struct vertex_data_type_from_element_type<u8>
-		{
-			static const vertex_base_type type = vertex_base_type::ub;
-		};
-		template <>
-		struct vertex_data_type_from_element_type<u16>
-		{
-			static const vertex_base_type type = vertex_base_type::s32k;
-		};
-		template <>
-		struct vertex_data_type_from_element_type<s16>
-		{
-			static const vertex_base_type type = vertex_base_type::s1;
-		};
+		template<typename Type> struct vertex_data_type_from_element_type;
+		template<> struct vertex_data_type_from_element_type<float> { static const vertex_base_type type = vertex_base_type::f; };
+		template<> struct vertex_data_type_from_element_type<f16> { static const vertex_base_type type = vertex_base_type::sf; };
+		template<> struct vertex_data_type_from_element_type<u8> { static const vertex_base_type type = vertex_base_type::ub; };
+		template<> struct vertex_data_type_from_element_type<u16> { static const vertex_base_type type = vertex_base_type::s32k; };
+		template<> struct vertex_data_type_from_element_type<s16> { static const vertex_base_type type = vertex_base_type::s1; };
 
 		void clear(context* ctx, u32 reg, u32 arg);
 
@@ -108,16 +87,18 @@ namespace rsx
 
 		void set_transform_constant_load(context* ctx, u32 reg, u32 arg);
 
+		void set_aa_control(context* ctx, u32 reg, u32 arg);
+
 #define RSX(ctx) ctx->rsxthr
 #define REGS(ctx) (&rsx::method_registers)
 
 		/**
-		 * id = base method register
-		 * index = register index in method
-		 * count = element count per attribute
-		 * register_count = number of registers consumed per attribute. E.g 3-element methods have padding
-		 */
-		template <u32 id, u32 index, int count, int register_count, typename type>
+		* id = base method register
+		* index = register index in method
+		* count = element count per attribute
+		* register_count = number of registers consumed per attribute. E.g 3-element methods have padding
+		*/
+		template<u32 id, u32 index, int count, int register_count, typename type>
 		void set_vertex_data_impl(context* ctx, u32 arg)
 		{
 			static constexpr usz increment_per_array_index = (register_count * sizeof(type)) / sizeof(u32);
@@ -146,7 +127,7 @@ namespace rsx
 			util::push_vertex_data(ctx, attribute_index, vertex_subreg, count, vtype, arg);
 		}
 
-		template <u32 index>
+		template<u32 index>
 		struct set_vertex_data4ub_m
 		{
 			static void impl(context* ctx, u32 /*reg*/, u32 arg)
@@ -155,7 +136,7 @@ namespace rsx
 			}
 		};
 
-		template <u32 index>
+		template<u32 index>
 		struct set_vertex_data1f_m
 		{
 			static void impl(context* ctx, u32 /*reg*/, u32 arg)
@@ -164,7 +145,7 @@ namespace rsx
 			}
 		};
 
-		template <u32 index>
+		template<u32 index>
 		struct set_vertex_data2f_m
 		{
 			static void impl(context* ctx, u32 /*reg*/, u32 arg)
@@ -173,17 +154,17 @@ namespace rsx
 			}
 		};
 
-		template <u32 index>
+		template<u32 index>
 		struct set_vertex_data3f_m
 		{
 			static void impl(context* ctx, u32 /*reg*/, u32 arg)
 			{
-				// Register alignment is only 1, 2, or 4 (Rachet & Clank 2)
+				//Register alignment is only 1, 2, or 4 (Rachet & Clank 2)
 				set_vertex_data_impl<NV4097_SET_VERTEX_DATA3F_M, index, 3, 4, f32>(ctx, arg);
 			}
 		};
 
-		template <u32 index>
+		template<u32 index>
 		struct set_vertex_data4f_m
 		{
 			static void impl(context* ctx, u32 /*reg*/, u32 arg)
@@ -192,7 +173,7 @@ namespace rsx
 			}
 		};
 
-		template <u32 index>
+		template<u32 index>
 		struct set_vertex_data2s_m
 		{
 			static void impl(context* ctx, u32 /*reg*/, u32 arg)
@@ -201,7 +182,7 @@ namespace rsx
 			}
 		};
 
-		template <u32 index>
+		template<u32 index>
 		struct set_vertex_data4s_m
 		{
 			static void impl(context* ctx, u32 /*reg*/, u32 arg)
@@ -210,7 +191,7 @@ namespace rsx
 			}
 		};
 
-		template <u32 index>
+		template<u32 index>
 		struct set_vertex_data_scaled4s_m
 		{
 			static void impl(context* ctx, u32 /*reg*/, u32 arg)
@@ -233,7 +214,7 @@ namespace rsx
 			static void impl(context* ctx, u32 reg, u32 arg);
 		};
 
-		template <u32 index>
+		template<u32 index>
 		struct set_vertex_array_offset
 		{
 			static void impl(context* ctx, u32 reg, u32 arg)
@@ -251,7 +232,7 @@ namespace rsx
 			}
 		};
 
-		template <u32 index>
+		template<u32 index>
 		struct set_vertex_texture_dirty_bit
 		{
 			static void impl(context* ctx, u32 /*reg*/, u32 /*arg*/)
@@ -262,5 +243,5 @@ namespace rsx
 
 #undef RSX
 #undef REGS
-	} // namespace nv4097
-} // namespace rsx
+	}
+}

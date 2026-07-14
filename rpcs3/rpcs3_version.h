@@ -1,6 +1,6 @@
 #pragma once
 #include <string>
-#include <util/version.h>
+#include <Utilities/version.h>
 
 namespace rpcs3
 {
@@ -12,4 +12,4 @@ namespace rpcs3
 	std::string get_verbose_version();
 	bool is_release_build();
 	bool is_local_build();
-} // namespace rpcs3
+}

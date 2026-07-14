@@ -4,6 +4,8 @@
 
 namespace rsx
 {
+	struct texture_format_ex;
+
 	class fragment_texture
 	{
 	protected:
@@ -12,7 +14,8 @@ namespace rsx
 
 	public:
 		fragment_texture(u8 idx, std::array<u32, 0x10000 / 4>& r)
-			: m_index(idx), registers(r)
+			: m_index(idx)
+			, registers(r)
 		{
 		}
 
@@ -32,6 +35,7 @@ namespace rsx
 		// cubemap as a separate dimension.
 		rsx::texture_dimension_extended get_extended_texture_dimension() const;
 		u8 format() const;
+		texture_format_ex format_ex() const;
 		bool is_compressed_format() const;
 		u16 mipmap() const;
 
@@ -76,8 +80,8 @@ namespace rsx
 		u16 height() const;
 
 		// Border Color
-		u32 border_color() const;
-		color4f remapped_border_color() const;
+		u32 border_color(bool apply_colorspace_remapping = false) const;
+		color4f remapped_border_color(bool apply_colorspace_remapping = false) const;
 
 		u16 depth() const;
 		u32 pitch() const;
@@ -90,8 +94,9 @@ namespace rsx
 		std::array<u32, 0x10000 / 4>& registers;
 
 	public:
-		vertex_texture(u8 idx, std::array<u32, 0x10000 / 4>& r)
-			: m_index(idx), registers(r)
+		vertex_texture(u8 idx, std::array<u32, 0x10000 / 4> &r)
+			: m_index(idx)
+			, registers(r)
 		{
 		}
 
@@ -131,8 +136,8 @@ namespace rsx
 		u16 height() const;
 
 		// Border Color
-		u32 border_color() const;
-		color4f remapped_border_color() const;
+		u32 border_color(bool = false) const;
+		color4f remapped_border_color(bool = false) const;
 
 		u16 depth() const;
 		u32 pitch() const;
@@ -141,6 +146,6 @@ namespace rsx
 		u16 get_exact_mipmap_count() const;
 	};
 
-	template <typename T>
+	template<typename T>
 	concept Texture = std::is_same_v<T, fragment_texture> || std::is_same_v<T, vertex_texture>;
-} // namespace rsx
+}

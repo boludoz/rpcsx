@@ -2,13 +2,21 @@
 #include "BufferUtils.h"
 #include "util/to_endian.hpp"
 #include "util/sysinfo.hpp"
-#include "util/JIT.h"
+#include "Utilities/JIT.h"
 #include "util/v128.hpp"
 #include "util/simd.hpp"
 
 #if !defined(_MSC_VER)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
+#endif
+
+#if defined(ARCH_ARM64)
+#if !defined(_MSC_VER)
+#pragma GCC diagnostic ignored "-Wstrict-aliasing"
+#endif
+#undef FORCE_INLINE
+#include "Emu/CPU/sse2neon.h"
 #endif
 
 #if defined(_MSC_VER) || !defined(__SSE2__)
@@ -47,7 +55,7 @@
 [[maybe_unused]] const bool s_use_avx2 = utils::has_avx2();
 [[maybe_unused]] const bool s_use_avx3 = utils::has_avx512();
 #else
-[[maybe_unused]] constexpr bool s_use_ssse3 = true;  // Non x86
+[[maybe_unused]] constexpr bool s_use_ssse3 = true; // Non x86
 [[maybe_unused]] constexpr bool s_use_sse4_1 = true; // Non x86
 [[maybe_unused]] constexpr bool s_use_avx2 = false;
 [[maybe_unused]] constexpr bool s_use_avx3 = false;
@@ -63,7 +71,7 @@ namespace utils
 	{
 		return std::span<T>(bless<T>(span.data()), sizeof(U) * span.size() / sizeof(T));
 	}
-} // namespace utils
+}
 
 namespace
 {
@@ -109,51 +117,50 @@ namespace
 		}
 
 		c.build_loop(sizeof(u32), x86::eax, args[2].r32(), [&]
-			{
-				c.zero_if_not_masked().vec_load_unaligned(sizeof(u32), c.v0, c.ptr_scale_for_vec(sizeof(u32), args[1], x86::rax));
+		{
+			c.zero_if_not_masked().vec_load_unaligned(sizeof(u32), c.v0, c.ptr_scale_for_vec(sizeof(u32), args[1], x86::rax));
 
-				if (utils::has_ssse3())
+			if (utils::has_ssse3())
+			{
+				c.vec_shuffle_xi8(c.v0, c.v0, c.v1);
+			}
+			else
+			{
+				c.emit(x86::Inst::kIdMovdqa, c.v1, c.v0);
+				c.emit(x86::Inst::kIdPsrlw, c.v0, 8);
+				c.emit(x86::Inst::kIdPsllw, c.v1, 8);
+				c.emit(x86::Inst::kIdPor, c.v0, c.v1);
+				c.emit(x86::Inst::kIdPshuflw, c.v0, c.v0, 0b10110001);
+				c.emit(x86::Inst::kIdPshufhw, c.v0, c.v0, 0b10110001);
+			}
+
+			if constexpr (Compare)
+			{
+				if (utils::has_avx512())
 				{
-					c.vec_shuffle_xi8(c.v0, c.v0, c.v1);
+					c.keep_if_not_masked().emit(x86::Inst::kIdVpternlogd, c.v2, c.v0, c.ptr_scale_for_vec(sizeof(u32), args[0], x86::rax), 0xf6); // orAxorBC
 				}
 				else
 				{
-					c.emit(x86::Inst::kIdMovdqa, c.v1, c.v0);
-					c.emit(x86::Inst::kIdPsrlw, c.v0, 8);
-					c.emit(x86::Inst::kIdPsllw, c.v1, 8);
-					c.emit(x86::Inst::kIdPor, c.v0, c.v1);
-					c.emit(x86::Inst::kIdPshuflw, c.v0, c.v0, 0b10110001);
-					c.emit(x86::Inst::kIdPshufhw, c.v0, c.v0, 0b10110001);
+					c.zero_if_not_masked().vec_load_unaligned(sizeof(u32), c.v3, c.ptr_scale_for_vec(sizeof(u32), args[0], x86::rax));
+					c.vec_xor(sizeof(u32), c.v3, c.v3, c.v0);
+					c.vec_or(sizeof(u32), c.v2, c.v2, c.v3);
 				}
+			}
 
-				if constexpr (Compare)
-				{
-					if (utils::has_avx512())
-					{
-						c.keep_if_not_masked().emit(x86::Inst::kIdVpternlogd, c.v2, c.v0, c.ptr_scale_for_vec(sizeof(u32), args[0], x86::rax), 0xf6); // orAxorBC
-					}
-					else
-					{
-						c.zero_if_not_masked().vec_load_unaligned(sizeof(u32), c.v3, c.ptr_scale_for_vec(sizeof(u32), args[0], x86::rax));
-						c.vec_xor(sizeof(u32), c.v3, c.v3, c.v0);
-						c.vec_or(sizeof(u32), c.v2, c.v2, c.v3);
-					}
-				}
-
-				c.keep_if_not_masked().vec_store_unaligned(sizeof(u32), c.v0, c.ptr_scale_for_vec(sizeof(u32), args[0], x86::rax));
-			},
-			[&]
+			c.keep_if_not_masked().vec_store_unaligned(sizeof(u32), c.v0, c.ptr_scale_for_vec(sizeof(u32), args[0], x86::rax));
+		}, [&]
+		{
+			if constexpr (Compare)
 			{
-				if constexpr (Compare)
+				if (c.vsize == 16 && c.vmask == 0)
 				{
-					if (c.vsize == 16 && c.vmask == 0)
-					{
-						// Fix for AVX2 path
-						c.vextracti128(x86::xmm0, x86::ymm2, 1);
-						c.vpor(x86::xmm2, x86::xmm2, x86::xmm0);
-					}
+					// Fix for AVX2 path
+					c.vextracti128(x86::xmm0, x86::ymm2, 1);
+					c.vpor(x86::xmm2, x86::xmm2, x86::xmm0);
 				}
-			});
+			}
+		});
 
 		if constexpr (Compare)
 		{
@@ -167,11 +174,11 @@ namespace
 		c.vec_cleanup_ret();
 	}
 #endif
-} // namespace
+}
 
 #if defined(ARCH_X64)
-DECLARE(copy_data_swap_u32) = build_function_asm<void (*)(u32*, const u32*, u32), asmjit::simd_builder>("copy_data_swap_u32", &build_copy_data_swap_u32<false>);
-DECLARE(copy_data_swap_u32_cmp) = build_function_asm<bool (*)(u32*, const u32*, u32), asmjit::simd_builder>("copy_data_swap_u32_cmp", &build_copy_data_swap_u32<true>);
+DECLARE(copy_data_swap_u32) = build_function_asm<void(*)(u32*, const u32*, u32), asmjit::simd_builder>("copy_data_swap_u32", &build_copy_data_swap_u32<false>);
+DECLARE(copy_data_swap_u32_cmp) = build_function_asm<bool(*)(u32*, const u32*, u32), asmjit::simd_builder>("copy_data_swap_u32_cmp", &build_copy_data_swap_u32<true>);
 #else
 DECLARE(copy_data_swap_u32) = copy_data_swap_u32_naive<false>;
 DECLARE(copy_data_swap_u32_cmp) = copy_data_swap_u32_naive<true>;
@@ -228,43 +235,42 @@ namespace
 			}
 
 			c.vec_set_const(c.v1, sizeof(T) == 2 ? s_bswap_u16_mask : s_bswap_u32_mask);
-			c.vec_set_all_ones(c.v2);  // vec min
+			c.vec_set_all_ones(c.v2); // vec min
 			c.vec_set_all_zeros(c.v3); // vec max
 
 			c.build_loop(sizeof(T), x86::eax, args[2].r32(), [&]
+			{
+				c.zero_if_not_masked().vec_load_unaligned(sizeof(T), c.v0, c.ptr_scale_for_vec(sizeof(T), args[0], x86::rax));
+
+				if (utils::has_ssse3())
 				{
-					c.zero_if_not_masked().vec_load_unaligned(sizeof(T), c.v0, c.ptr_scale_for_vec(sizeof(T), args[0], x86::rax));
-
-					if (utils::has_ssse3())
-					{
-						c.vec_shuffle_xi8(c.v0, c.v0, c.v1);
-					}
-					else
-					{
-						c.emit(x86::Inst::kIdMovdqa, c.v1, c.v0);
-						c.emit(x86::Inst::kIdPsrlw, c.v0, 8);
-						c.emit(x86::Inst::kIdPsllw, c.v1, 8);
-						c.emit(x86::Inst::kIdPor, c.v0, c.v1);
-
-						if constexpr (sizeof(T) == 4)
-						{
-							c.emit(x86::Inst::kIdPshuflw, c.v0, c.v0, 0b10110001);
-							c.emit(x86::Inst::kIdPshufhw, c.v0, c.v0, 0b10110001);
-						}
-					}
-
-					c.keep_if_not_masked().vec_umax(sizeof(T), c.v3, c.v3, c.v0);
-					c.keep_if_not_masked().vec_umin(sizeof(T), c.v2, c.v2, c.v0);
-					c.keep_if_not_masked().vec_store_unaligned(sizeof(T), c.v0, c.ptr_scale_for_vec(sizeof(T), args[1], x86::rax));
-				},
-				[&]
+					c.vec_shuffle_xi8(c.v0, c.v0, c.v1);
+				}
+				else
 				{
-					// Compress horizontally, protect high values
-					c.vec_extract_high(sizeof(T), c.v0, c.v3);
-					c.vec_umax(sizeof(T), c.v3, c.v3, c.v0);
-					c.vec_extract_high(sizeof(T), c.v0, c.v2);
-					c.vec_umin(sizeof(T), c.v2, c.v2, c.v0);
-				});
+					c.emit(x86::Inst::kIdMovdqa, c.v1, c.v0);
+					c.emit(x86::Inst::kIdPsrlw, c.v0, 8);
+					c.emit(x86::Inst::kIdPsllw, c.v1, 8);
+					c.emit(x86::Inst::kIdPor, c.v0, c.v1);
+
+					if constexpr (sizeof(T) == 4)
+					{
+						c.emit(x86::Inst::kIdPshuflw, c.v0, c.v0, 0b10110001);
+						c.emit(x86::Inst::kIdPshufhw, c.v0, c.v0, 0b10110001);
+					}
+				}
+
+				c.keep_if_not_masked().vec_umax(sizeof(T), c.v3, c.v3, c.v0);
+				c.keep_if_not_masked().vec_umin(sizeof(T), c.v2, c.v2, c.v0);
+				c.keep_if_not_masked().vec_store_unaligned(sizeof(T), c.v0, c.ptr_scale_for_vec(sizeof(T), args[1], x86::rax));
+			}, [&]
+			{
+				// Compress horizontally, protect high values
+				c.vec_extract_high(sizeof(T), c.v0, c.v3);
+				c.vec_umax(sizeof(T), c.v3, c.v3, c.v0);
+				c.vec_extract_high(sizeof(T), c.v0, c.v2);
+				c.vec_umin(sizeof(T), c.v2, c.v2, c.v0);
+			});
 
 			c.vec_extract_gpr(sizeof(T), x86::edx, c.v3);
 			c.vec_extract_gpr(sizeof(T), x86::eax, c.v2);
@@ -273,8 +279,8 @@ namespace
 			c.vec_cleanup_ret();
 		}
 
-		static inline auto upload_xi16 = build_function_asm<u64 (*)(const be_t<u16>*, u16*, u32), asmjit::simd_builder>("untouched_upload_xi16", &build_upload_untouched<u16>);
-		static inline auto upload_xi32 = build_function_asm<u64 (*)(const be_t<u32>*, u32*, u32), asmjit::simd_builder>("untouched_upload_xi32", &build_upload_untouched<u32>);
+		static inline auto upload_xi16 = build_function_asm<u64(*)(const be_t<u16>*, u16*, u32), asmjit::simd_builder>("untouched_upload_xi16", &build_upload_untouched<u16>);
+		static inline auto upload_xi32 = build_function_asm<u64(*)(const be_t<u32>*, u32*, u32), asmjit::simd_builder>("untouched_upload_xi32", &build_upload_untouched<u32>);
 #endif
 
 		template <typename T>
@@ -330,48 +336,47 @@ namespace
 			}
 
 			c.vec_set_const(c.v1, sizeof(T) == 2 ? s_bswap_u16_mask : s_bswap_u32_mask);
-			c.vec_set_all_ones(c.v2);  // vec min
+			c.vec_set_all_ones(c.v2); // vec min
 			c.vec_set_all_zeros(c.v3); // vec max
 			c.vec_broadcast_gpr(sizeof(T), c.v4, args[3].r32());
 
 			c.build_loop(sizeof(T), x86::eax, args[2].r32(), [&]
+			{
+				c.zero_if_not_masked().vec_load_unaligned(sizeof(T), c.v0, c.ptr_scale_for_vec(sizeof(T), args[0], x86::rax));
+
+				if (utils::has_ssse3())
 				{
-					c.zero_if_not_masked().vec_load_unaligned(sizeof(T), c.v0, c.ptr_scale_for_vec(sizeof(T), args[0], x86::rax));
-
-					if (utils::has_ssse3())
-					{
-						c.vec_shuffle_xi8(c.v0, c.v0, c.v1);
-					}
-					else
-					{
-						c.emit(x86::Inst::kIdMovdqa, c.v1, c.v0);
-						c.emit(x86::Inst::kIdPsrlw, c.v0, 8);
-						c.emit(x86::Inst::kIdPsllw, c.v1, 8);
-						c.emit(x86::Inst::kIdPor, c.v0, c.v1);
-
-						if constexpr (sizeof(T) == 4)
-						{
-							c.emit(x86::Inst::kIdPshuflw, c.v0, c.v0, 0b10110001);
-							c.emit(x86::Inst::kIdPshufhw, c.v0, c.v0, 0b10110001);
-						}
-					}
-
-					c.vec_cmp_eq(sizeof(T), c.v5, c.v4, c.v0);
-					c.vec_andn(sizeof(T), c.v5, c.v5, c.v0);
-					c.keep_if_not_masked().vec_umax(sizeof(T), c.v3, c.v3, c.v5);
-					c.vec_cmp_eq(sizeof(T), c.v5, c.v4, c.v0);
-					c.vec_or(sizeof(T), c.v0, c.v0, c.v5);
-					c.keep_if_not_masked().vec_umin(sizeof(T), c.v2, c.v2, c.v0);
-					c.keep_if_not_masked().vec_store_unaligned(sizeof(T), c.v0, c.ptr_scale_for_vec(sizeof(T), args[1], x86::rax));
-				},
-				[&]
+					c.vec_shuffle_xi8(c.v0, c.v0, c.v1);
+				}
+				else
 				{
-					// Compress horizontally, protect high values
-					c.vec_extract_high(sizeof(T), c.v0, c.v3);
-					c.vec_umax(sizeof(T), c.v3, c.v3, c.v0);
-					c.vec_extract_high(sizeof(T), c.v0, c.v2);
-					c.vec_umin(sizeof(T), c.v2, c.v2, c.v0);
-				});
+					c.emit(x86::Inst::kIdMovdqa, c.v1, c.v0);
+					c.emit(x86::Inst::kIdPsrlw, c.v0, 8);
+					c.emit(x86::Inst::kIdPsllw, c.v1, 8);
+					c.emit(x86::Inst::kIdPor, c.v0, c.v1);
+
+					if constexpr (sizeof(T) == 4)
+					{
+						c.emit(x86::Inst::kIdPshuflw, c.v0, c.v0, 0b10110001);
+						c.emit(x86::Inst::kIdPshufhw, c.v0, c.v0, 0b10110001);
+					}
+				}
+
+				c.vec_cmp_eq(sizeof(T), c.v5, c.v4, c.v0);
+				c.vec_andn(sizeof(T), c.v5, c.v5, c.v0);
+				c.keep_if_not_masked().vec_umax(sizeof(T), c.v3, c.v3, c.v5);
+				c.vec_cmp_eq(sizeof(T), c.v5, c.v4, c.v0);
+				c.vec_or(sizeof(T), c.v0, c.v0, c.v5);
+				c.keep_if_not_masked().vec_umin(sizeof(T), c.v2, c.v2, c.v0);
+				c.keep_if_not_masked().vec_store_unaligned(sizeof(T), c.v0, c.ptr_scale_for_vec(sizeof(T), args[1], x86::rax));
+			}, [&]
+			{
+				// Compress horizontally, protect high values
+				c.vec_extract_high(sizeof(T), c.v0, c.v3);
+				c.vec_umax(sizeof(T), c.v3, c.v3, c.v0);
+				c.vec_extract_high(sizeof(T), c.v0, c.v2);
+				c.vec_umin(sizeof(T), c.v2, c.v2, c.v0);
+			});
 
 			c.vec_extract_gpr(sizeof(T), x86::edx, c.v3);
 			c.vec_extract_gpr(sizeof(T), x86::eax, c.v2);
@@ -380,8 +385,8 @@ namespace
 			c.vec_cleanup_ret();
 		}
 
-		static inline auto upload_xi16 = build_function_asm<u64 (*)(const be_t<u16>*, u16*, u32, u32), asmjit::simd_builder>("restart_untouched_upload_xi16", &build_upload_untouched<u16>);
-		static inline auto upload_xi32 = build_function_asm<u64 (*)(const be_t<u32>*, u32*, u32, u32), asmjit::simd_builder>("restart_untouched_upload_xi32", &build_upload_untouched<u32>);
+		static inline auto upload_xi16 = build_function_asm<u64(*)(const be_t<u16>*, u16*, u32, u32), asmjit::simd_builder>("restart_untouched_upload_xi16", &build_upload_untouched<u16>);
+		static inline auto upload_xi32 = build_function_asm<u64(*)(const be_t<u32>*, u32*, u32, u32), asmjit::simd_builder>("restart_untouched_upload_xi32", &build_upload_untouched<u32>);
 #endif
 
 		template <typename T>
@@ -427,39 +432,52 @@ namespace
 		return std::make_tuple(min_index, max_index, written);
 	}
 
-	template <typename T>
+	template<typename T, typename U = remove_be_t<T>>
+		requires std::is_same_v<U, u32> || std::is_same_v<U, u16>
 	std::tuple<T, T, u32> upload_untouched(std::span<to_be_t<const T>> src, std::span<T> dst, rsx::primitive_type draw_mode, bool is_primitive_restart_enabled, u32 primitive_restart_index)
 	{
+		if constexpr (std::is_same_v<T, u16>)
+		{
+			if (primitive_restart_index > 0xffff)
+			{
+				// Will never trip index restart, unpload untouched
+				is_primitive_restart_enabled = false;
+			}
+		}
+
 		if (!is_primitive_restart_enabled)
 		{
 			return untouched_impl::upload_untouched(src, dst);
 		}
-		else if constexpr (std::is_same_v<T, u16>)
+
+		if (is_primitive_disjointed(draw_mode))
 		{
-			if (primitive_restart_index > 0xffff)
-			{
-				return untouched_impl::upload_untouched(src, dst);
-			}
-			else if (is_primitive_disjointed(draw_mode))
-			{
-				return upload_untouched_skip_restart(src, dst, static_cast<u16>(primitive_restart_index));
-			}
-			else
-			{
-				return primitive_restart_impl::upload_untouched(src, dst, static_cast<u16>(primitive_restart_index));
-			}
+			return upload_untouched_skip_restart(src, dst, static_cast<U>(primitive_restart_index));
 		}
-		else if (is_primitive_disjointed(draw_mode))
-		{
-			return upload_untouched_skip_restart(src, dst, primitive_restart_index);
-		}
-		else
-		{
-			return primitive_restart_impl::upload_untouched(src, dst, primitive_restart_index);
-		}
+
+		return primitive_restart_impl::upload_untouched(src, dst, static_cast<U>(primitive_restart_index));
 	}
 
-	template <typename T>
+	void iota16(u16* dst, u32 count)
+	{
+		unsigned i = 0;
+#if defined(ARCH_X64) || defined(ARCH_ARM64)
+		const unsigned step = 8;                          // We do 8 entries per step
+		const __m128i vec_step = _mm_set1_epi16(8);     // Constant to increment the raw values
+		__m128i values = _mm_set_epi16(7, 6, 5, 4, 3, 2, 1, 0);
+		__m128i* vec_ptr = utils::bless<__m128i>(dst);
+
+		for (; (i + step) <= count; i += step, vec_ptr++)
+		{
+			_mm_stream_si128(vec_ptr, values);
+			_mm_add_epi16(values,  vec_step);
+		}
+#endif
+		for (; i < count; ++i)
+			dst[i] = i;
+	}
+
+	template<typename T>
 	std::tuple<T, T, u32> expand_indexed_triangle_fan(std::span<to_be_t<const T>> src, std::span<T> dst, bool is_primitive_restart_enabled, u32 primitive_restart_index)
 	{
 		const T invalid_index = index_limit<T>();
@@ -496,7 +514,7 @@ namespace
 
 			if (last_index == invalid_index)
 			{
-				// Need at least one anchor and one outer index to create a triangle
+				//Need at least one anchor and one outer index to create a triangle
 				last_index = min_max(min_index, max_index, index);
 				continue;
 			}
@@ -511,7 +529,7 @@ namespace
 		return std::make_tuple(min_index, max_index, dst_idx);
 	}
 
-	template <typename T>
+	template<typename T>
 	std::tuple<T, T, u32> expand_indexed_quads(std::span<to_be_t<const T>> src, std::span<T> dst, bool is_primitive_restart_enabled, u32 primitive_restart_index)
 	{
 		T min_index = index_limit<T>();
@@ -527,7 +545,7 @@ namespace
 		{
 			if (is_primitive_restart_enabled && index == primitive_restart_index)
 			{
-				// empty temp buffer
+				//empty temp buffer
 				set_size = 0;
 				continue;
 			}
@@ -551,7 +569,7 @@ namespace
 
 		return std::make_tuple(min_index, max_index, dst_idx);
 	}
-} // namespace
+}
 
 // Only handle quads and triangle fan now
 bool is_primitive_native(rsx::primitive_type draw_mode)
@@ -627,8 +645,7 @@ void write_index_array_for_non_indexed_non_native_primitive_to_buffer(char* dst,
 	switch (draw_mode)
 	{
 	case rsx::primitive_type::line_loop:
-		for (unsigned i = 0; i < count; ++i)
-			typedDst[i] = i;
+		iota16(typedDst, count);
 		typedDst[count] = 0;
 		return;
 	case rsx::primitive_type::triangle_fan:
@@ -665,9 +682,10 @@ void write_index_array_for_non_indexed_non_native_primitive_to_buffer(char* dst,
 	fmt::throw_exception("Tried to load invalid primitive type");
 }
 
+
 namespace
 {
-	template <typename T>
+	template<typename T>
 	std::tuple<T, T, u32> write_index_array_data_to_buffer_impl(std::span<T> dst,
 		std::span<const be_t<T>> src,
 		rsx::primitive_type draw_mode, bool restart_index_enabled, u32 restart_index,
@@ -682,7 +700,7 @@ namespace
 		{
 		case rsx::primitive_type::line_loop:
 		{
-			const auto& returnvalue = upload_untouched<T>(src, dst, draw_mode, restart_index_enabled, restart_index);
+			const auto &returnvalue = upload_untouched<T>(src, dst, draw_mode, restart_index_enabled, restart_index);
 			const auto index_count = dst.size_bytes() / sizeof(T);
 			dst[index_count] = src[0];
 			return returnvalue;
@@ -700,7 +718,7 @@ namespace
 			fmt::throw_exception("Unknown draw mode (0x%x)", static_cast<u8>(draw_mode));
 		}
 	}
-} // namespace
+}
 
 std::tuple<u32, u32, u32> write_index_array_data_to_buffer(std::span<std::byte> dst_ptr,
 	std::span<const std::byte> src_ptr,

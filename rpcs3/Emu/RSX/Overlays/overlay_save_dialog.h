@@ -2,7 +2,7 @@
 
 #include "overlays.h"
 #include "overlay_list_view.hpp"
-#include "rpcsx/fw/ps3/cellSaveData.h"
+#include "Emu/Cell/Modules/cellSaveData.h"
 
 namespace rsx
 {
@@ -18,7 +18,6 @@ namespace rsx
 				void set_selected(bool selected) override;
 
 			private:
-				std::unique_ptr<image_info> icon_data;
 				overlay_element* m_image = nullptr;
 			};
 
@@ -42,5 +41,5 @@ namespace rsx
 
 			s32 show(const std::string& base_dir, std::vector<SaveDataEntry>& save_entries, u32 focused, u32 op, vm::ptr<CellSaveDataListSet> listSet, bool enable_overlay);
 		};
-	} // namespace overlays
-} // namespace rsx
+	}
+}

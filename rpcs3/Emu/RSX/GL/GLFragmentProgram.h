@@ -22,8 +22,10 @@ struct GLFragmentDecompilerThread : public FragmentProgramDecompiler
 	glsl::shader_properties m_shader_props{};
 
 public:
-	GLFragmentDecompilerThread(std::string& shader, ParamArray& parr, const RSXFragmentProgram& prog, u32& size)
-		: FragmentProgramDecompiler(prog, size), m_shader(shader), m_parrDummy(parr)
+	GLFragmentDecompilerThread(std::string& shader, ParamArray& parr, const RSXFragmentProgram &prog, u32& size)
+		: FragmentProgramDecompiler(prog, size)
+		, m_shader(shader)
+		, m_parrDummy(parr)
 	{
 	}
 
@@ -35,13 +37,13 @@ protected:
 	std::string getFunction(FUNCTION) override;
 	std::string compareFunction(COMPARE, const std::string&, const std::string&) override;
 
-	void insertHeader(std::stringstream& OS) override;
-	void insertInputs(std::stringstream& OS) override;
-	void insertOutputs(std::stringstream& OS) override;
-	void insertConstants(std::stringstream& OS) override;
-	void insertGlobalFunctions(std::stringstream& OS) override;
-	void insertMainStart(std::stringstream& OS) override;
-	void insertMainEnd(std::stringstream& OS) override;
+	void insertHeader(std::stringstream &OS) override;
+	void insertInputs(std::stringstream &OS) override;
+	void insertOutputs(std::stringstream &OS) override;
+	void insertConstants(std::stringstream &OS) override;
+	void insertGlobalFunctions(std::stringstream &OS) override;
+	void insertMainStart(std::stringstream &OS) override;
+	void insertMainEnd(std::stringstream &OS) override;
 };
 
 /** Storage for an Fragment Program in the process of of recompilation.
@@ -56,7 +58,7 @@ public:
 	ParamArray parr;
 	u32 id;
 	gl::glsl::shader shader;
-	std::vector<usz> FragmentConstantOffsetCache;
+	std::vector<u32> constant_offsets;
 
 	/**
 	 * Decompile a fragment shader located in the PS3's Memory.  This function operates synchronously.

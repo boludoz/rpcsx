@@ -8,7 +8,7 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <windows.h>
+#include <Windows.h>
 #include <Xinput.h>
 
 // ScpToolkit defined structure for pressure sensitive button query
@@ -93,13 +93,11 @@ class xinput_pad_handler final : public PadHandlerBase
 		RSYPos
 	};
 
-	using PadButtonValues = std::unordered_map<u64, u16>;
-
 	struct XInputDevice : public PadDevice
 	{
-		u32 deviceNumber{0};
-		bool is_scp_device{false};
-		DWORD state{ERROR_NOT_CONNECTED}; // holds internal controller state change
+		u32 deviceNumber{ 0 };
+		bool is_scp_device{ false };
+		DWORD state{ ERROR_NOT_CONNECTED }; // holds internal controller state change
 		SCP_EXTN state_scp{};
 		XINPUT_STATE state_base{};
 	};
@@ -123,24 +121,24 @@ private:
 	using PFN_XINPUTGETBATTERYINFORMATION = DWORD(WINAPI*)(DWORD, BYTE, XINPUT_BATTERY_INFORMATION*);
 
 	int GetDeviceNumber(const std::string& padId);
-	static PadButtonValues get_button_values_base(const XINPUT_STATE& state, trigger_recognition_mode trigger_mode);
-	static PadButtonValues get_button_values_scp(const SCP_EXTN& state, trigger_recognition_mode trigger_mode);
+	static std::unordered_map<u32, u16> get_button_values_base(const XINPUT_STATE& state, trigger_recognition_mode trigger_mode);
+	static std::unordered_map<u32, u16> get_button_values_scp(const SCP_EXTN& state, trigger_recognition_mode trigger_mode);
 
-	PFN_XINPUTGETEXTENDED xinputGetExtended{nullptr};
-	PFN_XINPUTGETCUSTOMDATA xinputGetCustomData{nullptr};
-	PFN_XINPUTGETSTATE xinputGetState{nullptr};
-	PFN_XINPUTSETSTATE xinputSetState{nullptr};
-	PFN_XINPUTGETBATTERYINFORMATION xinputGetBatteryInformation{nullptr};
+	PFN_XINPUTGETEXTENDED xinputGetExtended{ nullptr };
+	PFN_XINPUTGETCUSTOMDATA xinputGetCustomData{ nullptr };
+	PFN_XINPUTGETSTATE xinputGetState{ nullptr };
+	PFN_XINPUTSETSTATE xinputSetState{ nullptr };
+	PFN_XINPUTGETBATTERYINFORMATION xinputGetBatteryInformation{ nullptr };
 	utils::dynamic_library library;
 
 	std::shared_ptr<PadDevice> get_device(const std::string& device) override;
-	bool get_is_left_trigger(const std::shared_ptr<PadDevice>& device, u64 keyCode) override;
-	bool get_is_right_trigger(const std::shared_ptr<PadDevice>& device, u64 keyCode) override;
-	bool get_is_left_stick(const std::shared_ptr<PadDevice>& device, u64 keyCode) override;
-	bool get_is_right_stick(const std::shared_ptr<PadDevice>& device, u64 keyCode) override;
+	bool get_is_left_trigger(const std::shared_ptr<PadDevice>& device, u32 keyCode) override;
+	bool get_is_right_trigger(const std::shared_ptr<PadDevice>& device, u32 keyCode) override;
+	bool get_is_left_stick(const std::shared_ptr<PadDevice>& device, u32 keyCode) override;
+	bool get_is_right_stick(const std::shared_ptr<PadDevice>& device, u32 keyCode) override;
 	PadHandlerBase::connection update_connection(const std::shared_ptr<PadDevice>& device) override;
 	void get_extended_info(const pad_ensemble& binding) override;
 	void apply_pad_data(const pad_ensemble& binding) override;
-	std::unordered_map<u64, u16> get_button_values(const std::shared_ptr<PadDevice>& device) override;
-	pad_preview_values get_preview_values(const std::unordered_map<u64, u16>& data) override;
+	std::unordered_map<u32, u16> get_button_values(const std::shared_ptr<PadDevice>& device) override;
+	pad_preview_values get_preview_values(const std::unordered_map<u32, u16>& data, const std::vector<std::string>& buttons) override;
 };

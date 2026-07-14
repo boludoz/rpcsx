@@ -1,9 +1,11 @@
 #pragma once
 
-#include "util/JIT.h"
+#include "Utilities/JIT.h"
 #include "SPURecompiler.h"
 
 #include <functional>
+
+union v128;
 
 // SPU ASMJIT Recompiler
 class spu_recompiler : public spu_recompiler_base

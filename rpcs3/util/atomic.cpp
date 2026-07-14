@@ -1,8 +1,8 @@
 #include "atomic.hpp"
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
 #define USE_FUTEX
-#elif (!defined(_WIN32) || defined(__GNUC__))
+#elif !defined(_WIN32)
 #define USE_STD
 #endif
 
@@ -15,18 +15,18 @@ namespace utils
 {
 	u128 __vectorcall atomic_load16(const void* ptr)
 	{
-		return std::bit_cast<u128>(_mm_load_si128((__m128i*)ptr));
+		return std::bit_cast<u128>(_mm_load_si128(static_cast<const __m128i*>(ptr)));
 	}
 
 	void __vectorcall atomic_store16(void* ptr, u128 value)
 	{
-		_mm_store_si128((__m128i*)ptr, std::bit_cast<__m128i>(value));
+		_mm_store_si128(static_cast<__m128i*>(ptr), std::bit_cast<__m128i>(value));
 	}
-} // namespace utils
+}
 #endif
 
-#include "util/sync.h"
-#include "util/StrFmt.h"
+#include "Utilities/sync.h"
+#include "Utilities/StrFmt.h"
 
 #ifdef __linux__
 static bool has_waitv()
@@ -49,28 +49,30 @@ static bool has_waitv()
 #include <cstdint>
 #include <array>
 #include <random>
+#include <climits>
 
-#include "rx/asm.hpp"
+#ifdef __linux__
+#include <pthread.h>
+#endif
+
+#include "asm.hpp"
 #include "endian.hpp"
-#include "rx/tsc.hpp"
+#include "tsc.hpp"
 
 // Total number of entries.
 static constexpr usz s_hashtable_size = 1u << 17;
 
-// Reference counter combined with shifted pointer (which is assumed to be 48 bit)
-static constexpr uptr s_ref_mask = 0xffff;
+// Reference counter mask
+static constexpr uptr s_ref_mask = 0xffff'ffff;
 
 // Fix for silly on-first-use initializer
-static bool s_null_wait_cb(const void*, u64, u64)
-{
-	return true;
-};
+static bool s_null_wait_cb(const void*, u64, u64){ return true; };
 
 // Callback for wait() function, returns false if wait should return
-static thread_local bool (*s_tls_wait_cb)(const void* data, u64 attempts, u64 stamp0) = s_null_wait_cb;
+static thread_local bool(*s_tls_wait_cb)(const void* data, u64 attempts, u64 stamp0) = s_null_wait_cb;
 
 // Callback for wait() function for a second custon condition, commonly passed with timeout
-static thread_local bool (*s_tls_one_time_wait_cb)(u64 attempts) = nullptr;
+static thread_local bool(*s_tls_one_time_wait_cb)(u64 attempts) = nullptr;
 
 // Compare data in memory with old value, and return true if they are equal
 static NEVER_INLINE bool ptr_cmp(const void* data, u32 old, atomic_wait::info* ext = nullptr)
@@ -116,17 +118,17 @@ namespace
 			return std::launder(reinterpret_cast<const T*>(+data));
 		}
 
-		T& operator=(const T& r) noexcept
+		T& operator =(const T& r) noexcept
 		{
 			return *get() = r;
 		}
 
-		T* operator->() noexcept
+		T* operator ->() noexcept
 		{
 			return get();
 		}
 
-		const T* operator->() const noexcept
+		const T* operator ->() const noexcept
 		{
 			return get();
 		}
@@ -156,8 +158,16 @@ namespace
 	// Essentially a fat semaphore
 	struct alignas(64) cond_handle
 	{
-		// Combined pointer (most significant 48 bits) and ref counter (16 least significant bits)
-		atomic_t<u64> ptr_ref;
+		struct fat_ptr
+		{
+			u64 ptr{};
+			u32 reserved{};
+			u32 ref_ctr{};
+
+			auto operator<=>(const fat_ptr& other) const = default;
+		};
+
+		atomic_t<fat_ptr> ptr_ref;
 		u64 tid;
 		u32 oldv;
 
@@ -186,7 +196,7 @@ namespace
 			mtx.init(mtx);
 #endif
 
-			ensure(!ptr_ref.exchange((iptr << 16) | 1));
+			ensure(ptr_ref.exchange(fat_ptr{iptr, 0, 1}) == fat_ptr{});
 		}
 
 		void destroy()
@@ -206,15 +216,15 @@ namespace
 		bool forced_wakeup()
 		{
 			const auto [_old, ok] = sync.fetch_op([](u32& val)
+			{
+				if (val - 1 <= 1)
 				{
-					if (val - 1 <= 1)
-					{
-						val = 3;
-						return true;
-					}
+					val = 3;
+					return true;
+				}
 
-					return false;
-				});
+				return false;
+			});
 
 			// Prevent collision between normal wake-up and forced one
 			return ok && _old == 1;
@@ -225,15 +235,15 @@ namespace
 			if (cmp_res == 1) [[likely]]
 			{
 				const auto [_old, ok] = sync.fetch_op([](u32& val)
+				{
+					if (val == 1)
 					{
-						if (val == 1)
-						{
-							val = 2;
-							return true;
-						}
+						val = 2;
+						return true;
+					}
 
-						return false;
-					});
+					return false;
+				});
 
 				return ok;
 			}
@@ -251,15 +261,15 @@ namespace
 		bool set_sleep()
 		{
 			const auto [_old, ok] = sync.fetch_op([](u32& val)
+			{
+				if (val == 2)
 				{
-					if (val == 2)
-					{
-						val = 1;
-						return true;
-					}
+					val = 1;
+					return true;
+				}
 
-					return false;
-				});
+				return false;
+			});
 
 			return ok;
 		}
@@ -325,7 +335,7 @@ namespace
 #ifndef USE_STD
 	static_assert(sizeof(cond_handle) == 64);
 #endif
-} // namespace
+}
 
 // Produce u128 value that repeats val 8 times
 static constexpr u128 dup8(u32 val)
@@ -373,13 +383,13 @@ namespace
 				if (cond_id)
 				{
 					// Set fake refctr
-					s_cond_list[cond_id].ptr_ref.release(1);
+					s_cond_list[cond_id].ptr_ref.release(cond_handle::fat_ptr{0, 0, 1});
 					cond_free(cond_id, -1);
 				}
 			}
 		}
 	};
-} // namespace
+}
 
 // TLS storage for few allocaded "semaphores" to allow skipping initialization
 static thread_local tls_cond_handler s_tls_conds{};
@@ -393,52 +403,52 @@ static u32 cond_alloc(uptr iptr, u32 tls_slot = -1)
 	{
 		// Fast reinitialize
 		const u32 id = std::exchange(*ptls, 0);
-		s_cond_list[id].ptr_ref.release((iptr << 16) | 1);
+		s_cond_list[id].ptr_ref.release(cond_handle::fat_ptr{iptr, 0, 1});
 		return id;
 	}
 
 	const u32 level1 = s_cond_sem1.atomic_op([](u128& val) -> u32
+	{
+		constexpr u128 max_mask = dup8(8192);
+
+		// Leave only bits indicating sub-semaphore is full, find free one
+		const u32 pos = utils::ctz128(~val & max_mask);
+
+		if (pos == 128) [[unlikely]]
 		{
-			constexpr u128 max_mask = dup8(8192);
+			// No free space
+			return -1;
+		}
 
-			// Leave only bits indicating sub-semaphore is full, find free one
-			const u32 pos = rx::ctz128(~val & max_mask);
+		val += u128{1} << (pos / 14 * 14);
 
-			if (pos == 128) [[unlikely]]
-			{
-				// No free space
-				return -1;
-			}
-
-			val += u128{1} << (pos / 14 * 14);
-
-			return pos / 14;
-		});
+		return pos / 14;
+	});
 
 	// Determine whether there is a free slot or not
 	if (level1 < 8) [[likely]]
 	{
 		const u32 level2 = level1 * 8 + s_cond_sem2[level1].atomic_op([](u128& val)
-											{
-												constexpr u128 max_mask = dup8(1024);
+		{
+			constexpr u128 max_mask = dup8(1024);
 
-												const u32 pos = rx::ctz128(~val & max_mask);
+			const u32 pos = utils::ctz128(~val & max_mask);
 
-												val += u128{1} << (pos / 11 * 11);
+			val += u128{1} << (pos / 11 * 11);
 
-												return pos / 11;
-											});
+			return pos / 11;
+		});
 
 		const u32 level3 = level2 * 16 + s_cond_sem3[level2].atomic_op([](u128& val)
-											 {
-												 constexpr u128 max_mask = dup8(64) | (dup8(64) << 56);
+		{
+			constexpr u128 max_mask = dup8(64) | (dup8(64) << 56);
 
-												 const u32 pos = rx::ctz128(~val & max_mask);
+			const u32 pos = utils::ctz128(~val & max_mask);
 
-												 val += u128{1} << (pos / 7 * 7);
+			val += u128{1} << (pos / 7 * 7);
 
-												 return pos / 7;
-											 });
+			return pos / 7;
+		});
 
 		// Set lowest clear bit
 		const u64 bits = s_cond_bits[level3].fetch_op(AOFN(x |= x + 1, void()));
@@ -464,20 +474,20 @@ static void cond_free(u32 cond_id, u32 tls_slot = -1)
 	const auto cond = s_cond_list + cond_id;
 
 	// Dereference, destroy on last ref
-	const bool last = cond->ptr_ref.atomic_op([](u64& val)
+	const bool last = cond->ptr_ref.atomic_op([](cond_handle::fat_ptr& val)
+	{
+		ensure(val.ref_ctr);
+
+		val.ref_ctr--;
+
+		if (val.ref_ctr == 0)
 		{
-			ensure(val & s_ref_mask);
+			val = cond_handle::fat_ptr{};
+			return true;
+		}
 
-			val--;
-
-			if ((val & s_ref_mask) == 0)
-			{
-				val = 0;
-				return true;
-			}
-
-			return false;
-		});
+		return false;
+	});
 
 	if (!last)
 	{
@@ -495,15 +505,15 @@ static void cond_free(u32 cond_id, u32 tls_slot = -1)
 	}
 
 	// Call the destructor if necessary
-	rx::prefetch_write(s_cond_bits + cond_id / 64);
+	utils::prefetch_write(s_cond_bits + cond_id / 64);
 
 	const u32 level3 = cond_id / 64 % 16;
 	const u32 level2 = cond_id / 1024 % 8;
 	const u32 level1 = cond_id / 8192 % 8;
 
-	rx::prefetch_write(s_cond_sem3 + level2);
-	rx::prefetch_write(s_cond_sem2 + level1);
-	rx::prefetch_write(&s_cond_sem1);
+	utils::prefetch_write(s_cond_sem3 + level2);
+	utils::prefetch_write(s_cond_sem2 + level1);
+	utils::prefetch_write(&s_cond_sem1);
 
 	cond->destroy();
 
@@ -528,34 +538,34 @@ static cond_handle* cond_id_lock(u32 cond_id, uptr iptr = 0)
 
 	while (true)
 	{
-		const auto [old, ok] = cond->ptr_ref.fetch_op([&](u64& val)
+		const auto [old, ok] = cond->ptr_ref.fetch_op([&](cond_handle::fat_ptr& val)
+		{
+			if (val == cond_handle::fat_ptr{} || val.ref_ctr == s_ref_mask)
 			{
-				if (!val || (val & s_ref_mask) == s_ref_mask)
-				{
-					// Don't reference already deallocated semaphore
-					return false;
-				}
+				// Don't reference already deallocated semaphore
+				return false;
+			}
 
-				if (iptr && (val >> 16) != iptr)
-				{
-					// Pointer mismatch
-					return false;
-				}
+			if (iptr && val.ptr != iptr)
+			{
+				// Pointer mismatch
+				return false;
+			}
 
-				const u32 sync_val = cond->sync;
+			const u32 sync_val = cond->sync;
 
-				if (sync_val == 0 || sync_val == 3)
-				{
-					return false;
-				}
+			if (sync_val == 0 || sync_val == 3)
+			{
+				return false;
+			}
 
-				if (!did_ref)
-				{
-					val++;
-				}
+			if (!did_ref)
+			{
+				val.ref_ctr++;
+			}
 
-				return true;
-			});
+			return true;
+		});
 
 		if (ok)
 		{
@@ -569,7 +579,7 @@ static cond_handle* cond_id_lock(u32 cond_id, uptr iptr = 0)
 			return cond;
 		}
 
-		if ((old & s_ref_mask) == s_ref_mask)
+		if (old.ref_ctr == s_ref_mask)
 		{
 			fmt::throw_exception("Reference count limit (%u) reached in an atomic notifier.", s_ref_mask);
 		}
@@ -589,14 +599,16 @@ namespace
 {
 	struct alignas(16) slot_allocator
 	{
-		u64 maxc : 5;  // Collision counter
-		u64 maxd : 11; // Distance counter
-		u64 bits : 24; // Allocated bits
-		u64 prio : 24; // Reserved
+		u64 maxc: 5; // Collision counter
+		u64 maxd: 11; // Distance counter
+		u64 bits: 24; // Allocated bits
+		u64 prio: 8; // Reserved
 
-		u64 ref : 16;  // Ref counter
-		u64 iptr : 48; // First pointer to use slot (to count used slots)
+		u64 ref : 16; // Ref counter
+		u64 iptr: 64; // First pointer to use slot (to count used slots)
 	};
+
+	static_assert(sizeof(slot_allocator) == 16);
 
 	// Need to spare 16 bits for ref counter
 	static constexpr u64 max_threads = 24;
@@ -622,7 +634,7 @@ namespace
 	};
 
 	static_assert(sizeof(root_info) == 64);
-} // namespace
+}
 
 // Main hashtable for atomic wait.
 static root_info s_hashtable[s_hashtable_size]{};
@@ -645,7 +657,10 @@ namespace
 
 		// Initialize: PRNG on iptr, split into two 16 bit chunks, choose first chunk
 		explicit hash_engine(uptr iptr)
-			: init(rng(iptr)()), r0(static_cast<u16>(init >> 48)), r1(static_cast<u16>(init >> 32)), id(static_cast<u32>(init) >> 31 ? r0 : r1 + 0x10000)
+			: init(rng(iptr)())
+			, r0(static_cast<u16>(init >> 48))
+			, r1(static_cast<u16>(init >> 32))
+			, id(static_cast<u32>(init) >> 31 ? r0 : r1 + 0x10000)
 		{
 		}
 
@@ -667,32 +682,31 @@ namespace
 			return &s_hashtable[id];
 		}
 
-		root_info* operator->() const noexcept
+		root_info* operator ->() const noexcept
 		{
 			return current();
 		}
 	};
-} // namespace
+}
 
 u64 utils::get_unique_tsc()
 {
-	const u64 stamp0 = rx::get_tsc();
+	const u64 stamp0 = utils::get_tsc();
 
 	if (!s_min_tsc.fetch_op([=](u64& tsc)
-					  {
-						  if (stamp0 <= tsc)
-						  {
-							  // Add 1 if new stamp is too old
-							  return false;
-						  }
-						  else
-						  {
-							  // Update last tsc with new stamp otherwise
-							  tsc = stamp0;
-							  return true;
-						  }
-					  })
-			.second)
+	{
+		if (stamp0 <= tsc)
+		{
+			// Add 1 if new stamp is too old
+			return false;
+		}
+		else
+		{
+			// Update last tsc with new stamp otherwise
+			tsc = stamp0;
+			return true;
+		}
+	}).second)
 	{
 		// Add 1 if new stamp is too old
 		// Avoid doing it in the atomic operaion because, if it gets here it means there is already much cntention
@@ -712,32 +726,32 @@ atomic_t<u16>* root_info::slot_alloc(uptr ptr) noexcept
 	for (hash_engine _this(ptr);; _this.advance())
 	{
 		slot = _this->bits.atomic_op([&](slot_allocator& bits) -> atomic_t<u16>*
+		{
+			// Increment reference counter on every hashtable slot we attempt to allocate on
+			if (bits.ref == u16{umax})
 			{
-				// Increment reference counter on every hashtable slot we attempt to allocate on
-				if (bits.ref == u16{umax})
-				{
-					fmt::throw_exception("Thread limit (65535) reached for a single hashtable slot.");
-					return nullptr;
-				}
-
-				if (bits.iptr == 0)
-					bits.iptr = ptr;
-				if (bits.maxc == 0 && bits.iptr != ptr && bits.ref)
-					bits.maxc = 1;
-				if (bits.maxd < limit)
-					bits.maxd = limit;
-
-				bits.ref++;
-
-				if (bits.bits != (1ull << max_threads) - 1)
-				{
-					const u32 id = std::countr_one(bits.bits);
-					bits.bits |= bits.bits + 1;
-					return _this->slots + id;
-				}
-
+				fmt::throw_exception("Thread limit (65535) reached for a single hashtable slot.");
 				return nullptr;
-			});
+			}
+
+			if (bits.iptr == 0)
+				bits.iptr = ptr;
+			if (bits.maxc == 0 && bits.iptr != ptr && bits.ref)
+				bits.maxc = 1;
+			if (bits.maxd < limit)
+				bits.maxd = limit;
+
+			bits.ref++;
+
+			if (bits.bits != (1ull << max_threads) - 1)
+			{
+				const u32 id = std::countr_one(bits.bits);
+				bits.bits |= bits.bits + 1;
+				return _this->slots + id;
+			}
+
+			return nullptr;
+		});
 
 		if (slot)
 		{
@@ -792,14 +806,14 @@ void root_info::slot_free(uptr iptr, atomic_t<u16>* slot, u32 tls_slot) noexcept
 	{
 		// Reset reference counter and allocation bit in every slot
 		curr->bits.atomic_op([&](slot_allocator& bits)
-			{
-				ensure(bits.ref--);
+		{
+			ensure(bits.ref--);
 
-				if (_this == curr.current())
-				{
-					bits.bits &= ~(1ull << diff);
-				}
-			});
+			if (_this == curr.current())
+			{
+				bits.bits &= ~(1ull << diff);
+			}
+		});
 
 		if (_this == curr.current())
 		{
@@ -832,7 +846,7 @@ FORCE_INLINE auto root_info::slot_search(uptr iptr, F func) noexcept
 		{
 			if (u16 cond_id = _this->slots[std::countr_zero(bits)])
 			{
-				rx::prefetch_read(s_cond_list + cond_id);
+				utils::prefetch_read(s_cond_list + cond_id);
 				cond_ids[cond_count++] = cond_id;
 			}
 		}
@@ -936,7 +950,7 @@ atomic_wait_engine::wait(const void* data, u32 old_value, u64 timeout, atomic_wa
 
 	const auto stamp0 = utils::get_unique_tsc();
 
-	const uptr iptr = reinterpret_cast<uptr>(data) & (~s_ref_mask >> 16);
+	const uptr iptr = reinterpret_cast<uptr>(data);
 
 	uptr iptr_ext[atomic_wait::max_list - 1]{};
 
@@ -957,7 +971,7 @@ atomic_wait_engine::wait(const void* data, u32 old_value, u64 timeout, atomic_wa
 				}
 			}
 
-			iptr_ext[ext_size] = reinterpret_cast<uptr>(e->data) & (~s_ref_mask >> 16);
+			iptr_ext[ext_size] = reinterpret_cast<uptr>(e->data);
 			ext_size++;
 		}
 	}
@@ -1025,7 +1039,7 @@ atomic_wait_engine::wait(const void* data, u32 old_value, u64 timeout, atomic_wa
 
 	// Can skip unqueue process if true
 #if defined(USE_FUTEX) || defined(USE_STD)
-	[[maybe_unused]] constexpr bool fallback = true;
+	constexpr bool fallback = true;
 #else
 	bool fallback = false;
 #endif
@@ -1044,7 +1058,7 @@ atomic_wait_engine::wait(const void* data, u32 old_value, u64 timeout, atomic_wa
 
 #ifdef USE_FUTEX
 		struct timespec ts;
-		ts.tv_sec = timeout / 1'000'000'000;
+		ts.tv_sec  = timeout / 1'000'000'000;
 		ts.tv_nsec = timeout % 1'000'000'000;
 
 		const u32 val = cond->sync;
@@ -1139,9 +1153,9 @@ atomic_wait_engine::wait(const void* data, u32 old_value, u64 timeout, atomic_wa
 		}
 	}
 
-#if defined(_WIN32) && !defined(__GNUC__)
 	while (!fallback)
 	{
+#if defined(_WIN32)
 		static LARGE_INTEGER instant{};
 
 		if (cond->wakeup(1))
@@ -1167,8 +1181,8 @@ atomic_wait_engine::wait(const void* data, u32 old_value, u64 timeout, atomic_wa
 		}
 
 		continue;
-	}
 #endif
+	}
 
 #ifdef USE_STD
 	if (lock)
@@ -1241,7 +1255,7 @@ static u32 alert_sema(u32 cond_id, u32 size)
 	return ok;
 }
 
-void atomic_wait_engine::set_wait_callback(bool (*cb)(const void*, u64, u64))
+void atomic_wait_engine::set_wait_callback(bool(*cb)(const void*, u64, u64))
 {
 	if (cb)
 	{
@@ -1253,7 +1267,7 @@ void atomic_wait_engine::set_wait_callback(bool (*cb)(const void*, u64, u64))
 	}
 }
 
-void atomic_wait_engine::set_one_time_use_wait_callback(bool (*cb)(u64 progress))
+void atomic_wait_engine::set_one_time_use_wait_callback(bool(*cb)(u64 progress))
 {
 	s_tls_one_time_wait_cb = cb;
 }
@@ -1267,17 +1281,17 @@ void atomic_wait_engine::notify_one(const void* data)
 		return;
 	}
 #endif
-	const uptr iptr = reinterpret_cast<uptr>(data) & (~s_ref_mask >> 16);
+	const uptr iptr = reinterpret_cast<uptr>(data);
 
 	root_info::slot_search(iptr, [&](u32 cond_id)
+	{
+		if (alert_sema(cond_id, 4))
 		{
-			if (alert_sema(cond_id, 4))
-			{
-				return true;
-			}
+			return true;
+		}
 
-			return false;
-		});
+		return false;
+	});
 }
 
 SAFE_BUFFERS(void)
@@ -1290,7 +1304,7 @@ atomic_wait_engine::notify_all(const void* data)
 		return;
 	}
 #endif
-	const uptr iptr = reinterpret_cast<uptr>(data) & (~s_ref_mask >> 16);
+	const uptr iptr = reinterpret_cast<uptr>(data);
 
 	// Array count for batch notification
 	u32 count = 0;
@@ -1299,24 +1313,24 @@ atomic_wait_engine::notify_all(const void* data)
 	u32 cond_ids[128];
 
 	root_info::slot_search(iptr, [&](u32 cond_id)
+	{
+		if (count >= 128)
 		{
-			if (count >= 128)
-			{
-				// Unusual big amount of sema: fallback to notify_one alg
-				alert_sema(cond_id, 4);
-				return false;
-			}
-
-			u32 res = alert_sema<true>(cond_id, 4);
-
-			if (~res <= u16{umax})
-			{
-				// Add to the end of the "stack"
-				*(std::end(cond_ids) - ++count) = ~res;
-			}
-
+			// Unusual big amount of sema: fallback to notify_one alg
+			alert_sema(cond_id, 4);
 			return false;
-		});
+		}
+
+		u32 res = alert_sema<true>(cond_id, 4);
+
+		if (~res <= u16{umax})
+		{
+			// Add to the end of the "stack"
+			*(std::end(cond_ids) - ++count) = ~res;
+		}
+
+		return false;
+	});
 
 	// Try alert
 	for (u32 i = 0; i < count; i++)
@@ -1366,7 +1380,7 @@ atomic_wait_engine::notify_all(const void* data)
 
 namespace atomic_wait
 {
-	extern void parse_hashtable(bool (*cb)(u64 id, u32 refs, u64 ptr, u32 max_coll))
+	extern void parse_hashtable(bool(*cb)(u64 id, u32 refs, u64 ptr, u32 max_coll))
 	{
 		for (u64 i = 0; i < s_hashtable_size; i++)
 		{
@@ -1379,4 +1393,4 @@ namespace atomic_wait
 			}
 		}
 	}
-} // namespace atomic_wait
+}

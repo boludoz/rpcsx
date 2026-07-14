@@ -3,8 +3,7 @@
 enum class ppu_decoder_type : unsigned
 {
 	_static,
-	llvm_legacy,
-	interpreter,
+	llvm,
 };
 
 enum class spu_decoder_type : unsigned
@@ -88,11 +87,11 @@ enum class audio_format
 
 enum class audio_format_flag : unsigned
 {
-	lpcm_2_48khz = 0x00000000,   // Linear PCM 2 Ch. 48 kHz (always available)
+	lpcm_2_48khz   = 0x00000000, // Linear PCM 2 Ch. 48 kHz (always available)
 	lpcm_5_1_48khz = 0x00000001, // Linear PCM 5.1 Ch. 48 kHz
 	lpcm_7_1_48khz = 0x00000002, // Linear PCM 7.1 Ch. 48 kHz
-	ac3 = 0x00000004,            // Dolby Digital 5.1 Ch.
-	dts = 0x00000008,            // DTS 5.1 Ch.
+	ac3            = 0x00000004, // Dolby Digital 5.1 Ch.
+	dts            = 0x00000008, // DTS 5.1 Ch.
 };
 
 enum class audio_channel_layout
@@ -117,7 +116,10 @@ enum class camera_handler
 {
 	null,
 	fake,
-	qt
+	qt,
+#ifdef HAVE_SDL3
+	sdl,
+#endif
 };
 
 enum class camera_flip
@@ -224,6 +226,13 @@ enum class msaa_level
 	_auto
 };
 
+enum class framebuffer_aliasing_bias
+{
+	_auto,
+	prefer_color,
+	prefer_depth,
+};
+
 enum class detail_level
 {
 	none,
@@ -249,17 +258,23 @@ enum class rsx_fifo_mode : unsigned
 	as_ps3,
 };
 
-enum class tsx_usage
-{
-	disabled,
-	enabled,
-	forced,
-};
-
 enum class enter_button_assign
 {
 	circle, // CELL_SYSUTIL_ENTER_BUTTON_ASSIGN_CIRCLE
 	cross   // CELL_SYSUTIL_ENTER_BUTTON_ASSIGN_CROSS
+};
+
+enum class date_format
+{
+	yyyymmdd, // CELL_SYSUTIL_DATE_FMT_YYYYMMDD
+	ddmmyyyy, // CELL_SYSUTIL_DATE_FMT_DDMMYYYY
+	mmddyyyy  // CELL_SYSUTIL_DATE_FMT_MMDDYYYY
+};
+
+enum class time_format
+{
+	clock12, // CELL_SYSUTIL_TIME_FMT_CLOCK12
+	clock24  // CELL_SYSUTIL_TIME_FMT_CLOCK24
 };
 
 enum class np_internet_status
@@ -346,6 +361,7 @@ enum class stereo_render_mode_options
 	anaglyph_magenta_cyan,
 	anaglyph_trioscopic,
 	anaglyph_amber_blue,
+	anaglyph_custom,
 };
 
 enum class xfloat_accuracy
@@ -354,4 +370,11 @@ enum class xfloat_accuracy
 	approximate,
 	relaxed, // Approximate accuracy for only the "FCGT", "FNMS", "FREST" AND "FRSQEST" instructions
 	inaccurate
+};
+
+enum class vsync_mode
+{
+	off,
+	adaptive,
+	full,
 };

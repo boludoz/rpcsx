@@ -6,8 +6,8 @@
 #include "Emu/System.h"
 #include "Emu/VFS.h"
 #include "util/sysinfo.hpp"
-#include "util/File.h"
-#include "util/Thread.h"
+#include "Utilities/File.h"
+#include "Utilities/Thread.h"
 #include "Crypto/unpkg.h"
 #include "Crypto/unself.h"
 #include "Crypto/unedat.h"
@@ -79,11 +79,11 @@ namespace rpcs3::utils
 
 		// Run PKG unpacking asynchronously
 		named_thread worker("PKG Installer", [&]
-			{
-				std::deque<std::string> bootables;
-				const package_install_result result = package_reader::extract_data(reader, bootables);
-				return result.error == package_install_result::error_type::no_error;
-			});
+		{
+			std::deque<std::string> bootables;
+			const package_install_result result = package_reader::extract_data(reader, bootables);
+			return result.error == package_install_result::error_type::no_error;
+		});
 
 		// Wait for the completion
 		while (std::this_thread::sleep_for(5ms), worker <= thread_state::aborting)
@@ -101,15 +101,52 @@ namespace rpcs3::utils
 		return worker();
 	}
 
+	std::vector<std::pair<std::string, u64>> get_vfs_disk_usage()
+	{
+		std::vector<std::pair<std::string, u64>> disk_usage;
+
+		if (const u64 data_size = fs::get_dir_size(rpcs3::utils::get_hdd0_dir(), 1); data_size != umax)
+		{
+			disk_usage.push_back({"dev_hdd0", data_size});
+		}
+
+		if (const u64 data_size = fs::get_dir_size(rpcs3::utils::get_hdd1_dir(), 1); data_size != umax)
+		{
+			disk_usage.push_back({"dev_hdd1", data_size});
+		}
+
+		if (const u64 data_size = fs::get_dir_size(rpcs3::utils::get_flash_dir(), 1); data_size != umax)
+		{
+			disk_usage.push_back({"dev_flash", data_size});
+		}
+
+		if (const u64 data_size = fs::get_dir_size(rpcs3::utils::get_flash2_dir(), 1); data_size != umax)
+		{
+			disk_usage.push_back({"dev_flash2", data_size});
+		}
+
+		if (const u64 data_size = fs::get_dir_size(rpcs3::utils::get_flash3_dir(), 1); data_size != umax)
+		{
+			disk_usage.push_back({"dev_flash3", data_size});
+		}
+
+		if (const u64 data_size = fs::get_dir_size(rpcs3::utils::get_bdvd_dir(), 1); data_size != umax)
+		{
+			disk_usage.push_back({"dev_bdvd", data_size});
+		}
+
+		if (const u64 data_size = fs::get_dir_size(rpcs3::utils::get_games_dir(), 1); data_size != umax)
+		{
+			disk_usage.push_back({"games", data_size});
+		}
+
+		return disk_usage;
+	}
+
 	std::string get_emu_dir()
 	{
 		const std::string& emu_dir_ = g_cfg_vfs.emulator_dir;
 		return emu_dir_.empty() ? fs::get_config_dir() : emu_dir_;
-	}
-
-	std::string get_games_dir()
-	{
-		return g_cfg_vfs.get(g_cfg_vfs.games_dir, get_emu_dir());
 	}
 
 	std::string get_hdd0_dir()
@@ -120,6 +157,61 @@ namespace rpcs3::utils
 	std::string get_hdd1_dir()
 	{
 		return g_cfg_vfs.get(g_cfg_vfs.dev_hdd1, get_emu_dir());
+	}
+
+	std::string get_flash_dir()
+	{
+		return g_cfg_vfs.get(g_cfg_vfs.dev_flash, get_emu_dir());
+	}
+
+	std::string get_flash2_dir()
+	{
+		return g_cfg_vfs.get(g_cfg_vfs.dev_flash2, get_emu_dir());
+	}
+
+	std::string get_flash3_dir()
+	{
+		return g_cfg_vfs.get(g_cfg_vfs.dev_flash3, get_emu_dir());
+	}
+
+	std::string get_bdvd_dir()
+	{
+		return g_cfg_vfs.get(g_cfg_vfs.dev_bdvd, get_emu_dir());
+	}
+
+	std::string get_games_dir()
+	{
+		return g_cfg_vfs.get(g_cfg_vfs.games_dir, get_emu_dir());
+	}
+
+	std::string get_hdd0_game_dir()
+	{
+		return get_hdd0_dir() + "game/";
+	}
+
+	std::string get_hdd0_locks_dir()
+	{
+		return get_hdd0_game_dir() + "$locks/";
+	}
+
+	std::string get_hdd1_cache_dir()
+	{
+		return get_hdd1_dir() + "caches/";
+	}
+
+	std::string get_games_shortcuts_dir()
+	{
+		return get_games_dir() + "shortcuts/";
+	}
+
+	u64 get_cache_disk_usage()
+	{
+		if (const u64 data_size = fs::get_dir_size(rpcs3::utils::get_cache_dir(), 1); data_size != umax)
+		{
+			return data_size;
+		}
+
+		return 0;
 	}
 
 	std::string get_cache_dir()
@@ -147,6 +239,113 @@ namespace rpcs3::utils
 		}
 
 		return cache_dir;
+	}
+
+	std::string get_redump_db_path()
+	{
+		return fs::get_config_dir(true) + "redump.dat";
+	}
+
+	std::string get_redump_db_download_url()
+	{
+		return "https://api.rpcs3.net/redump/?api=v1";
+	}
+
+	std::string get_redump_key_dir()
+	{
+		return get_data_dir() + "redump/";
+	}
+
+	std::string get_data_dir()
+	{
+		return fs::get_config_dir() + "data/";
+	}
+
+	std::string get_icons_dir()
+	{
+		return fs::get_config_dir() + "Icons/game_icons/";
+	}
+
+	std::string get_savestates_dir()
+	{
+		return fs::get_config_dir() + "savestates/";
+	}
+
+	std::string get_captures_dir()
+	{
+		return fs::get_config_dir() + "captures/";
+	}
+
+	std::string get_recordings_dir()
+	{
+		return fs::get_config_dir() + "recordings/";
+	}
+
+	std::string get_screenshots_dir()
+	{
+		return fs::get_config_dir() + "screenshots/";
+	}
+
+	std::string get_cache_dir_by_serial(const std::string& serial)
+	{
+		return get_cache_dir() + (serial == "vsh.self" ? "vsh" : serial);
+	}
+
+	std::string get_data_dir(const std::string& serial)
+	{
+		return get_data_dir() + serial;
+	}
+
+	std::string get_icons_dir(const std::string& serial)
+	{
+		return get_icons_dir() + serial;
+	}
+
+	std::string get_savestates_dir(const std::string& serial)
+	{
+		return get_savestates_dir() + serial;
+	}
+
+	std::string get_recordings_dir(const std::string& serial)
+	{
+		return get_recordings_dir() + serial;
+	}
+
+	std::string get_screenshots_dir(const std::string& serial)
+	{
+		return get_screenshots_dir() + serial;
+	}
+
+	std::set<std::string> get_dir_list(const std::string& base_dir, const std::string& serial)
+	{
+		std::set<std::string> dir_list;
+
+		for (const auto& entry : fs::dir(base_dir))
+		{
+			// Check for sub folder starting with serial (e.g. BCES01118_BCES01118)
+			if (entry.is_directory && entry.name.starts_with(serial))
+			{
+				dir_list.insert(base_dir + entry.name);
+			}
+		}
+
+		return dir_list;
+	}
+
+	std::set<std::string> get_file_list(const std::string& base_dir, const std::string& serial)
+	{
+		std::set<std::string> file_list;
+
+		for (const auto& entry : fs::dir(base_dir))
+		{
+			// Check for files starting with serial (e.g. BCES01118_BCES01118)
+			if (!entry.is_directory && entry.name.starts_with(serial))
+			{
+				file_list.insert(base_dir + entry.name);
+			}
+		}
+
+		return file_list;
 	}
 
 	std::string get_rap_file_path(const std::string_view& rap)
@@ -336,8 +535,7 @@ namespace rpcs3::utils
 
 	std::string get_custom_input_config_path(const std::string& title_id)
 	{
-		if (title_id.empty())
-			return "";
+		if (title_id.empty()) return "";
 		return get_input_config_dir(title_id) + g_cfg_input_configs.default_config + ".yml";
 	}
 
@@ -358,7 +556,7 @@ namespace rpcs3::utils
 		const auto find_content = [&](const std::string& name, const std::string& extension) -> std::string
 		{
 			// Check localized content first
-			for (bool localized : {true, false})
+			for (bool localized : { true, false })
 			{
 				const std::string filename = fmt::format("/%s%s.%s", name, localized ? locale_suffix : std::string(), extension);
 
@@ -434,4 +632,4 @@ namespace rpcs3::utils
 		sys_log.error("Failed to compare the %s numbers for title ID %s: '%s'-'%s'", is_fw ? "firmware version" : "version", serial, v0, v1);
 		return false;
 	}
-} // namespace rpcs3::utils
+}

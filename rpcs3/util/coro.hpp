@@ -10,21 +10,21 @@
 #if defined(__clang__) && (__cpp_impl_coroutine == 123)
 namespace std::experimental
 {
-	using ::std::coroutine_handle;
 	using ::std::coroutine_traits;
-} // namespace std::experimental
+	using ::std::coroutine_handle;
+}
 #endif
 #elif __has_include(<experimental/coroutine>)
 #include <experimental/coroutine>
 
 namespace std
 {
-	using experimental::coroutine_handle;
 	using experimental::coroutine_traits;
+	using experimental::coroutine_handle;
 	using experimental::noop_coroutine_handle;
 	using experimental::suspend_always;
 	using experimental::suspend_never;
-} // namespace std
+}
 #endif
 
 #include <iterator>
@@ -43,10 +43,7 @@ namespace stx
 		{
 			struct final_suspend_t
 			{
-				constexpr bool await_ready() const noexcept
-				{
-					return false;
-				}
+				constexpr bool await_ready() const noexcept { return false; }
 
 				template <typename P>
 				std::coroutine_handle<> await_suspend(std::coroutine_handle<P> h) noexcept
@@ -60,14 +57,8 @@ namespace stx
 			constexpr lazy_promise_base() noexcept = default;
 			lazy_promise_base(const lazy_promise_base&) = delete;
 			lazy_promise_base& operator=(const lazy_promise_base&) = delete;
-			std::suspend_always initial_suspend()
-			{
-				return {};
-			}
-			final_suspend_t final_suspend() noexcept
-			{
-				return {};
-			}
+			std::suspend_always initial_suspend() { return {}; }
+			final_suspend_t final_suspend() noexcept { return {}; }
 			void unhandled_exception() {}
 
 		protected:
@@ -130,7 +121,7 @@ namespace stx
 			void return_void() noexcept {}
 			void result() {}
 		};
-	} // namespace detail
+	}
 
 	template <typename T = void>
 	struct [[nodiscard]] lazy
@@ -177,7 +168,7 @@ namespace stx
 			return !m_handle || m_handle.done();
 		}
 
-		auto operator co_await() const& noexcept
+		auto operator co_await() const & noexcept
 		{
 			struct awaitable : awaitable_base
 			{
@@ -192,7 +183,7 @@ namespace stx
 			return awaitable{m_handle};
 		}
 
-		auto operator co_await() const&& noexcept
+		auto operator co_await() const && noexcept
 		{
 			struct awaitable : awaitable_base
 			{
@@ -247,14 +238,8 @@ namespace stx
 
 			generator<T> get_return_object() noexcept;
 
-			constexpr std::suspend_always initial_suspend() const noexcept
-			{
-				return {};
-			}
-			constexpr std::suspend_always final_suspend() const noexcept
-			{
-				return {};
-			}
+			constexpr std::suspend_always initial_suspend() const noexcept { return {}; }
+			constexpr std::suspend_always final_suspend() const noexcept { return {}; }
 			void unhandled_exception() {}
 
 			std::suspend_always yield_value(std::remove_reference_t<T>& value) noexcept
@@ -287,7 +272,7 @@ namespace stx
 		{
 		};
 
-		template <typename T>
+		template<typename T>
 		struct generator_iterator
 		{
 			using iterator_category = std::input_iterator_tag;
@@ -330,9 +315,9 @@ namespace stx
 		private:
 			std::coroutine_handle<generator_promise<T>> m_coro;
 		};
-	} // namespace detail
+	}
 
-	template <typename T>
+	template<typename T>
 	struct [[nodiscard]] generator
 	{
 		using promise_type = detail::generator_promise<T>;
@@ -387,4 +372,4 @@ namespace stx
 	{
 		return generator<T>{std::coroutine_handle<generator_promise<T>>::from_promise(*this)};
 	}
-} // namespace stx
+}

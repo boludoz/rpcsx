@@ -1,8 +1,10 @@
 #include "stdafx.h"
 
-#include "util/mutex.h"
+#include "Utilities/mutex.h"
 #include "VKRenderPass.h"
 #include "vkutils/image.h"
+
+#include "Emu/RSX/Common/unordered_map.hpp"
 
 namespace vk
 {
@@ -13,11 +15,11 @@ namespace vk
 	};
 
 	atomic_t<u64> g_cached_renderpass_key = 0;
-	VkRenderPass g_cached_renderpass = VK_NULL_HANDLE;
-	std::unordered_map<VkCommandBuffer, active_renderpass_info_t> g_current_renderpass;
+	VkRenderPass  g_cached_renderpass = VK_NULL_HANDLE;
+	rsx::unordered_map<VkCommandBuffer, active_renderpass_info_t>  g_current_renderpass;
 
 	shared_mutex g_renderpass_cache_mutex;
-	std::unordered_map<u64, VkRenderPass> g_renderpass_cache;
+	rsx::unordered_map<u64, VkRenderPass> g_renderpass_cache;
 
 	// Key structure
 	// 0-7 color_format
@@ -64,16 +66,15 @@ namespace vk
 
 		struct
 		{
-			u64 color_format : 8;
-			u64 depth_format : 8;
-			u64 sample_count : 6;
-			u64 layout_blob : 15;
+			u64 color_format  : 8;
+			u64 depth_format  : 8;
+			u64 sample_count  : 6;
+			u64 layout_blob   : 15;
 			u64 input_attachments_mask : 5;
 		};
 
 		renderpass_key_blob(u64 encoded_) : encoded(encoded_)
-		{
-		}
+		{}
 
 		// Encoders
 		inline void set_layout(u32 index, VkImageLayout layout)
@@ -202,10 +203,10 @@ namespace vk
 		return key.encoded;
 	}
 
-	u64 get_renderpass_key(VkFormat surface_format)
+	u64 get_renderpass_key(VkFormat surface_format, u8 sample_count)
 	{
 		renderpass_key_blob key(0);
-		key.sample_count = 1;
+		key.sample_count = sample_count;
 
 		switch (surface_format)
 		{
@@ -220,6 +221,27 @@ namespace vk
 			key.color_format = static_cast<u64>(surface_format);
 			key.layout_blob = static_cast<u64>(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 			break;
+		}
+
+		return key.encoded;
+	}
+
+	u64 get_renderpass_key(VkFormat color_format, VkFormat depth_format, u8 sample_count)
+	{
+		renderpass_key_blob key(0);
+		key.sample_count = sample_count;
+
+		u32 image_index = 0;
+		if (color_format != VK_FORMAT_UNDEFINED)
+		{
+			key.set_format(color_format);
+			key.set_layout(image_index++, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+		}
+
+		if (depth_format != VK_FORMAT_UNDEFINED)
+		{
+			key.set_format(depth_format);
+			key.set_layout(image_index++, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 		}
 
 		return key.encoded;
@@ -267,7 +289,7 @@ namespace vk
 		}
 
 		u32 attachment_count = 0;
-		for (const auto& layout : rtv_layouts)
+		for (const auto &layout : rtv_layouts)
 		{
 			VkAttachmentDescription color_attachment_description = {};
 			color_attachment_description.format = color_format;
@@ -280,7 +302,7 @@ namespace vk
 			color_attachment_description.finalLayout = layout;
 
 			attachments.push_back(color_attachment_description);
-			attachment_references.push_back({attachment_count++, layout});
+			attachment_references.push_back({ attachment_count++, layout });
 		}
 
 		if (depth_format)
@@ -296,14 +318,14 @@ namespace vk
 			depth_attachment_description.finalLayout = dsv_layout;
 			attachments.push_back(depth_attachment_description);
 
-			attachment_references.push_back({attachment_count, dsv_layout});
+			attachment_references.push_back({ attachment_count, dsv_layout });
 		}
 
 		VkSubpassDescription subpass = {};
 		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 		subpass.colorAttachmentCount = attachment_count;
-		subpass.pColorAttachments = attachment_count ? attachment_references.data() : nullptr;
-		subpass.pDepthStencilAttachment = depth_format ? &attachment_references.back() : nullptr;
+		subpass.pColorAttachments = attachment_count? attachment_references.data() : nullptr;
+		subpass.pDepthStencilAttachment = depth_format? &attachment_references.back() : nullptr;
 
 		const auto input_attachments = key.get_input_attachments();
 		if (!input_attachments.empty())
@@ -320,7 +342,7 @@ namespace vk
 		rp_info.pSubpasses = &subpass;
 
 		VkRenderPass result;
-		CHECK_RESULT(VK_GET_SYMBOL(vkCreateRenderPass)(dev, &rp_info, NULL, &result));
+		CHECK_RESULT(vkCreateRenderPass(dev, &rp_info, NULL, &result));
 
 		g_renderpass_cache[renderpass_key] = result;
 		return result;
@@ -334,9 +356,9 @@ namespace vk
 		g_current_renderpass.clear();
 
 		// Destroy cache
-		for (const auto& renderpass : g_renderpass_cache)
+		for (const auto &renderpass : g_renderpass_cache)
 		{
-			VK_GET_SYMBOL(vkDestroyRenderPass)(dev, renderpass.second, nullptr);
+			vkDestroyRenderPass(dev, renderpass.second, nullptr);
 		}
 
 		g_renderpass_cache.clear();
@@ -363,8 +385,8 @@ namespace vk
 		rp_begin.renderArea.extent.width = framebuffer_region.width;
 		rp_begin.renderArea.extent.height = framebuffer_region.height;
 
-		VK_GET_SYMBOL(vkCmdBeginRenderPass)(cmd, &rp_begin, VK_SUBPASS_CONTENTS_INLINE);
-		renderpass_info = {pass, target};
+		vkCmdBeginRenderPass(cmd, &rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+		renderpass_info = { pass, target };
 	}
 
 	void begin_renderpass(VkDevice dev, const vk::command_buffer& cmd, u64 renderpass_key, VkFramebuffer target, const coordu& framebuffer_region)
@@ -380,7 +402,7 @@ namespace vk
 
 	void end_renderpass(const vk::command_buffer& cmd)
 	{
-		VK_GET_SYMBOL(vkCmdEndRenderPass)(cmd);
+		vkCmdEndRenderPass(cmd);
 		g_current_renderpass[cmd] = {};
 	}
 
@@ -394,4 +416,4 @@ namespace vk
 		const auto& active = g_current_renderpass[cmd];
 		op(cmd, active.pass, active.fbo);
 	}
-} // namespace vk
+}

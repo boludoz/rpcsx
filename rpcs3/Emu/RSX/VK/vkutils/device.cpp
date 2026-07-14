@@ -2,6 +2,10 @@
 #include "instance.h"
 #include "util/logs.hpp"
 #include "Emu/system_config.h"
+#include <vulkan/vulkan_core.h>
+#ifdef __APPLE__
+#include <vulkan/vulkan_beta.h>
+#endif
 
 namespace vk
 {
@@ -12,123 +16,119 @@ namespace vk
 	{
 		if (!allow_extensions)
 		{
-			VK_GET_SYMBOL(vkGetPhysicalDeviceFeatures)(dev, &features);
+			vkGetPhysicalDeviceFeatures(dev, &features);
 			return;
 		}
 
 		supported_extensions instance_extensions(supported_extensions::instance);
 		supported_extensions device_extensions(supported_extensions::device, nullptr, dev);
 
-		if (!instance_extensions.is_supported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME))
+		VkPhysicalDeviceFeatures2KHR features2;
+		features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+		features2.pNext = nullptr;
+
+		VkPhysicalDeviceFloat16Int8FeaturesKHR shader_support_info{};
+		VkPhysicalDeviceDescriptorIndexingFeatures descriptor_indexing_info{};
+		VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT fbo_loops_info{};
+		VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR shader_barycentric_info{};
+		VkPhysicalDeviceCustomBorderColorFeaturesEXT custom_border_color_info{};
+		VkPhysicalDeviceBorderColorSwizzleFeaturesEXT border_color_swizzle_info{};
+		VkPhysicalDeviceFaultFeaturesEXT device_fault_info{};
+		VkPhysicalDeviceMultiDrawFeaturesEXT multidraw_info{};
+
+		// Core features
+		shader_support_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
+		features2.pNext           = &shader_support_info;
+
+		descriptor_indexing_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+		descriptor_indexing_info.pNext = features2.pNext;
+		features2.pNext                = &descriptor_indexing_info;
+		descriptor_indexing_support    = true;
+
+		// Optional features
+		if (device_extensions.is_supported(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME))
 		{
-			VK_GET_SYMBOL(vkGetPhysicalDeviceFeatures)(dev, &features);
+			fbo_loops_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_FEATURES_EXT;
+			fbo_loops_info.pNext = features2.pNext;
+			features2.pNext      = &fbo_loops_info;
 		}
-		else
+
+		if (device_extensions.is_supported(VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME))
 		{
-			VkPhysicalDeviceFeatures2KHR features2;
-			features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-			features2.pNext = nullptr;
+			shader_barycentric_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR;
+			shader_barycentric_info.pNext = features2.pNext;
+			features2.pNext               = &shader_barycentric_info;
+		}
 
-			VkPhysicalDeviceFloat16Int8FeaturesKHR shader_support_info{};
-			VkPhysicalDeviceDescriptorIndexingFeatures descriptor_indexing_info{};
-			VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT fbo_loops_info{};
-			VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR shader_barycentric_info{};
-			VkPhysicalDeviceCustomBorderColorFeaturesEXT custom_border_color_info{};
-			VkPhysicalDeviceBorderColorSwizzleFeaturesEXT border_color_swizzle_info{};
-			VkPhysicalDeviceFaultFeaturesEXT device_fault_info{};
+		if (device_extensions.is_supported(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME))
+		{
+			custom_border_color_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT;
+			custom_border_color_info.pNext = features2.pNext;
+			features2.pNext                = &custom_border_color_info;
+		}
 
-			if (device_extensions.is_supported(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME))
-			{
-				shader_support_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT16_INT8_FEATURES_KHR;
-				features2.pNext = &shader_support_info;
-			}
+		if (device_extensions.is_supported(VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME))
+		{
+			border_color_swizzle_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BORDER_COLOR_SWIZZLE_FEATURES_EXT;
+			border_color_swizzle_info.pNext = features2.pNext;
+			features2.pNext                 = &border_color_swizzle_info;
+		}
 
-			if (device_extensions.is_supported(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME))
-			{
-				descriptor_indexing_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT;
-				descriptor_indexing_info.pNext = features2.pNext;
-				features2.pNext = &descriptor_indexing_info;
-				descriptor_indexing_support = true;
-			}
+		if (device_extensions.is_supported(VK_EXT_DEVICE_FAULT_EXTENSION_NAME))
+		{
+			device_fault_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT;
+			device_fault_info.pNext = features2.pNext;
+			features2.pNext         = &device_fault_info;
+		}
 
-			if (device_extensions.is_supported(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME))
-			{
-				fbo_loops_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_FEATURES_EXT;
-				fbo_loops_info.pNext = features2.pNext;
-				features2.pNext = &fbo_loops_info;
-			}
+		if (device_extensions.is_supported(VK_EXT_MULTI_DRAW_EXTENSION_NAME))
+		{
+			multidraw_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTI_DRAW_FEATURES_EXT;
+			multidraw_info.pNext = features2.pNext;
+			features2.pNext      = &multidraw_info;
+		}
 
-			if (device_extensions.is_supported(VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME))
-			{
-				shader_barycentric_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR;
-				shader_barycentric_info.pNext = features2.pNext;
-				features2.pNext = &shader_barycentric_info;
-			}
+		vkGetPhysicalDeviceFeatures2(dev, &features2);
 
-			if (device_extensions.is_supported(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME))
-			{
-				custom_border_color_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT;
-				custom_border_color_info.pNext = features2.pNext;
-				features2.pNext = &custom_border_color_info;
-			}
+		shader_types_support.allow_float64 = !!features2.features.shaderFloat64;
+		shader_types_support.allow_float16 = !!shader_support_info.shaderFloat16;
+		shader_types_support.allow_int8    = !!shader_support_info.shaderInt8;
 
-			if (device_extensions.is_supported(VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME))
-			{
-				border_color_swizzle_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BORDER_COLOR_SWIZZLE_FEATURES_EXT;
-				border_color_swizzle_info.pNext = features2.pNext;
-				features2.pNext = &border_color_swizzle_info;
-			}
+		custom_border_color_support.supported = !!custom_border_color_info.customBorderColors && !!custom_border_color_info.customBorderColorWithoutFormat;
+		custom_border_color_support.swizzle_extension_supported = border_color_swizzle_info.sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BORDER_COLOR_SWIZZLE_FEATURES_EXT;
+		custom_border_color_support.require_border_color_remap = !border_color_swizzle_info.borderColorSwizzleFromImage;
 
-			if (device_extensions.is_supported(VK_EXT_DEVICE_FAULT_EXTENSION_NAME))
-			{
-				device_fault_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT;
-				device_fault_info.pNext = features2.pNext;
-				features2.pNext = &device_fault_info;
-			}
+		multidraw_support.supported = !!multidraw_info.multiDraw;
+		multidraw_support.max_batch_size = 65536;
 
-			auto _vkGetPhysicalDeviceFeatures2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2KHR>(VK_GET_SYMBOL(vkGetInstanceProcAddr)(parent, "vkGetPhysicalDeviceFeatures2KHR"));
-			ensure(_vkGetPhysicalDeviceFeatures2KHR); // "vkGetInstanceProcAddress failed to find entry point!"
-			_vkGetPhysicalDeviceFeatures2KHR(dev, &features2);
+		optional_features_support.barycentric_coords  = !!shader_barycentric_info.fragmentShaderBarycentric;
+		optional_features_support.framebuffer_loops   = !!fbo_loops_info.attachmentFeedbackLoopLayout;
+		optional_features_support.extended_device_fault = !!device_fault_info.deviceFault;
 
-			shader_types_support.allow_float64 = !!features2.features.shaderFloat64;
-			shader_types_support.allow_float16 = !!shader_support_info.shaderFloat16;
-			shader_types_support.allow_int8 = !!shader_support_info.shaderInt8;
+		features = features2.features;
 
-			custom_border_color_support.supported = !!custom_border_color_info.customBorderColors && !!custom_border_color_info.customBorderColorWithoutFormat;
-			custom_border_color_support.swizzle_extension_supported = border_color_swizzle_info.sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BORDER_COLOR_SWIZZLE_FEATURES_EXT;
-			custom_border_color_support.require_border_color_remap = !border_color_swizzle_info.borderColorSwizzleFromImage;
-
-			optional_features_support.barycentric_coords = !!shader_barycentric_info.fragmentShaderBarycentric;
-			optional_features_support.framebuffer_loops = !!fbo_loops_info.attachmentFeedbackLoopLayout;
-			optional_features_support.extended_device_fault = !!device_fault_info.deviceFault;
-
-			features = features2.features;
-
-			if (descriptor_indexing_support)
-			{
-#define SET_DESCRIPTOR_BITFLAG(field, bit) \
-	if (descriptor_indexing_info.field)    \
-	descriptor_indexing_support.update_after_bind_mask |= (1ull << bit)
-				SET_DESCRIPTOR_BITFLAG(descriptorBindingUniformBufferUpdateAfterBind, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-				SET_DESCRIPTOR_BITFLAG(descriptorBindingSampledImageUpdateAfterBind, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-				SET_DESCRIPTOR_BITFLAG(descriptorBindingSampledImageUpdateAfterBind, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
-				SET_DESCRIPTOR_BITFLAG(descriptorBindingStorageImageUpdateAfterBind, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
-				SET_DESCRIPTOR_BITFLAG(descriptorBindingStorageBufferUpdateAfterBind, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-				SET_DESCRIPTOR_BITFLAG(descriptorBindingUniformTexelBufferUpdateAfterBind, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER);
-				SET_DESCRIPTOR_BITFLAG(descriptorBindingStorageTexelBufferUpdateAfterBind, VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER);
+		descriptor_indexing_support.supported = true; // VK_API_VERSION_1_2
+#define SET_DESCRIPTOR_BITFLAG(field, bit) if (descriptor_indexing_info.field) descriptor_indexing_support.update_after_bind_mask |= (1ull << bit)
+		SET_DESCRIPTOR_BITFLAG(descriptorBindingUniformBufferUpdateAfterBind, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+		SET_DESCRIPTOR_BITFLAG(descriptorBindingSampledImageUpdateAfterBind, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+		SET_DESCRIPTOR_BITFLAG(descriptorBindingSampledImageUpdateAfterBind, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
+		SET_DESCRIPTOR_BITFLAG(descriptorBindingStorageImageUpdateAfterBind, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+		SET_DESCRIPTOR_BITFLAG(descriptorBindingStorageBufferUpdateAfterBind, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+		SET_DESCRIPTOR_BITFLAG(descriptorBindingUniformTexelBufferUpdateAfterBind, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER);
+		SET_DESCRIPTOR_BITFLAG(descriptorBindingStorageTexelBufferUpdateAfterBind, VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER);
 #undef SET_DESCRIPTOR_BITFLAG
-			}
-		}
 
-		optional_features_support.shader_stencil_export = device_extensions.is_supported(VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME);
-		optional_features_support.conditional_rendering = device_extensions.is_supported(VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME);
-		optional_features_support.external_memory_host = device_extensions.is_supported(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
-		optional_features_support.sampler_mirror_clamped = device_extensions.is_supported(VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME);
-		optional_features_support.synchronization_2 = device_extensions.is_supported(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
+		optional_features_support.shader_stencil_export    = device_extensions.is_supported(VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME);
+		optional_features_support.conditional_rendering    = device_extensions.is_supported(VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME);
+		optional_features_support.external_memory_host     = device_extensions.is_supported(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
+		optional_features_support.synchronization_2        = device_extensions.is_supported(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
 		optional_features_support.unrestricted_depth_range = device_extensions.is_supported(VK_EXT_DEPTH_RANGE_UNRESTRICTED_EXTENSION_NAME);
+#ifdef __APPLE__
+		optional_features_support.portability              = device_extensions.is_supported(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+#endif
 
-		optional_features_support.debug_utils = instance_extensions.is_supported(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-		optional_features_support.surface_capabilities_2 = instance_extensions.is_supported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+		optional_features_support.debug_utils              = instance_extensions.is_supported(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+		optional_features_support.surface_capabilities_2   = instance_extensions.is_supported(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
 
 		// Post-initialization checks
 		if (!custom_border_color_support.swizzle_extension_supported)
@@ -138,77 +138,105 @@ namespace vk
 		}
 
 		// v3dv and PanVK support BC1-BC3 which is all we require, support is reported as false since not all formats are supported
-		optional_features_support.texture_compression_bc = features.textureCompressionBC || get_driver_vendor() == driver_vendor::V3DV || get_driver_vendor() == driver_vendor::PANVK;
+		optional_features_support.texture_compression_bc = features.textureCompressionBC
+				|| get_driver_vendor() == driver_vendor::V3DV || get_driver_vendor() == driver_vendor::PANVK;
+
+		// Texel buffer UAB is reported to the trigger for some driver crashes on older NV cards
+		if (get_driver_vendor() == driver_vendor::NVIDIA &&
+			get_chip_class() >= chip_class::NV_kepler &&
+			get_chip_class() <= chip_class::NV_pascal)
+		{
+			// UBOs are unsupported on these cards anyway, disable texel buffers as well
+			descriptor_indexing_support.update_after_bind_mask &= ~(1ull << VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER);
+		}
 	}
 
-	void physical_device::get_physical_device_properties(bool allow_extensions)
+	void physical_device::get_physical_device_properties_0(bool allow_extensions)
 	{
-		VK_GET_SYMBOL(vkGetPhysicalDeviceMemoryProperties)(dev, &memory_properties);
+		// Core properties only
+		vkGetPhysicalDeviceMemoryProperties(dev, &memory_properties);
+		vkGetPhysicalDeviceProperties(dev, &props);
 
 		if (!allow_extensions)
 		{
-			VK_GET_SYMBOL(vkGetPhysicalDeviceProperties)(dev, &props);
 			return;
 		}
 
-		supported_extensions instance_extensions(supported_extensions::instance);
+		VkPhysicalDeviceProperties2KHR properties2;
+		properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR;
+		properties2.pNext = nullptr;
+
+		driver_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES_KHR;
+		driver_properties.pNext = properties2.pNext;
+		properties2.pNext = &driver_properties;
+		vkGetPhysicalDeviceProperties2(dev, &properties2);
+	}
+
+	void physical_device::get_physical_device_properties_1(bool allow_extensions)
+	{
+		// Extended properties. Call after checking for features
+		if (!allow_extensions)
+		{
+			return;
+		}
+
 		supported_extensions device_extensions(supported_extensions::device, nullptr, dev);
 
-		if (!instance_extensions.is_supported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME))
+		VkPhysicalDeviceProperties2KHR properties2;
+		properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR;
+		properties2.pNext = nullptr;
+
+		VkPhysicalDeviceDescriptorIndexingPropertiesEXT descriptor_indexing_props{};
+		VkPhysicalDeviceMultiDrawPropertiesEXT multidraw_props{};
+
+		descriptor_indexing_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES_EXT;
+		descriptor_indexing_props.pNext = properties2.pNext;
+		properties2.pNext = &descriptor_indexing_props;
+
+		if (multidraw_support.supported)
 		{
-			VK_GET_SYMBOL(vkGetPhysicalDeviceProperties)(dev, &props);
+			multidraw_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTI_DRAW_PROPERTIES_EXT;
+			multidraw_props.pNext = properties2.pNext;
+			properties2.pNext = &multidraw_props;
 		}
-		else
+
+		vkGetPhysicalDeviceProperties2(dev, &properties2);
+		props = properties2.properties;
+
+		if (descriptor_indexing_support)
 		{
-			VkPhysicalDeviceProperties2KHR properties2;
-			properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR;
-			properties2.pNext = nullptr;
-
-			VkPhysicalDeviceDescriptorIndexingPropertiesEXT descriptor_indexing_props{};
-
-			if (descriptor_indexing_support)
+			if (descriptor_indexing_props.maxUpdateAfterBindDescriptorsInAllPools < 800'000)
 			{
-				descriptor_indexing_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES_EXT;
-				descriptor_indexing_props.pNext = properties2.pNext;
-				properties2.pNext = &descriptor_indexing_props;
+				rsx_log.error("Physical device does not support enough descriptors for deferred updates to work effectively. Deferred updates are disabled.");
+				descriptor_indexing_support.update_after_bind_mask = 0;
 			}
-
-			if (device_extensions.is_supported(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME))
+			else if (descriptor_indexing_props.maxUpdateAfterBindDescriptorsInAllPools < 2'000'000)
 			{
-				driver_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES_KHR;
-				driver_properties.pNext = properties2.pNext;
-				properties2.pNext = &driver_properties;
+				rsx_log.warning("Physical device reports a low amount of allowed deferred descriptor updates. Draw call threshold will be lowered accordingly.");
+				descriptor_max_draw_calls = 8192;
 			}
+		}
 
-			auto _vkGetPhysicalDeviceProperties2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2KHR>(VK_GET_SYMBOL(vkGetInstanceProcAddr)(parent, "vkGetPhysicalDeviceProperties2KHR"));
-			ensure(_vkGetPhysicalDeviceProperties2KHR);
+		if (multidraw_support.supported)
+		{
+			multidraw_support.max_batch_size = multidraw_props.maxMultiDrawCount;
 
-			_vkGetPhysicalDeviceProperties2KHR(dev, &properties2);
-			props = properties2.properties;
-
-			if (descriptor_indexing_support)
+			if (!multidraw_props.maxMultiDrawCount)
 			{
-				if (descriptor_indexing_props.maxUpdateAfterBindDescriptorsInAllPools < 800'000)
-				{
-					rsx_log.error("Physical device does not support enough descriptors for deferred updates to work effectively. Deferred updates are disabled.");
-					descriptor_indexing_support.update_after_bind_mask = 0;
-				}
-				else if (descriptor_indexing_props.maxUpdateAfterBindDescriptorsInAllPools < 2'000'000)
-				{
-					rsx_log.warning("Physical device reports a low amount of allowed deferred descriptor updates. Draw call threshold will be lowered accordingly.");
-					descriptor_max_draw_calls = 8192;
-				}
+				rsx_log.error("Physical device reports 0 support maxMultiDraw count. Multidraw support will be disabled.");
+				multidraw_support.supported = false;
 			}
 		}
 	}
 
 	void physical_device::create(VkInstance context, VkPhysicalDevice pdev, bool allow_extensions)
 	{
-		dev = pdev;
+		dev    = pdev;
 		parent = context;
 
+		get_physical_device_properties_0(allow_extensions);
 		get_physical_device_features(allow_extensions);
-		get_physical_device_properties(allow_extensions);
+		get_physical_device_properties_1(allow_extensions);
 
 		rsx_log.always()("Found Vulkan-compatible GPU: '%s' running on driver %s", get_name(), get_driver_version());
 
@@ -244,17 +272,6 @@ namespace vk
 	std::string physical_device::get_name() const
 	{
 		return props.deviceName;
-	}
-
-	std::string physical_device::get_driver_name() const
-	{
-		return driver_properties.driverName;
-	}
-
-	std::string physical_device::get_driver_vk_version() const
-	{
-		auto version = driver_properties.conformanceVersion;
-		return fmt::format("%u.%u.%u.%d", version.major, version.minor, version.subminor, version.patch);
 	}
 
 	driver_vendor physical_device::get_driver_vendor() const
@@ -374,8 +391,8 @@ namespace vk
 			// 10 + 8 + 8 + 6
 			const auto major_version = props.driverVersion >> 22;
 			const auto minor_version = (props.driverVersion >> 14) & 0xff;
-			const auto patch = (props.driverVersion >> 6) & 0xff;
-			const auto revision = (props.driverVersion & 0x3f);
+			const auto patch         = (props.driverVersion >> 6) & 0xff;
+			const auto revision      = (props.driverVersion & 0x3f);
 
 			return fmt::format("%u.%u.%u.%u", major_version, minor_version, patch, revision);
 		}
@@ -398,7 +415,7 @@ namespace vk
 			return ::size32(queue_props);
 
 		u32 count = 0;
-		VK_GET_SYMBOL(vkGetPhysicalDeviceQueueFamilyProperties)(dev, &count, nullptr);
+		vkGetPhysicalDeviceQueueFamilyProperties(dev, &count, nullptr);
 
 		return count;
 	}
@@ -408,10 +425,10 @@ namespace vk
 		if (queue_props.empty())
 		{
 			u32 count = 0;
-			VK_GET_SYMBOL(vkGetPhysicalDeviceQueueFamilyProperties)(dev, &count, nullptr);
+			vkGetPhysicalDeviceQueueFamilyProperties(dev, &count, nullptr);
 
 			queue_props.resize(count);
-			VK_GET_SYMBOL(vkGetPhysicalDeviceQueueFamilyProperties)(dev, &count, queue_props.data());
+			vkGetPhysicalDeviceQueueFamilyProperties(dev, &count, queue_props.data());
 		}
 
 		if (queue >= queue_props.size())
@@ -442,7 +459,7 @@ namespace vk
 	// Render Device - The actual usable device
 	void render_device::create(vk::physical_device& pdev, u32 graphics_queue_idx, u32 present_queue_idx, u32 transfer_queue_idx)
 	{
-		float queue_priorities[1] = {0.f};
+		float queue_priorities[1] = { 0.f };
 		pgpu = &pdev;
 
 		ensure(graphics_queue_idx == present_queue_idx || present_queue_idx == umax); // TODO
@@ -488,21 +505,21 @@ namespace vk
 		}
 
 		// Set up instance information
-		std::vector<const char*> requested_extensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+		std::vector<const char*> requested_extensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 
 		// Enable hardware features manually
 		// Currently we require:
 		// 1. Anisotropic sampling
 		// 2. Indexable storage buffers
 		VkPhysicalDeviceFeatures enabled_features{};
-		if (pgpu->shader_types_support.allow_float16)
-		{
-			requested_extensions.push_back(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
-		}
-
 		if (pgpu->custom_border_color_support)
 		{
 			requested_extensions.push_back(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
+		}
+
+		if (pgpu->multidraw_support)
+		{
+			requested_extensions.push_back(VK_EXT_MULTI_DRAW_EXTENSION_NAME);
 		}
 
 		if (pgpu->optional_features_support.conditional_rendering)
@@ -517,24 +534,12 @@ namespace vk
 
 		if (pgpu->optional_features_support.external_memory_host)
 		{
-			requested_extensions.push_back(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME);
 			requested_extensions.push_back(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
 		}
 
 		if (pgpu->optional_features_support.shader_stencil_export)
 		{
 			requested_extensions.push_back(VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME);
-		}
-
-		if (pgpu->optional_features_support.sampler_mirror_clamped)
-		{
-			requested_extensions.push_back(VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME);
-		}
-
-		if (pgpu->descriptor_indexing_support)
-		{
-			requested_extensions.push_back(VK_KHR_MAINTENANCE3_EXTENSION_NAME);
-			requested_extensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
 		}
 
 		if (pgpu->optional_features_support.framebuffer_loops)
@@ -549,19 +554,26 @@ namespace vk
 
 		if (pgpu->optional_features_support.synchronization_2)
 		{
-			requested_extensions.push_back(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
+			requested_extensions.push_back(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME); // VK_API_VERSION_1_3
 		}
 
 		if (pgpu->optional_features_support.extended_device_fault)
 		{
 			requested_extensions.push_back(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
 		}
+		
+#ifdef __APPLE__
+		if (pgpu->optional_features_support.portability)
+		{
+			requested_extensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+		}
+#endif
 
-		enabled_features.robustBufferAccess = ensure(pgpu->features.robustBufferAccess, "robustBufferAccess is unsupported");
+		enabled_features.robustBufferAccess = VK_TRUE;
 		enabled_features.fullDrawIndexUint32 = VK_TRUE;
-		enabled_features.independentBlend = ensure(pgpu->features.independentBlend, "independentBlend is unsupported");
+		enabled_features.independentBlend = VK_TRUE;
 		enabled_features.logicOp = VK_TRUE;
-		enabled_features.depthClamp = pgpu->features.depthClamp;
+		enabled_features.depthClamp = VK_TRUE;
 		enabled_features.depthBounds = VK_TRUE;
 		enabled_features.wideLines = VK_TRUE;
 		enabled_features.largePoints = VK_TRUE;
@@ -587,7 +599,7 @@ namespace vk
 		// enabled_features.shaderCullDistance = VK_TRUE;  // Alt notation of clip distance
 
 		enabled_features.samplerAnisotropy = VK_TRUE;
-		enabled_features.textureCompressionBC = pgpu->optional_features_support.texture_compression_bc;
+		enabled_features.textureCompressionBC = pgpu->features.textureCompressionBC;
 		enabled_features.shaderStorageBufferArrayDynamicIndexing = VK_TRUE;
 
 		// Optionally disable unsupported stuff
@@ -691,28 +703,15 @@ namespace vk
 		device.ppEnabledExtensionNames = requested_extensions.data();
 		device.pEnabledFeatures = &enabled_features;
 
-		VkPhysicalDeviceFloat16Int8FeaturesKHR shader_support_info{};
-		if (pgpu->shader_types_support.allow_float16)
-		{
-			// Allow use of f16 type in shaders if possible
-			shader_support_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT16_INT8_FEATURES_KHR;
-			shader_support_info.shaderFloat16 = VK_TRUE;
-			shader_support_info.pNext = const_cast<void*>(device.pNext);
-			device.pNext = &shader_support_info;
+		VkPhysicalDeviceVulkan12Features vulkan12_features{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+		vulkan12_features.runtimeDescriptorArray = VK_TRUE;
+		vulkan12_features.uniformBufferStandardLayout = VK_TRUE;
+		vulkan12_features.pNext = const_cast<void*>(device.pNext);
+		device.pNext = &vulkan12_features;
 
-			rsx_log.notice("GPU/driver supports float16 data types natively. Using native float16_t variables if possible.");
-		}
-		else
-		{
-			rsx_log.notice("GPU/driver lacks support for float16 data types. All float16_t arithmetic will be emulated with float32_t.");
-		}
-
-		VkPhysicalDeviceDescriptorIndexingFeatures indexing_features{};
 		if (pgpu->descriptor_indexing_support)
 		{
-#define SET_DESCRIPTOR_BITFLAG(field, bit)                                        \
-	if (pgpu->descriptor_indexing_support.update_after_bind_mask & (1ull << bit)) \
-	indexing_features.field = VK_TRUE
+#define SET_DESCRIPTOR_BITFLAG(field, bit) if (pgpu->descriptor_indexing_support.update_after_bind_mask & (1ull << bit)) vulkan12_features.field = VK_TRUE
 			SET_DESCRIPTOR_BITFLAG(descriptorBindingUniformBufferUpdateAfterBind, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 			SET_DESCRIPTOR_BITFLAG(descriptorBindingSampledImageUpdateAfterBind, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 			SET_DESCRIPTOR_BITFLAG(descriptorBindingSampledImageUpdateAfterBind, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
@@ -721,11 +720,25 @@ namespace vk
 			SET_DESCRIPTOR_BITFLAG(descriptorBindingUniformTexelBufferUpdateAfterBind, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER);
 			SET_DESCRIPTOR_BITFLAG(descriptorBindingStorageTexelBufferUpdateAfterBind, VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER);
 #undef SET_DESCRIPTOR_BITFLAG
-
-			indexing_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT;
-			indexing_features.pNext = const_cast<void*>(device.pNext);
-			device.pNext = &indexing_features;
 		}
+
+		if (pgpu->shader_types_support.allow_float16)
+		{
+			// Allow use of f16 type in shaders if possible
+			vulkan12_features.shaderFloat16 = VK_TRUE;
+			rsx_log.notice("GPU/driver supports float16 data types natively. Using native float16_t variables if possible.");
+		}
+		else
+		{
+			rsx_log.notice("GPU/driver lacks support for float16 data types. All float16_t arithmetic will be emulated with float32_t.");
+		}
+
+		// FIXME: Fall back to something. Idk how that would even work though, this really is a hard requirement
+		VkPhysicalDeviceShaderUniformBufferUnsizedArrayFeaturesEXT ubo_unsized_array_feature{};
+		ubo_unsized_array_feature.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_UNIFORM_BUFFER_UNSIZED_ARRAY_FEATURES_EXT;
+		ubo_unsized_array_feature.shaderUniformBufferUnsizedArray = VK_TRUE;
+		ubo_unsized_array_feature.pNext = const_cast<void*>(device.pNext);
+		device.pNext = &ubo_unsized_array_feature;
 
 		VkPhysicalDeviceCustomBorderColorFeaturesEXT custom_border_color_features{};
 		if (pgpu->custom_border_color_support)
@@ -735,6 +748,15 @@ namespace vk
 			custom_border_color_features.customBorderColorWithoutFormat = VK_TRUE;
 			custom_border_color_features.pNext = const_cast<void*>(device.pNext);
 			device.pNext = &custom_border_color_features;
+		}
+
+		VkPhysicalDeviceMultiDrawFeaturesEXT multidraw_features{};
+		if (pgpu->multidraw_support)
+		{
+			multidraw_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTI_DRAW_FEATURES_EXT;
+			multidraw_features.multiDraw = VK_TRUE;
+			multidraw_features.pNext = const_cast<void*>(device.pNext);
+			device.pNext = &multidraw_features;
 		}
 
 		VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT fbo_loop_features{};
@@ -783,7 +805,7 @@ namespace vk
 			device.pNext = &shader_barycentric_info;
 		}
 
-		if (auto error = VK_GET_SYMBOL(vkCreateDevice)(*pgpu, &device, nullptr, &dev))
+		if (auto error = vkCreateDevice(*pgpu, &device, nullptr, &dev))
 		{
 			dump_debug_info(requested_extensions, enabled_features);
 			vk::die_with_error(error);
@@ -797,48 +819,16 @@ namespace vk
 		}
 
 		// Initialize queues
-		VK_GET_SYMBOL(vkGetDeviceQueue)(dev, graphics_queue_idx, 0, &m_graphics_queue);
-		VK_GET_SYMBOL(vkGetDeviceQueue)(dev, transfer_queue_idx, transfer_queue_sub_index, &m_transfer_queue);
+		vkGetDeviceQueue(dev, graphics_queue_idx, 0, &m_graphics_queue);
+		vkGetDeviceQueue(dev, transfer_queue_idx, transfer_queue_sub_index, &m_transfer_queue);
 
 		if (present_queue_idx != umax)
 		{
-			VK_GET_SYMBOL(vkGetDeviceQueue)(dev, present_queue_idx, 0, &m_present_queue);
-		}
-
-		// Import optional function endpoints
-		if (pgpu->optional_features_support.conditional_rendering)
-		{
-			_vkCmdBeginConditionalRenderingEXT = reinterpret_cast<PFN_vkCmdBeginConditionalRenderingEXT>(VK_GET_SYMBOL(vkGetDeviceProcAddr)(dev, "vkCmdBeginConditionalRenderingEXT"));
-			_vkCmdEndConditionalRenderingEXT = reinterpret_cast<PFN_vkCmdEndConditionalRenderingEXT>(VK_GET_SYMBOL(vkGetDeviceProcAddr)(dev, "vkCmdEndConditionalRenderingEXT"));
-		}
-
-		if (pgpu->optional_features_support.debug_utils)
-		{
-			_vkSetDebugUtilsObjectNameEXT = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(VK_GET_SYMBOL(vkGetDeviceProcAddr)(dev, "vkSetDebugUtilsObjectNameEXT"));
-			_vkQueueInsertDebugUtilsLabelEXT = reinterpret_cast<PFN_vkQueueInsertDebugUtilsLabelEXT>(VK_GET_SYMBOL(vkGetDeviceProcAddr)(dev, "vkQueueInsertDebugUtilsLabelEXT"));
-			_vkCmdInsertDebugUtilsLabelEXT = reinterpret_cast<PFN_vkCmdInsertDebugUtilsLabelEXT>(VK_GET_SYMBOL(vkGetDeviceProcAddr)(dev, "vkCmdInsertDebugUtilsLabelEXT"));
-		}
-
-		if (pgpu->optional_features_support.synchronization_2)
-		{
-			_vkCmdSetEvent2KHR = reinterpret_cast<PFN_vkCmdSetEvent2KHR>(VK_GET_SYMBOL(vkGetDeviceProcAddr)(dev, "vkCmdSetEvent2KHR"));
-			_vkCmdWaitEvents2KHR = reinterpret_cast<PFN_vkCmdWaitEvents2KHR>(VK_GET_SYMBOL(vkGetDeviceProcAddr)(dev, "vkCmdWaitEvents2KHR"));
-			_vkCmdPipelineBarrier2KHR = reinterpret_cast<PFN_vkCmdPipelineBarrier2KHR>(VK_GET_SYMBOL(vkGetDeviceProcAddr)(dev, "vkCmdPipelineBarrier2KHR"));
-		}
-
-		if (pgpu->optional_features_support.extended_device_fault)
-		{
-			_vkGetDeviceFaultInfoEXT = reinterpret_cast<PFN_vkGetDeviceFaultInfoEXT>(VK_GET_SYMBOL(vkGetDeviceProcAddr)(dev, "vkGetDeviceFaultInfoEXT"));
+			vkGetDeviceQueue(dev, present_queue_idx, 0, &m_present_queue);
 		}
 
 		memory_map = vk::get_memory_mapping(pdev);
 		m_formats_support = vk::get_optimal_tiling_supported_formats(pdev);
-		m_pipeline_binding_table = vk::get_pipeline_binding_table(pdev);
-
-		if (pgpu->optional_features_support.external_memory_host)
-		{
-			memory_map._vkGetMemoryHostPointerPropertiesEXT = reinterpret_cast<PFN_vkGetMemoryHostPointerPropertiesEXT>(VK_GET_SYMBOL(vkGetDeviceProcAddr)(dev, "vkGetMemoryHostPointerPropertiesEXT"));
-		}
 
 		if (g_cfg.video.disable_vulkan_mem_allocator)
 		{
@@ -846,7 +836,7 @@ namespace vk
 		}
 		else
 		{
-			m_allocator = std::make_unique<vk::mem_allocator_vma>(*this, pdev);
+			m_allocator = std::make_unique<vk::mem_allocator_vma>(*this, pdev, pdev);
 		}
 
 		// Useful for debugging different VRAM configurations
@@ -869,7 +859,7 @@ namespace vk
 				m_allocator.reset();
 			}
 
-			VK_GET_SYMBOL(vkDestroyDevice)(dev, nullptr);
+			vkDestroyDevice(dev, nullptr);
 			dev = nullptr;
 			memory_map = {};
 			m_formats_support = {};
@@ -885,7 +875,7 @@ namespace vk
 		}
 
 		auto& props = pgpu->format_properties[format];
-		VK_GET_SYMBOL(vkGetPhysicalDeviceFormatProperties)(*pgpu, format, &props);
+		vkGetPhysicalDeviceFormatProperties(*pgpu, format, &props);
 		return props;
 	}
 
@@ -934,14 +924,13 @@ namespace vk
 		rsx_log.notice("Dumping requested features...");
 		const auto& supported_features = pgpu->features;
 
-#define TEST_VK_FEATURE(name)                        \
-	if (requested_features.name)                     \
-	{                                                \
-		if (supported_features.name)                 \
-			rsx_log.notice("[Supported] " #name);    \
-		else                                         \
-			rsx_log.error("[Not supported] " #name); \
-	}
+#define TEST_VK_FEATURE(name) \
+		if (requested_features.name) {\
+			if (supported_features.name) \
+				rsx_log.notice("[Supported] "#name); \
+			else \
+				rsx_log.error("[Not supported] "#name); \
+		}
 
 		TEST_VK_FEATURE(robustBufferAccess);
 		TEST_VK_FEATURE(fullDrawIndexUint32);
@@ -1007,7 +996,7 @@ namespace vk
 	{
 		VkPhysicalDevice pdev = dev;
 		VkPhysicalDeviceMemoryProperties memory_properties;
-		VK_GET_SYMBOL(vkGetPhysicalDeviceMemoryProperties)(pdev, &memory_properties);
+		vkGetPhysicalDeviceMemoryProperties(pdev, &memory_properties);
 
 		memory_type_mapping result;
 		result.device_local_total_bytes = 0;
@@ -1033,14 +1022,18 @@ namespace vk
 		for (u32 i = 0; i < memory_properties.memoryHeapCount; ++i)
 		{
 			memory_heap_map.push_back(
-				{.heap = memory_properties.memoryHeaps[i],
-					.types = {}});
+			{
+				.heap = memory_properties.memoryHeaps[i],
+				.types = {}
+			});
+
+			result.heaps.push_back({ i, memory_properties.memoryHeaps[i].flags, memory_properties.memoryHeaps[i].size });
 		}
 
 		for (u32 i = 0; i < memory_properties.memoryTypeCount; i++)
 		{
 			auto& type_info = memory_properties.memoryTypes[i];
-			memory_heap_map[type_info.heapIndex].types.push_back({i, type_info.propertyFlags, 0});
+			memory_heap_map[type_info.heapIndex].types.push_back({ i, type_info.propertyFlags, 0 });
 		}
 
 		auto find_memory_type_with_property = [&memory_heap_map](VkFlags desired_flags, VkFlags excluded_flags)
@@ -1049,12 +1042,12 @@ namespace vk
 
 			for (auto& heap : memory_heap_map)
 			{
-				for (auto& type : heap.types)
+				for (auto &type : heap.types)
 				{
 					if (((type.flags & desired_flags) == desired_flags) && !(type.flags & excluded_flags))
 					{
 						// Match, only once allowed per heap!
-						results.push_back({type.type_index, type.flags, heap.heap.size});
+						results.push_back({ type.type_index, type.flags, heap.heap.size });
 						break;
 					}
 				}
@@ -1097,14 +1090,14 @@ namespace vk
 		if (device_local_types.size() > 1)
 		{
 			std::sort(device_local_types.begin(), device_local_types.end(), [](const auto& a, const auto& b)
+			{
+				if (a.flags == b.flags)
 				{
-					if (a.flags == b.flags)
-					{
-						return a.size > b.size;
-					}
+					return a.size > b.size;
+				}
 
-					return (a.flags == VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) || (b.flags != VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT && a.size > b.size);
-				});
+				return (a.flags == VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) || (b.flags != VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT && a.size > b.size);
+			});
 		}
 
 		for (const auto& type : device_local_types)
@@ -1137,7 +1130,7 @@ namespace vk
 		const auto test_format_features = [&dev](VkFormat format, VkFlags required_features, VkBool32 linear_features) -> bool
 		{
 			VkFormatProperties props;
-			VK_GET_SYMBOL(vkGetPhysicalDeviceFormatProperties)(dev, format, &props);
+			vkGetPhysicalDeviceFormatProperties(dev, format, &props);
 
 			const auto supported_features_mask = (linear_features) ? props.linearTilingFeatures : props.optimalTilingFeatures;
 			return (supported_features_mask & required_features) == required_features;
@@ -1172,15 +1165,4 @@ namespace vk
 
 		return result;
 	}
-
-	pipeline_binding_table get_pipeline_binding_table(const vk::physical_device& dev)
-	{
-		pipeline_binding_table result{};
-
-		// Need to check how many samplers are supported by the driver
-		const auto usable_samplers = std::min(dev.get_limits().maxPerStageDescriptorSampledImages, 32u);
-		result.vertex_textures_first_bind_slot = result.textures_first_bind_slot + usable_samplers;
-		result.total_descriptor_bindings = result.vertex_textures_first_bind_slot + 4;
-		return result;
-	}
-} // namespace vk
+}

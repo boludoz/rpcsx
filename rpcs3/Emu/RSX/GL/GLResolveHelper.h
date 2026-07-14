@@ -19,12 +19,10 @@ namespace gl
 		u32 cs_wave_y = 1;
 
 		cs_resolve_base()
-		{
-		}
+		{}
 
 		virtual ~cs_resolve_base()
-		{
-		}
+		{}
 
 		void build(const std::string& format_prefix, bool unresolve);
 
@@ -128,4 +126,4 @@ namespace gl
 			build(true, true, true);
 		}
 	};
-} // namespace gl
+}

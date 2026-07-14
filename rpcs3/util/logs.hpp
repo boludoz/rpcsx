@@ -3,10 +3,10 @@
 #include <map>
 #include <memory>
 #include <string>
-#include <vector>
+#include <set>
 #include <initializer_list>
 #include "util/atomic.hpp"
-#include "util/StrFmt.h"
+#include "Utilities/StrFmt.h"
 
 namespace logs
 {
@@ -20,6 +20,8 @@ namespace logs
 		warning = 5,
 		notice = 6,
 		trace = 7, // Lowest severity (usually disabled)
+
+		_default = notice
 	};
 
 	struct channel;
@@ -33,7 +35,7 @@ namespace logs
 		// Cannot be moved because it relies on its location
 		message(const message&) = delete;
 
-		message& operator=(const message&) = delete;
+		message& operator =(const message&) = delete;
 
 		// Send log message to the given channel with severity
 		template <typename... Args>
@@ -79,7 +81,7 @@ namespace logs
 		virtual ~listener();
 
 		// Process log message
-		virtual void log(u64 stamp, const message& msg, const std::string& prefix, const std::string& text) = 0;
+		virtual void log(u64 stamp, const message& msg, std::string_view prefix, std::string_view text) = 0;
 
 		// Flush contents (file writer)
 		virtual void sync();
@@ -96,6 +98,9 @@ namespace logs
 		// Flush log to disk
 		static void sync_all();
 
+		// Detach all listeners before controlled shutdown tears them down.
+		static void shutdown_all();
+
 		// Close file handle after flushing to disk (hazardous)
 		static void close_all_prematurely();
 	};
@@ -110,7 +115,9 @@ namespace logs
 
 		// Initialize channel
 		consteval channel(const char* name) noexcept
-			: message{}, name(name), enabled(level::notice)
+			: message{}
+			, name(name)
+			, enabled(level::notice)
 		{
 		}
 
@@ -120,8 +127,8 @@ namespace logs
 			return *this;
 		}
 
-#define GEN_LOG_METHOD(_sev) \
-	const message _sev{};
+#define GEN_LOG_METHOD(_sev)\
+		const message _sev{};\
 
 		GEN_LOG_METHOD(fatal)
 		GEN_LOG_METHOD(error)
@@ -161,7 +168,7 @@ namespace logs
 		registerer(channel& _ch);
 	};
 
-	// Log level control: set all channels to level::notice
+	// Log level control: set all channels to default level::notice
 	void reset();
 
 	// Log level control: set all channels to level::always
@@ -177,7 +184,7 @@ namespace logs
 	void set_channel_levels(const std::map<std::string, logs::level, std::less<>>& map);
 
 	// Get all registered log channels
-	std::vector<std::string> get_channels();
+	std::set<std::string> get_channels();
 
 	// Helper: no additional name specified
 	consteval const char* make_channel_name(const char* name, const char* alt = nullptr)
@@ -190,13 +197,9 @@ namespace logs
 
 	// Called in main()
 	void set_init(std::initializer_list<stored_message>);
-} // namespace logs
+}
 
-#define LOG_CHANNEL(ch, ...)                                                            \
-	inline constinit ::logs::channel ch(::logs::make_channel_name(#ch, ##__VA_ARGS__)); \
-	namespace logs                                                                      \
-	{                                                                                   \
-		inline ::logs::registerer reg_##ch{ch};                                         \
-	}
+#define LOG_CHANNEL(ch, ...) inline constinit ::logs::channel ch(::logs::make_channel_name(#ch, ##__VA_ARGS__)); \
+	namespace logs { inline ::logs::registerer reg_##ch{ch}; }
 
 LOG_CHANNEL(rsx_log, "RSX");

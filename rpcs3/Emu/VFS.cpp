@@ -3,13 +3,13 @@
 #include "System.h"
 #include "VFS.h"
 
-#include "cellos/sys_fs.h"
+#include "Cell/lv2/sys_fs.h"
 
-#include "util/mutex.h"
-#include "util/StrUtil.h"
+#include "Utilities/mutex.h"
+#include "Utilities/StrUtil.h"
 
 #ifdef _WIN32
-#include <windows.h>
+#include <Windows.h>
 #endif
 
 #include <thread>
@@ -137,7 +137,7 @@ bool vfs::unmount(std::string_view vpath)
 		return false;
 	}
 
-	const std::vector<std::string> entry_list = fmt::split(vpath, {"/"});
+	const std::vector<std::string_view> entry_list = fmt::split_sv(vpath, {"/"});
 
 	if (entry_list.empty())
 	{
@@ -166,7 +166,7 @@ bool vfs::unmount(std::string_view vpath)
 		}
 
 		// Get the current name based on the depth
-		const std::string& name = ::at32(entry_list, depth);
+		const std::string_view name = ::at32(entry_list, depth);
 
 		// Go through all children of this node
 		for (auto it = dir.dirs.begin(); it != dir.dirs.end();)
@@ -456,10 +456,10 @@ std::string vfs::retrieve(std::string_view path, const vfs_directory* node, std:
 		auto unescape_path = [](std::string_view path)
 		{
 			// Unescape from host FS
-			std::vector<std::string> escaped = fmt::split(path, {std::string_view{&fs::delim[0], 1}, std::string_view{&fs::delim[1], 1}});
+			const std::vector<std::string_view> escaped = fmt::split_sv(path, {std::string_view{&fs::delim[0], 1}, std::string_view{&fs::delim[1], 1}});
 			std::vector<std::string> result;
-			for (auto& sv : escaped)
-				result.emplace_back(vfs::unescape(sv));
+			for (const auto& sv : escaped)
+				result.push_back(vfs::unescape(sv));
 
 			return fmt::merge(result, "/");
 		};
@@ -976,27 +976,27 @@ bool vfs::host::rename(const std::string& from, const std::string& to, const lv2
 	};
 
 	idm::select<lv2_fs_object, lv2_file>([&](u32 id, lv2_file& file)
+	{
+		if (file.mp != mp)
 		{
-			if (file.mp != mp)
+			return;
+		}
+
+		std::string escaped = Emu.GetCallbacks().resolve_path(file.real_path);
+
+		if (check_path(escaped))
+		{
+			if (!file.file)
 			{
 				return;
 			}
 
-			std::string escaped = Emu.GetCallbacks().resolve_path(file.real_path);
+			file.restore_data.seek_pos = file.file.pos();
 
-			if (check_path(escaped))
-			{
-				if (!file.file)
-				{
-					return;
-				}
-
-				file.restore_data.seek_pos = file.file.pos();
-
-				file.file.close(); // Actually close it!
-				escaped_real.emplace_back(ensure(idm::get_unlocked<lv2_fs_object, lv2_file>(id)), std::move(escaped));
-			}
-		});
+			file.file.close(); // Actually close it!
+			escaped_real.emplace_back(ensure(idm::get_unlocked<lv2_fs_object, lv2_file>(id)), std::move(escaped));
+		}
+	});
 
 	bool res = false;
 
@@ -1028,7 +1028,7 @@ bool vfs::host::rename(const std::string& from, const std::string& to, const lv2
 			}
 
 			// Reopen with ignored TRUNC, APPEND, CREATE and EXCL flags
-			auto res0 = lv2_file::open_raw(file.real_path, file.flags & CELL_FS_O_ACCMODE, file.mode, file.type, file.mp);
+			auto res0 = lv2_file::open_raw(file.real_path, file.flags & CELL_FS_O_ACCMODE, true, file.type, file.mp);
 			file.file = std::move(res0.file);
 			ensure(file.file.operator bool());
 			file.file.seek(file.restore_data.seek_pos);
@@ -1042,40 +1042,42 @@ bool vfs::host::rename(const std::string& from, const std::string& to, const lv2
 bool vfs::host::unlink(const std::string& path, [[maybe_unused]] const std::string& dev_root)
 {
 #ifdef _WIN32
-	if (std::string_view dev_path; auto device = fs::get_virtual_device(path, &dev_path))
+	if (auto device = fs::get_virtual_device(path))
 	{
-		return device->remove(std::string(dev_path));
+		return device->remove(path);
 	}
-
-	// Rename to special dummy name which will be ignored by VFS (but opened file handles can still read or write it)
-	std::string dummy = hash_path(path, dev_root, "file");
-
-	while (true)
+	else
 	{
-		if (fs::rename(path, dummy, false))
+		// Rename to special dummy name which will be ignored by VFS (but opened file handles can still read or write it)
+		std::string dummy = hash_path(path, dev_root, "file");
+
+		while (true)
 		{
-			break;
+			if (fs::rename(path, dummy, false))
+			{
+				break;
+			}
+
+			if (fs::g_tls_error != fs::error::exist)
+			{
+				return false;
+			}
+
+			dummy = hash_path(path, dev_root, "file");
 		}
 
-		if (fs::g_tls_error != fs::error::exist)
+		if (fs::file f{dummy, fs::read + fs::write})
 		{
-			return false;
+			// Set to delete on close on last handle
+			FILE_DISPOSITION_INFO disp;
+			disp.DeleteFileW = true;
+			SetFileInformationByHandle(f.get_handle(), FileDispositionInfo, &disp, sizeof(disp));
+			return true;
 		}
 
-		dummy = hash_path(path, dev_root, "file");
-	}
-
-	if (fs::file f{dummy, fs::read + fs::write})
-	{
-		// Set to delete on close on last handle
-		FILE_DISPOSITION_INFO disp;
-		disp.DeleteFileW = true;
-		SetFileInformationByHandle(f.get_handle(), FileDispositionInfo, &disp, sizeof(disp));
+		// TODO: what could cause this and how to handle it
 		return true;
 	}
-
-	// TODO: what could cause this and how to handle it
-	return true;
 #else
 	return fs::remove_file(path);
 #endif

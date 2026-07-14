@@ -17,45 +17,45 @@ namespace reports
 	constexpr u32 DUALSENSE_USB_INPUT_REPORT_SIZE = 64;
 	constexpr u32 DUALSENSE_BLUETOOTH_INPUT_REPORT_SIZE = 78;
 	constexpr u32 DUALSENSE_INPUT_REPORT_GYRO_X_OFFSET = 15;
-	constexpr u32 DUALSENSE_TOUCHPAD_WIDTH = 1920;
+	constexpr u32 DUALSENSE_TOUCHPAD_WIDTH  = 1920;
 	constexpr u32 DUALSENSE_TOUCHPAD_HEIGHT = 1080;
 	constexpr u32 DUALSENSE_TOUCH_POINT_INACTIVE = 0x80;
 
 	enum
 	{
-		VALID_FLAG_0_COMPATIBLE_VIBRATION = 0x01,
-		VALID_FLAG_0_HAPTICS_SELECT = 0x02,
-		VALID_FLAG_0_SET_LEFT_TRIGGER_MOTOR = 0x04,
-		VALID_FLAG_0_SET_RIGHT_TRIGGER_MOTOR = 0x08,
-		VALID_FLAG_0_SET_AUDIO_VOLUME = 0x10,
-		VALID_FLAG_0_TOGGLE_AUDIO = 0x20,
-		VALID_FLAG_0_SET_MICROPHONE_VOLUME = 0x40,
-		VALID_FLAG_0_TOGGLE_MICROPHONE = 0x80,
+		VALID_FLAG_0_COMPATIBLE_VIBRATION            = 0x01,
+		VALID_FLAG_0_HAPTICS_SELECT                  = 0x02,
+		VALID_FLAG_0_SET_LEFT_TRIGGER_MOTOR          = 0x04,
+		VALID_FLAG_0_SET_RIGHT_TRIGGER_MOTOR         = 0x08,
+		VALID_FLAG_0_SET_AUDIO_VOLUME                = 0x10,
+		VALID_FLAG_0_TOGGLE_AUDIO                    = 0x20,
+		VALID_FLAG_0_SET_MICROPHONE_VOLUME           = 0x40,
+		VALID_FLAG_0_TOGGLE_MICROPHONE               = 0x80,
 
-		VALID_FLAG_1_TOGGLE_MIC_BUTTON_LED = 0x01,
-		VALID_FLAG_1_POWER_SAVE_CONTROL_ENABLE = 0x02,
-		VALID_FLAG_1_LIGHTBAR_CONTROL_ENABLE = 0x04,
-		VALID_FLAG_1_RELEASE_LEDS = 0x08,
+		VALID_FLAG_1_TOGGLE_MIC_BUTTON_LED           = 0x01,
+		VALID_FLAG_1_POWER_SAVE_CONTROL_ENABLE       = 0x02,
+		VALID_FLAG_1_LIGHTBAR_CONTROL_ENABLE         = 0x04,
+		VALID_FLAG_1_RELEASE_LEDS                    = 0x08,
 		VALID_FLAG_1_PLAYER_INDICATOR_CONTROL_ENABLE = 0x10,
-		VALID_FLAG_1_EFFECT_POWER = 0x40,
+		VALID_FLAG_1_EFFECT_POWER                    = 0x40,
 
-		VALID_FLAG_2_SET_PLAYER_LED_BRIGHTNESS = 0x01,
-		VALID_FLAG_2_LIGHTBAR_SETUP_CONTROL_ENABLE = 0x02,
-		VALID_FLAG_2_IMPROVED_RUMBLE_EMULATION = 0x04,
+		VALID_FLAG_2_SET_PLAYER_LED_BRIGHTNESS       = 0x01,
+		VALID_FLAG_2_LIGHTBAR_SETUP_CONTROL_ENABLE   = 0x02,
+		VALID_FLAG_2_IMPROVED_RUMBLE_EMULATION       = 0x04,
 
-		AUDIO_BIT_FORCE_INTERNAL_MIC = 0x01,
-		AUDIO_BIT_FORCE_EXTERNAL_MIC = 0x02,
-		AUDIO_BIT_PAD_EXTERNAL_MIC = 0x04,
-		AUDIO_BIT_PAD_INTERNAL_MIC = 0x08,
-		AUDIO_BIT_DISABLE_EXTERNAL_SPEAKERS = 0x10,
-		AUDIO_BIT_ENABLE_INTERNAL_SPEAKERS = 0x20,
+		AUDIO_BIT_FORCE_INTERNAL_MIC                 = 0x01,
+		AUDIO_BIT_FORCE_EXTERNAL_MIC                 = 0x02,
+		AUDIO_BIT_PAD_EXTERNAL_MIC                   = 0x04,
+		AUDIO_BIT_PAD_INTERNAL_MIC                   = 0x08,
+		AUDIO_BIT_DISABLE_EXTERNAL_SPEAKERS          = 0x10,
+		AUDIO_BIT_ENABLE_INTERNAL_SPEAKERS           = 0x20,
 
-		POWER_SAVE_CONTROL_MIC_MUTE = 0x10,
-		POWER_SAVE_CONTROL_AUDIO_MUTE = 0x40,
-		LIGHTBAR_SETUP_LIGHT_ON = 0x01,
-		LIGHTBAR_SETUP_LIGHT_OFF = 0x02,
-		MIC_BUTTON_LED_ON = 0x01,
-		MIC_BUTTON_LED_PULSE = 0x02,
+		POWER_SAVE_CONTROL_MIC_MUTE                  = 0x10,
+		POWER_SAVE_CONTROL_AUDIO_MUTE                = 0x40,
+		LIGHTBAR_SETUP_LIGHT_ON                      = 0x01,
+		LIGHTBAR_SETUP_LIGHT_OFF                     = 0x02,
+		MIC_BUTTON_LED_ON                            = 0x01,
+		MIC_BUTTON_LED_PULSE                         = 0x02,
 	};
 
 	struct dualsense_touch_point
@@ -152,7 +152,7 @@ namespace reports
 		u8 reserved[15];
 	};
 	static_assert(sizeof(dualsense_output_report_usb) == DUALSENSE_USB_REPORT_SIZE);
-} // namespace reports
+}
 
 class DualSenseDevice : public HidDevice
 {
@@ -248,14 +248,14 @@ private:
 	void check_add_device(hid_device* hidDevice, hid_enumerated_device_view path, std::wstring_view wide_serial) override;
 	int send_output_report(DualSenseDevice* device) override;
 
-	bool get_is_left_trigger(const std::shared_ptr<PadDevice>& device, u64 keyCode) override;
-	bool get_is_right_trigger(const std::shared_ptr<PadDevice>& device, u64 keyCode) override;
-	bool get_is_left_stick(const std::shared_ptr<PadDevice>& device, u64 keyCode) override;
-	bool get_is_right_stick(const std::shared_ptr<PadDevice>& device, u64 keyCode) override;
-	bool get_is_touch_pad_motion(const std::shared_ptr<PadDevice>& device, u64 keyCode) override;
+	bool get_is_left_trigger(const std::shared_ptr<PadDevice>& device, u32 keyCode) override;
+	bool get_is_right_trigger(const std::shared_ptr<PadDevice>& device, u32 keyCode) override;
+	bool get_is_left_stick(const std::shared_ptr<PadDevice>& device, u32 keyCode) override;
+	bool get_is_right_stick(const std::shared_ptr<PadDevice>& device, u32 keyCode) override;
+	bool get_is_touch_pad_motion(const std::shared_ptr<PadDevice>& device, u32 keyCode) override;
 	PadHandlerBase::connection update_connection(const std::shared_ptr<PadDevice>& device) override;
-	std::unordered_map<u64, u16> get_button_values(const std::shared_ptr<PadDevice>& device) override;
-	pad_preview_values get_preview_values(const std::unordered_map<u64, u16>& data) override;
+	std::unordered_map<u32, u16> get_button_values(const std::shared_ptr<PadDevice>& device) override;
+	pad_preview_values get_preview_values(const std::unordered_map<u32, u16>& data, const std::vector<std::string>& buttons) override;
 	void get_extended_info(const pad_ensemble& binding) override;
 	void apply_pad_data(const pad_ensemble& binding) override;
 };

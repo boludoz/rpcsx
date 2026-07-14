@@ -2,6 +2,7 @@
 #include "video_provider.h"
 #include "Emu/RSX/Overlays/overlay_message.h"
 #include "Emu/Cell/timers.hpp"
+#include "Emu/system_config.h"
 
 extern "C"
 {
@@ -16,16 +17,16 @@ template <>
 void fmt_class_string<recording_mode>::format(std::string& out, u64 arg)
 {
 	format_enum(out, arg, [](recording_mode value)
+	{
+		switch (value)
 		{
-			switch (value)
-			{
-			case recording_mode::stopped: return "stopped";
-			case recording_mode::rpcs3: return "rpcs3";
-			case recording_mode::cell: return "cell";
-			}
+		case recording_mode::stopped: return "stopped";
+		case recording_mode::rpcs3: return "rpcs3";
+		case recording_mode::cell: return "cell";
+		}
 
-			return unknown;
-		});
+		return unknown;
+	});
 }
 
 namespace utils
@@ -89,7 +90,11 @@ namespace utils
 		if (!m_video_sink || m_video_sink->has_error)
 		{
 			g_recording_mode = recording_mode::stopped;
-			rsx::overlays::queue_message(localized_string_id::RECORDING_ABORTED);
+
+			if (g_cfg.misc.show_capture_hints)
+			{
+				rsx::overlays::queue_message(localized_string_id::RECORDING_ABORTED);
+			}
 		}
 
 		if (g_recording_mode == recording_mode::stopped)
@@ -122,7 +127,7 @@ namespace utils
 		return pts > m_last_video_pts_incoming;
 	}
 
-	void video_provider::present_frame(std::vector<u8>& data, u32 pitch, u32 width, u32 height, bool is_bgra)
+	void video_provider::present_frame(std::vector<u8>&& data, u32 pitch, u32 width, u32 height, bool is_bgra)
 	{
 		if (!m_active)
 		{
@@ -162,7 +167,7 @@ namespace utils
 		}
 	}
 
-	void video_provider::present_samples(u8* buf, u32 sample_count, u16 channels)
+	void video_provider::present_samples(const u8* buf, u32 sample_count, u16 channels)
 	{
 		if (!buf || !sample_count || !channels || !m_active)
 		{
@@ -206,4 +211,4 @@ namespace utils
 			m_last_audio_pts_incoming = pts;
 		}
 	}
-} // namespace utils
+}

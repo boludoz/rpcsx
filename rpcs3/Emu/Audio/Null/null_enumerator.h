@@ -5,11 +5,9 @@
 class null_enumerator final : public audio_device_enumerator
 {
 public:
+
 	null_enumerator() {};
 	~null_enumerator() override {};
 
-	std::vector<audio_device> get_output_devices() override
-	{
-		return {};
-	}
+	std::vector<audio_device> get_output_devices() override { return {}; }
 };

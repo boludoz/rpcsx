@@ -1,6 +1,6 @@
 #pragma once
 
-#include "util/Thread.h"
+#include "Utilities/Thread.h"
 #include "util/logs.hpp"
 #include "Emu/Memory/vm.h"
 #include "3rdparty/pine/pine_server.h"
@@ -27,7 +27,7 @@ namespace IPC_socket
 		static const be_t<u64>& read64(u32 addr);
 		static void write64(u32 addr, be_t<u64> value);
 
-		template <typename... Args>
+		template<typename... Args>
 		static void error(const const_str& fmt, Args&&... args)
 		{
 			IPC.error(fmt, std::forward<Args>(args)...);
@@ -57,4 +57,4 @@ namespace IPC_socket
 		explicit IPC_server_manager(bool enabled);
 		void set_server_enabled(bool enabled);
 	};
-} // namespace IPC_socket
+}

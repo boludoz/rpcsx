@@ -12,9 +12,9 @@
 #pragma clang diagnostic ignored "-Winconsistent-missing-override"
 #endif
 #endif
-#include "SPIRV/GlslangToSpv.h"
-#include "glslang/Include/ResourceLimits.h"
-#include "glslang/Public/ShaderLang.h"
+#include <SPIRV/GlslangToSpv.h>
+#include <glslang/Include/ResourceLimits.h>
+#include <glslang/Public/ShaderLang.h>
 #ifdef _MSC_VER
 #pragma warning(pop)
 #else
@@ -127,32 +127,38 @@ namespace spirv
 
 	bool compile_glsl_to_spv(std::vector<u32>& spv, std::string& shader, ::glsl::program_domain domain, ::glsl::glsl_rules rules)
 	{
-		EShLanguage lang = (domain == ::glsl::glsl_fragment_program) ? EShLangFragment : (domain == ::glsl::glsl_vertex_program) ? EShLangVertex :
-		                                                                                                                           EShLangCompute;
+		EShLanguage lang = (domain == ::glsl::glsl_fragment_program)
+			? EShLangFragment
+			: (domain == ::glsl::glsl_vertex_program)
+				? EShLangVertex
+				: EShLangCompute;
 
 		glslang::EShClient client;
 		glslang::EShTargetClientVersion target_version;
+		glslang::EShTargetLanguageVersion spirv_version;
 		EShMessages msg;
 
 		if (rules == ::glsl::glsl_rules_vulkan)
 		{
 			client = glslang::EShClientVulkan;
-			target_version = glslang::EShTargetClientVersion::EShTargetVulkan_1_0;
+			target_version = glslang::EShTargetClientVersion::EShTargetVulkan_1_2;
+			spirv_version = glslang::EShTargetLanguageVersion::EShTargetSpv_1_5;
 			msg = static_cast<EShMessages>(EShMsgVulkanRules | EShMsgSpvRules | EShMsgEnhanced);
 		}
 		else
 		{
 			client = glslang::EShClientOpenGL;
 			target_version = glslang::EShTargetClientVersion::EShTargetOpenGL_450;
+			spirv_version = glslang::EShTargetLanguageVersion::EShTargetSpv_1_0;
 			msg = static_cast<EShMessages>(EShMsgDefault | EShMsgSpvRules | EShMsgEnhanced);
 		}
 
 		glslang::TProgram program;
 		glslang::TShader shader_object(lang);
 
-		shader_object.setEnvInput(glslang::EShSourceGlsl, lang, client, 100);
+		shader_object.setEnvInput(glslang::EShSourceGlsl, lang, client, 100); // NOTE: 100 here is the spec revision of GL_KHR_vulkan_glsl. There is only one version (100) for the past 10 years.
 		shader_object.setEnvClient(client, target_version);
-		shader_object.setEnvTarget(glslang::EshTargetSpv, glslang::EShTargetLanguageVersion::EShTargetSpv_1_0);
+		shader_object.setEnvTarget(glslang::EshTargetSpv, spirv_version);
 
 		bool success = false;
 		const char* shader_text = shader.data();
@@ -170,11 +176,11 @@ namespace spirv
 				glslang::GlslangToSpv(*program.getIntermediate(lang), spv, &options);
 
 				// Now we optimize
-				// spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_0);
-				// optimizer.RegisterPass(spvtools::CreateUnifyConstantPass());      // Remove duplicate constants
-				// optimizer.RegisterPass(spvtools::CreateMergeReturnPass());        // Huge savings in vertex interpreter and likely normal vertex shaders
-				// optimizer.RegisterPass(spvtools::CreateAggressiveDCEPass());      // Remove dead code
-				// optimizer.Run(spv.data(), spv.size(), &spv);
+				//spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_0);
+				//optimizer.RegisterPass(spvtools::CreateUnifyConstantPass());      // Remove duplicate constants
+				//optimizer.RegisterPass(spvtools::CreateMergeReturnPass());        // Huge savings in vertex interpreter and likely normal vertex shaders
+				//optimizer.RegisterPass(spvtools::CreateAggressiveDCEPass());      // Remove dead code
+				//optimizer.Run(spv.data(), spv.size(), &spv);
 			}
 		}
 		else
@@ -196,4 +202,4 @@ namespace spirv
 	{
 		glslang::FinalizeProcess();
 	}
-} // namespace spirv
+}

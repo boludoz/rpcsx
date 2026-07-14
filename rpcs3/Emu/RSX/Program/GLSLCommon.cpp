@@ -4,7 +4,7 @@
 #include "RSXFragmentProgram.h"
 
 #include "Emu/RSX/gcm_enums.h"
-#include "util/StrFmt.h"
+#include "Utilities/StrFmt.h"
 
 namespace program_common
 {
@@ -35,7 +35,7 @@ namespace program_common
 
 		OS << "\n";
 	}
-} // namespace program_common
+}
 
 namespace glsl
 {
@@ -73,7 +73,7 @@ namespace glsl
 		}
 	}
 
-	std::string compareFunctionImpl(COMPARE f, const std::string& Op0, const std::string& Op1, bool scalar)
+	std::string compareFunctionImpl(COMPARE f, const std::string &Op0, const std::string &Op1, bool scalar)
 	{
 		if (scalar)
 		{
@@ -121,13 +121,15 @@ namespace glsl
 
 		// Actually decode a vertex attribute from a raw byte stream
 		program_common::define_glsl_constants<int>(OS,
-			{{"VTX_FMT_SNORM16", RSX_VERTEX_BASE_TYPE_SNORM16},
-				{"VTX_FMT_FLOAT32", RSX_VERTEX_BASE_TYPE_FLOAT},
-				{"VTX_FMT_FLOAT16", RSX_VERTEX_BASE_TYPE_HALF_FLOAT},
-				{"VTX_FMT_UNORM8 ", RSX_VERTEX_BASE_TYPE_UNORM8},
-				{"VTX_FMT_SINT16 ", RSX_VERTEX_BASE_TYPE_SINT16},
-				{"VTX_FMT_COMP32 ", RSX_VERTEX_BASE_TYPE_CMP32},
-				{"VTX_FMT_UINT8  ", RSX_VERTEX_BASE_TYPE_UINT8}});
+		{
+			{ "VTX_FMT_SNORM16", RSX_VERTEX_BASE_TYPE_SNORM16 },
+			{ "VTX_FMT_FLOAT32", RSX_VERTEX_BASE_TYPE_FLOAT },
+			{ "VTX_FMT_FLOAT16", RSX_VERTEX_BASE_TYPE_HALF_FLOAT },
+			{ "VTX_FMT_UNORM8 ", RSX_VERTEX_BASE_TYPE_UNORM8 },
+			{ "VTX_FMT_SINT16 ", RSX_VERTEX_BASE_TYPE_SINT16 },
+			{ "VTX_FMT_COMP32 ", RSX_VERTEX_BASE_TYPE_CMP32 },
+			{ "VTX_FMT_UINT8  ", RSX_VERTEX_BASE_TYPE_UINT8 }
+		});
 
 		// For intel GPUs which cannot access vectors in indexed mode (driver bug? or glsl version too low?)
 		// Note: Tested on Mesa iris with HD 530 and compilant path works fine, may be a bug on Windows proprietary drivers
@@ -137,28 +139,28 @@ namespace glsl
 		}
 
 		OS <<
-#include "GLSLSnippets/RSXProg/RSXVertexFetch.glsl"
-			;
+			#include "GLSLSnippets/RSXProg/RSXVertexFetch.glsl"
+		;
 	}
 
 	void insert_blend_prologue(std::ostream& OS)
 	{
 		OS <<
-#include "GLSLSnippets/RSXProg/RSXProgrammableBlendPrologue.glsl"
+			#include "GLSLSnippets/RSXProg/RSXProgrammableBlendPrologue.glsl"
 			;
 	}
 
 	void insert_rop_init(std::ostream& OS)
 	{
 		OS <<
-#include "GLSLSnippets/RSXProg/RSXROPPrologue.glsl"
+			#include "GLSLSnippets/RSXProg/RSXROPPrologue.glsl"
 			;
 	}
 
 	void insert_rop(std::ostream& OS, const shader_properties& /*props*/)
 	{
 		OS <<
-#include "GLSLSnippets/RSXProg/RSXROPEpilogue.glsl"
+			#include "GLSLSnippets/RSXProg/RSXROPEpilogue.glsl"
 			;
 	}
 
@@ -175,46 +177,53 @@ namespace glsl
 			enabled_options.push_back("_ENABLE_LIT_EMULATION");
 		}
 
-		OS << "#define _select mix\n";
-		OS << "#define _saturate(x) clamp(x, 0., 1.)\n";
-		OS << "#define _get_bits(x, off, count) bitfieldExtract(x, off, count)\n";
-		OS << "#define _set_bits(x, y, off, count) bitfieldInsert(x, y, off, count)\n";
-		OS << "#define _test_bit(x, y) (_get_bits(x, y, 1) != 0)\n";
-		OS << "#define _rand(seed) fract(sin(dot(seed.xy, vec2(12.9898f, 78.233f))) * 43758.5453f)\n\n";
+		if (props.require_clip_plane_functions)
+		{
+			OS <<
+				"#define CLIP_PLANE_DISABLED 1\n"
+				"#define is_user_clip_enabled(idx) (_get_bits(get_user_clip_config(), idx * 2, 2) != CLIP_PLANE_DISABLED)\n"
+				"#define user_clip_factor(idx) (float(_get_bits(get_user_clip_config(), idx * 2, 2)) - 1.f)\n\n";
+		}
 
 		if (props.domain == glsl::program_domain::glsl_fragment_program)
 		{
 			OS << "// ROP control\n";
 			program_common::define_glsl_constants<rsx::ROP_control_bits>(OS,
-				{{"ALPHA_TEST_ENABLE_BIT       ", rsx::ROP_control_bits::ALPHA_TEST_ENABLE_BIT},
-					{"SRGB_FRAMEBUFFER_BIT        ", rsx::ROP_control_bits::SRGB_FRAMEBUFFER_BIT},
-					{"ALPHA_TO_COVERAGE_ENABLE_BIT", rsx::ROP_control_bits::ALPHA_TO_COVERAGE_ENABLE_BIT},
-					{"MSAA_WRITE_ENABLE_BIT       ", rsx::ROP_control_bits::MSAA_WRITE_ENABLE_BIT},
-					{"INT_FRAMEBUFFER_BIT         ", rsx::ROP_control_bits::INT_FRAMEBUFFER_BIT},
-					{"POLYGON_STIPPLE_ENABLE_BIT  ", rsx::ROP_control_bits::POLYGON_STIPPLE_ENABLE_BIT},
-					{"ALPHA_TEST_FUNC_OFFSET      ", rsx::ROP_control_bits::ALPHA_FUNC_OFFSET},
-					{"ALPHA_TEST_FUNC_LENGTH      ", rsx::ROP_control_bits::ALPHA_FUNC_NUM_BITS},
-					{"MSAA_SAMPLE_CTRL_OFFSET     ", rsx::ROP_control_bits::MSAA_SAMPLE_CTRL_OFFSET},
-					{"MSAA_SAMPLE_CTRL_LENGTH     ", rsx::ROP_control_bits::MSAA_SAMPLE_CTRL_NUM_BITS},
-					{"ROP_CMD_MASK                ", rsx::ROP_control_bits::ROP_CMD_MASK}});
+			{
+				{ "ALPHA_TEST_ENABLE_BIT       ", rsx::ROP_control_bits::ALPHA_TEST_ENABLE_BIT },
+				{ "SRGB_FRAMEBUFFER_BIT        ", rsx::ROP_control_bits::SRGB_FRAMEBUFFER_BIT },
+				{ "ALPHA_TO_COVERAGE_ENABLE_BIT", rsx::ROP_control_bits::ALPHA_TO_COVERAGE_ENABLE_BIT },
+				{ "MSAA_WRITE_ENABLE_BIT       ", rsx::ROP_control_bits::MSAA_WRITE_ENABLE_BIT },
+				{ "INT_FRAMEBUFFER_BIT         ", rsx::ROP_control_bits::INT_FRAMEBUFFER_BIT },
+				{ "POLYGON_STIPPLE_ENABLE_BIT  ", rsx::ROP_control_bits::POLYGON_STIPPLE_ENABLE_BIT },
+				{ "ALPHA_TEST_FUNC_OFFSET      ", rsx::ROP_control_bits::ALPHA_FUNC_OFFSET },
+				{ "ALPHA_TEST_FUNC_LENGTH      ", rsx::ROP_control_bits::ALPHA_FUNC_NUM_BITS },
+				{ "MSAA_SAMPLE_CTRL_OFFSET     ", rsx::ROP_control_bits::MSAA_SAMPLE_CTRL_OFFSET },
+				{ "MSAA_SAMPLE_CTRL_LENGTH     ", rsx::ROP_control_bits::MSAA_SAMPLE_CTRL_NUM_BITS },
+				{ "FRAG_DEPTH_24_BIT           ", rsx::ROP_control_bits::FRAG_DEPTH_24_BIT },
+				{ "FRAG_DEPTH_FLOAT_BIT        ", rsx::ROP_control_bits::FRAG_DEPTH_FLOAT_BIT },
+				{ "ROP_CMD_MASK                ", rsx::ROP_control_bits::ROP_CMD_MASK }
+			});
 
 			program_common::define_glsl_constants<const char*>(OS,
-				{{"col0", props.fp32_outputs ? "r0" : "h0"},
-					{"col1", props.fp32_outputs ? "r2" : "h4"},
-					{"col2", props.fp32_outputs ? "r3" : "h6"},
-					{"col3", props.fp32_outputs ? "r4" : "h8"}});
+			{
+				{ "col0", props.fp32_outputs ? "r0" : "h0" },
+				{ "col1", props.fp32_outputs ? "r2" : "h4" },
+				{ "col2", props.fp32_outputs ? "r3" : "h6" },
+				{ "col3", props.fp32_outputs ? "r4" : "h8" }
+			});
 
 			if (props.fp32_outputs || !props.supports_native_fp16)
 			{
 				enabled_options.push_back("_32_BIT_OUTPUT");
 			}
 
-			if (!props.fp32_outputs)
+			if (props.ROP_sRGB_packing)
 			{
 				enabled_options.push_back("_ENABLE_FRAMEBUFFER_SRGB");
 			}
 
-			if (props.disable_early_discard)
+			if (props.disable_early_discard && props.ROP_discard)
 			{
 				enabled_options.push_back("_DISABLE_EARLY_DISCARD");
 			}
@@ -224,7 +233,25 @@ namespace glsl
 				enabled_options.push_back("_ENABLE_ROP_OUTPUT_ROUNDING");
 			}
 
-			enabled_options.push_back("_ENABLE_POLYGON_STIPPLE");
+			if (props.ROP_alpha_test)
+			{
+				enabled_options.push_back("_ENABLE_ALPHA_TEST");
+			}
+
+			if (props.ROP_polygon_stipple_test)
+			{
+				enabled_options.push_back("_ENABLE_POLYGON_STIPPLE");
+			}
+
+			if (props.emulate_depth_compare)
+			{
+				enabled_options.push_back("_ENABLE_DEPTH_COMPARE");
+			}
+
+			if (props.depth_buffer_multisampled)
+			{
+				enabled_options.push_back("_ENABLE_DEPTH_BUFFER_MULTISAMPLED");
+			}
 		}
 
 		// Import common header
@@ -232,8 +259,8 @@ namespace glsl
 		enabled_options.clear();
 
 		OS <<
-#include "GLSLSnippets/RSXProg/RSXProgramCommon.glsl"
-			;
+			#include "GLSLSnippets/RSXProg/RSXProgramCommon.glsl"
+		;
 
 		if (props.domain == glsl::program_domain::glsl_vertex_program)
 		{
@@ -263,18 +290,18 @@ namespace glsl
 			program_common::define_glsl_switches(OS, enabled_options);
 
 			OS <<
-#include "GLSLSnippets/RSXProg/RSXVertexPrologue.glsl"
-				;
+				#include "GLSLSnippets/RSXProg/RSXVertexPrologue.glsl"
+			;
 
 			return;
 		}
 
-		if (props.emulate_coverage_tests)
+		if (props.ROP_alpha_to_coverage_test)
 		{
-			enabled_options.push_back("_EMULATE_COVERAGE_TEST");
+			enabled_options.push_back("_ENABLE_ALPHA_TO_COVERAGE_TEST");
 		}
 
-		if (!props.fp32_outputs || props.require_linear_to_srgb)
+		if (props.ROP_sRGB_packing || props.require_linear_to_srgb)
 		{
 			enabled_options.push_back("_ENABLE_LINEAR_TO_SRGB");
 		}
@@ -289,17 +316,22 @@ namespace glsl
 			enabled_options.push_back("_ENABLE_WPOS");
 		}
 
+		if (props.ROP_alpha_test || (props.require_msaa_ops && props.require_tex_shadow_ops))
+		{
+			enabled_options.push_back("_ENABLE_COMPARISON_FUNC");
+		}
+
 		if (props.require_fog_read)
 		{
 			program_common::define_glsl_constants<rsx::fog_mode>(OS,
-				{
-					{"FOG_LINEAR    ", rsx::fog_mode::linear},
-					{"FOG_EXP       ", rsx::fog_mode::exponential},
-					{"FOG_EXP2      ", rsx::fog_mode::exponential2},
-					{"FOG_LINEAR_ABS", rsx::fog_mode::linear_abs},
-					{"FOG_EXP_ABS   ", rsx::fog_mode::exponential_abs},
-					{"FOG_EXP2_ABS  ", rsx::fog_mode::exponential2_abs},
-				});
+			{
+				{ "FOG_LINEAR    ", rsx::fog_mode::linear },
+				{ "FOG_EXP       ", rsx::fog_mode::exponential },
+				{ "FOG_EXP2      ", rsx::fog_mode::exponential2 },
+				{ "FOG_LINEAR_ABS", rsx::fog_mode::linear_abs },
+				{ "FOG_EXP_ABS   ", rsx::fog_mode::exponential_abs },
+				{ "FOG_EXP2_ABS  ", rsx::fog_mode::exponential2_abs },
+			});
 
 			enabled_options.push_back("_ENABLE_FOG_READ");
 		}
@@ -309,37 +341,44 @@ namespace glsl
 		enabled_options.clear();
 
 		OS <<
-#include "GLSLSnippets/RSXProg/RSXFragmentPrologue.glsl"
-			;
+			#include "GLSLSnippets/RSXProg/RSXFragmentPrologue.glsl"
+		;
 
 		if (props.require_texture_ops)
 		{
 			// Declare special texture control flags
 			program_common::define_glsl_constants<rsx::texture_control_bits>(OS,
-				{{"GAMMA_R_BIT ", rsx::texture_control_bits::GAMMA_R},
-					{"GAMMA_G_BIT ", rsx::texture_control_bits::GAMMA_G},
-					{"GAMMA_B_BIT ", rsx::texture_control_bits::GAMMA_B},
-					{"GAMMA_A_BIT ", rsx::texture_control_bits::GAMMA_A},
-					{"EXPAND_R_BIT", rsx::texture_control_bits::EXPAND_R},
-					{"EXPAND_G_BIT", rsx::texture_control_bits::EXPAND_G},
-					{"EXPAND_B_BIT", rsx::texture_control_bits::EXPAND_B},
-					{"EXPAND_A_BIT", rsx::texture_control_bits::EXPAND_A},
-					{"SEXT_R_BIT", rsx::texture_control_bits::SEXT_R},
-					{"SEXT_G_BIT", rsx::texture_control_bits::SEXT_G},
-					{"SEXT_B_BIT", rsx::texture_control_bits::SEXT_B},
-					{"SEXT_A_BIT", rsx::texture_control_bits::SEXT_A},
-					{"WRAP_S_BIT", rsx::texture_control_bits::WRAP_S},
-					{"WRAP_T_BIT", rsx::texture_control_bits::WRAP_T},
-					{"WRAP_R_BIT", rsx::texture_control_bits::WRAP_R},
+			{
+				{ "GAMMA_R_BIT ", rsx::texture_control_bits::GAMMA_R },
+				{ "GAMMA_G_BIT ", rsx::texture_control_bits::GAMMA_G },
+				{ "GAMMA_B_BIT ", rsx::texture_control_bits::GAMMA_B },
+				{ "GAMMA_A_BIT ", rsx::texture_control_bits::GAMMA_A },
+				{ "EXPAND_R_BIT", rsx::texture_control_bits::EXPAND_R },
+				{ "EXPAND_G_BIT", rsx::texture_control_bits::EXPAND_G },
+				{ "EXPAND_B_BIT", rsx::texture_control_bits::EXPAND_B },
+				{ "EXPAND_A_BIT", rsx::texture_control_bits::EXPAND_A },
+				{ "SEXT_R_BIT",   rsx::texture_control_bits::SEXT_R },
+				{ "SEXT_G_BIT",   rsx::texture_control_bits::SEXT_G },
+				{ "SEXT_B_BIT",   rsx::texture_control_bits::SEXT_B },
+				{ "SEXT_A_BIT",   rsx::texture_control_bits::SEXT_A },
+				{ "WRAP_S_BIT",   rsx::texture_control_bits::WRAP_S },
+				{ "WRAP_T_BIT",   rsx::texture_control_bits::WRAP_T },
+				{ "WRAP_R_BIT",   rsx::texture_control_bits::WRAP_R },
 
-					{"ALPHAKILL    ", rsx::texture_control_bits::ALPHAKILL},
-					{"RENORMALIZE  ", rsx::texture_control_bits::RENORMALIZE},
-					{"DEPTH_FLOAT  ", rsx::texture_control_bits::DEPTH_FLOAT},
-					{"DEPTH_COMPARE", rsx::texture_control_bits::DEPTH_COMPARE_OP},
-					{"FILTERED_MAG_BIT", rsx::texture_control_bits::FILTERED_MAG},
-					{"FILTERED_MIN_BIT", rsx::texture_control_bits::FILTERED_MIN},
-					{"INT_COORDS_BIT  ", rsx::texture_control_bits::UNNORMALIZED_COORDS},
-					{"CLAMP_COORDS_BIT", rsx::texture_control_bits::CLAMP_TEXCOORDS_BIT}});
+				{ "ALPHAKILL    ", rsx::texture_control_bits::ALPHAKILL },
+				{ "RENORMALIZE  ", rsx::texture_control_bits::RENORMALIZE },
+				{ "DEPTH_FLOAT  ", rsx::texture_control_bits::DEPTH_FLOAT },
+				{ "DEPTH_COMPARE", rsx::texture_control_bits::DEPTH_COMPARE_OP },
+				{ "FILTERED_MAG_BIT", rsx::texture_control_bits::FILTERED_MAG },
+				{ "FILTERED_MIN_BIT", rsx::texture_control_bits::FILTERED_MIN },
+				{ "INT_COORDS_BIT  ", rsx::texture_control_bits::UNNORMALIZED_COORDS },
+				{ "CLAMP_COORDS_BIT", rsx::texture_control_bits::CLAMP_TEXCOORDS_BIT },
+
+				{ "FORMAT_FEATURE_SIGNED_BIT", rsx::texture_control_bits::FF_SIGNED_BIT },
+				{ "FORMAT_FEATURE_GAMMA_BIT",  rsx::texture_control_bits::FF_GAMMA_BIT },
+				{ "FORMAT_FEATURE_BIASED_RENORMALIZATION_BIT", rsx::texture_control_bits::FF_BIASED_RENORM_BIT },
+				{ "FORMAT_FEATURE_16BIT_CHANNELS_BIT", rsx::texture_control_bits::FF_16BIT_CHANNELS_BIT }
+			});
 
 			if (props.require_texture_expand)
 			{
@@ -376,31 +415,51 @@ namespace glsl
 				enabled_options.push_back("_ENABLE_SHADOWPROJ");
 			}
 
+			if (props.require_alpha_kill)
+			{
+				enabled_options.push_back("_ENABLE_TEXTURE_ALPHA_KILL");
+			}
+
+			if (props.require_color_format_convert)
+			{
+				enabled_options.push_back("_ENABLE_FORMAT_CONVERSION");
+			}
+
+			if (props.require_depth_conversion)
+			{
+				enabled_options.push_back("_ENABLE_DEPTH_FORMAT_RECONSTRUCTION");
+			}
+
+			if (props.require_msaa_ops)
+			{
+				enabled_options.push_back("_ENABLE_TEXTURE_MULTISAMPLE");
+			}
+
 			program_common::define_glsl_switches(OS, enabled_options);
 			enabled_options.clear();
 
 			OS <<
-#include "GLSLSnippets/RSXProg/RSXFragmentTextureOps.glsl"
-				;
+				#include "GLSLSnippets/RSXProg/RSXFragmentTextureOps.glsl"
+			;
 
 			if (props.require_depth_conversion)
 			{
 				OS <<
-#include "GLSLSnippets/RSXProg/RSXFragmentTextureDepthConversion.glsl"
-					;
+					#include "GLSLSnippets/RSXProg/RSXFragmentTextureDepthConversion.glsl"
+				;
 			}
 
 			if (props.require_msaa_ops)
 			{
 				OS <<
-#include "GLSLSnippets/RSXProg/RSXFragmentTextureMSAAOps.glsl"
-					;
+					#include "GLSLSnippets/RSXProg/RSXFragmentTextureMSAAOps.glsl"
+				;
 
 				// Generate multiple versions of the actual sampler code.
 				// We could use defines to generate these, but I don't trust some OpenGL compilers to do the right thing.
 				const std::string_view msaa_sampling_impl =
-#include "GLSLSnippets/RSXProg/RSXFragmentTextureMSAAOpsInternal.glsl"
-					;
+					#include "GLSLSnippets/RSXProg/RSXFragmentTextureMSAAOpsInternal.glsl"
+				;
 
 				OS << fmt::replace_all(msaa_sampling_impl, "_MSAA_SAMPLER_TYPE_", "sampler2DMS");
 				if (props.require_depth_conversion)
@@ -530,8 +589,8 @@ namespace glsl
 		// Global types and stuff
 		// Must be compatible with std140 packing rules
 		OS <<
-#include "GLSLSnippets/RSXProg/RSXDefines2.glsl"
-			;
+			#include "GLSLSnippets/RSXProg/RSXDefines2.glsl"
+		;
 	}
 
 	void insert_fragment_shader_inputs_block(
@@ -556,8 +615,7 @@ namespace glsl
 			for (const ParamItem& PI : PT.items)
 			{
 				// ssa is defined in the program body and is not a varying type
-				if (PI.name == "ssa")
-					continue;
+				if (PI.name == "ssa") continue;
 
 				const auto reg_location = varying_location(PI.name);
 				std::string var_name = PI.name;
@@ -578,7 +636,7 @@ namespace glsl
 					}
 				}
 
-				varying_list.push_back({reg_location, var_name, PT.type});
+				varying_list.push_back({ reg_location, var_name, PT.type });
 			}
 		}
 
@@ -586,12 +644,12 @@ namespace glsl
 		{
 			if (_2sided_lighting.two_sided_color)
 			{
-				varying_list.push_back({varying_location("diff_color1"), "diff_color1", "vec4"});
+				varying_list.push_back({ varying_location("diff_color1"), "diff_color1", "vec4" });
 			}
 
 			if (_2sided_lighting.two_sided_specular)
 			{
-				varying_list.push_back({varying_location("spec_color1"), "spec_color1", "vec4"});
+				varying_list.push_back({ varying_location("spec_color1"), "spec_color1", "vec4" });
 			}
 		}
 
@@ -626,12 +684,12 @@ namespace glsl
 			"vec4 _interpolate_varying3(const in vec4[3] v)\n"
 			"{\n"
 			// In the corner case where v[0] == v[1] == v[2], this algorithm generates a perfect result vs alternatives that use weighted multiply + add.
-		    // Due to the finite precision of floating point arithmetic, adding together the result of different multiplies yeields a slightly inaccurate result which breaks things.
+			// Due to the finite precision of floating point arithmetic, adding together the result of different multiplies yeields a slightly inaccurate result which breaks things.
 			"	const vec4 p10 = v[1] - v[0];\n"
 			"	const vec4 p20 = v[2] - v[0];\n"
 			"	return v[0] + p10 * $gl_BaryCoord.y + p20 * $gl_BaryCoord.z;\n"
 			"}\n\n";
-		OS << fmt::replace_all(interpolate_function_block, {{"$gl_BaryCoord", "gl_BaryCoord"s + std::string(ext_flavour)}});
+		OS << fmt::replace_all(interpolate_function_block, {{ "$gl_BaryCoord", "gl_BaryCoord"s + std::string(ext_flavour) }});
 
 		for (const auto& reg : varying_list)
 		{
@@ -640,4 +698,4 @@ namespace glsl
 
 		OS << "\n";
 	}
-} // namespace glsl
+}

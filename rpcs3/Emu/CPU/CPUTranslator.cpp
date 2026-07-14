@@ -22,68 +22,73 @@ llvm::Value* peek_through_bitcasts(llvm::Value* arg)
 }
 
 cpu_translator::cpu_translator(llvm::Module* _module, bool is_be)
-	: m_context(g_llvm_ctx), m_module(_module), m_is_be(is_be)
+    : m_context(g_llvm_ctx)
+	, m_module(_module)
+	, m_is_be(is_be)
 {
 	register_intrinsic("x86_pshufb", [&](llvm::CallInst* ci) -> llvm::Value*
-		{
-			const auto data0 = ci->getOperand(0);
-			const auto index = ci->getOperand(1);
-			const auto zeros = llvm::ConstantAggregateZero::get(get_type<u8[16]>());
+	{
+		const auto data0 = ci->getOperand(0);
+		const auto index = ci->getOperand(1);
+		const auto zeros = llvm::ConstantAggregateZero::get(get_type<u8[16]>());
 
-			if (m_use_ssse3)
-			{
+		if (m_use_ssse3)
+		{
 #if defined(ARCH_X64)
-				return m_ir->CreateCall(get_intrinsic(llvm::Intrinsic::x86_ssse3_pshuf_b_128), {data0, index});
+			return m_ir->CreateCall(get_intrinsic(llvm::Intrinsic::x86_ssse3_pshuf_b_128), {data0, index});
 #elif defined(ARCH_ARM64)
-				// Modified from sse2neon
-			    // movi    v2.16b, #143
-			    // and     v1.16b, v1.16b, v2.16b
-			    // tbl     v0.16b, { v0.16b }, v1.16b
-				auto mask = llvm::ConstantInt::get(get_type<u8[16]>(), 0x8F);
-				auto and_mask = llvm::ConstantInt::get(get_type<bool[16]>(), true);
-				auto vec_len = llvm::ConstantInt::get(get_type<u32>(), 16);
-				auto index_masked = m_ir->CreateCall(get_intrinsic<u8[16]>(llvm::Intrinsic::vp_and), {index, mask, and_mask, vec_len});
-				return m_ir->CreateCall(get_intrinsic<u8[16]>(llvm::Intrinsic::aarch64_neon_tbl1), {data0, index_masked});
+			// Modified from sse2neon
+			// movi    v2.16b, #143
+			// and     v1.16b, v1.16b, v2.16b
+			// tbl     v0.16b, { v0.16b }, v1.16b
+			auto mask = llvm::ConstantInt::get(get_type<u8[16]>(), 0x8F);
+			auto and_mask = llvm::ConstantInt::get(get_type<bool[16]>(), true);
+			auto vec_len = llvm::ConstantInt::get(get_type<u32>(), 16);
+			auto index_masked = m_ir->CreateCall(get_intrinsic<u8[16]>(llvm::Intrinsic::vp_and), {index, mask, and_mask, vec_len});
+			return m_ir->CreateCall(get_intrinsic<u8[16]>(llvm::Intrinsic::aarch64_neon_tbl1), {data0, index_masked});
 #else
 #error "Unimplemented"
 #endif
-			}
-			else
-			{
-				// Emulate PSHUFB (TODO)
-				const auto mask = m_ir->CreateAnd(index, 0xf);
-				const auto loop = llvm::BasicBlock::Create(m_context, "", m_ir->GetInsertBlock()->getParent());
-				const auto prev = ci->getParent();
-				const auto next = prev->splitBasicBlock(ci->getNextNode());
+		}
+		else
+		{
+			// Emulate PSHUFB (TODO)
+			const auto mask = m_ir->CreateAnd(index, 0xf);
+			const auto loop = llvm::BasicBlock::Create(m_context, "", m_ir->GetInsertBlock()->getParent());
+			const auto prev = ci->getParent();
+			const auto next = prev->splitBasicBlock(ci->getNextNode());
 
-				llvm::cast<llvm::BranchInst>(m_ir->GetInsertBlock()->getTerminator())->setOperand(0, loop);
+			llvm::cast<llvm::BranchInst>(m_ir->GetInsertBlock()->getTerminator())->setOperand(0, loop);
 
-				llvm::Value* result;
-				// m_ir->CreateBr(loop);
-				m_ir->SetInsertPoint(loop);
-				const auto i = m_ir->CreatePHI(get_type<u32>(), 2);
-				const auto v = m_ir->CreatePHI(get_type<u8[16]>(), 2);
-				i->addIncoming(m_ir->getInt32(0), prev);
-				i->addIncoming(m_ir->CreateAdd(i, m_ir->getInt32(1)), loop);
-				v->addIncoming(zeros, prev);
-				result = m_ir->CreateInsertElement(v, m_ir->CreateExtractElement(data0, m_ir->CreateExtractElement(mask, i)), i);
-				v->addIncoming(result, loop);
-				m_ir->CreateCondBr(m_ir->CreateICmpULT(i, m_ir->getInt32(16)), loop, next);
-				m_ir->SetInsertPoint(next->getFirstNonPHI());
-				result = m_ir->CreateSelect(m_ir->CreateICmpSLT(index, zeros), zeros, result);
+			llvm::Value* result;
+			//m_ir->CreateBr(loop);
+			m_ir->SetInsertPoint(loop);
+			const auto i = m_ir->CreatePHI(get_type<u32>(), 2);
+			const auto v = m_ir->CreatePHI(get_type<u8[16]>(), 2);
+			i->addIncoming(m_ir->getInt32(0), prev);
+			i->addIncoming(m_ir->CreateAdd(i, m_ir->getInt32(1)), loop);
+			v->addIncoming(zeros, prev);
+			result = m_ir->CreateInsertElement(v, m_ir->CreateExtractElement(data0, m_ir->CreateExtractElement(mask, i)), i);
+			v->addIncoming(result, loop);
+			m_ir->CreateCondBr(m_ir->CreateICmpULT(i, m_ir->getInt32(16)), loop, next);
+#if LLVM_VERSION_MAJOR >= 21 || (LLVM_VERSION_MAJOR == 20 && LLVM_VERSION_MINOR >= 1)
+			m_ir->SetInsertPoint(next->getFirstNonPHIIt());
+#else
+			m_ir->SetInsertPoint(next->getFirstNonPHI());
+#endif
+			result = m_ir->CreateSelect(m_ir->CreateICmpSLT(index, zeros), zeros, result);
 
-				return result;
-			}
-		});
+			return result;
+		}
+	});
 
 	register_intrinsic("any_select_by_bit4", [&](llvm::CallInst* ci) -> llvm::Value*
-		{
-			const auto s = bitcast<s8[16]>(m_ir->CreateShl(bitcast<u64[2]>(ci->getOperand(0)), 3));
-			;
-			const auto a = bitcast<u8[16]>(ci->getOperand(1));
-			const auto b = bitcast<u8[16]>(ci->getOperand(2));
-			return m_ir->CreateSelect(m_ir->CreateICmpSLT(s, llvm::ConstantAggregateZero::get(get_type<s8[16]>())), b, a);
-		});
+	{
+		const auto s = bitcast<s8[16]>(m_ir->CreateShl(bitcast<u64[2]>(ci->getOperand(0)), 3));;
+		const auto a = bitcast<u8[16]>(ci->getOperand(1));
+		const auto b = bitcast<u8[16]>(ci->getOperand(2));
+		return m_ir->CreateSelect(m_ir->CreateICmpSLT(s, llvm::ConstantAggregateZero::get(get_type<s8[16]>())), b, a);
+	});
 }
 
 void cpu_translator::initialize(llvm::LLVMContext& context, llvm::ExecutionEngine& engine)
@@ -134,7 +139,10 @@ void cpu_translator::initialize(llvm::LLVMContext& context, llvm::ExecutionEngin
 		cpu == "bdver4" ||
 		cpu == "znver1" ||
 		cpu == "znver2" ||
-		cpu == "znver3")
+		cpu == "znver3" ||
+		cpu == "arrowlake" ||
+		cpu == "arrowlake-s" ||
+		cpu == "lunarlake")
 	{
 		m_use_fma = true;
 		m_use_avx = true;
@@ -156,7 +164,10 @@ void cpu_translator::initialize(llvm::LLVMContext& context, llvm::ExecutionEngin
 		cpu == "cooperlake" ||
 		cpu == "alderlake" ||
 		cpu == "raptorlake" ||
-		cpu == "meteorlake")
+		cpu == "meteorlake" ||
+		cpu == "arrowlake" ||
+		cpu == "arrowlake-s" ||
+		cpu == "lunarlake")
 	{
 		m_use_vnni = true;
 	}
@@ -166,7 +177,10 @@ void cpu_translator::initialize(llvm::LLVMContext& context, llvm::ExecutionEngin
 		cpu == "gracemont" ||
 		cpu == "alderlake" ||
 		cpu == "raptorlake" ||
-		cpu == "meteorlake")
+		cpu == "meteorlake" ||
+		cpu == "arrowlake" ||
+		cpu == "arrowlake-s" ||
+		cpu == "lunarlake")
 	{
 		m_use_gfni = true;
 	}
@@ -188,16 +202,15 @@ void cpu_translator::initialize(llvm::LLVMContext& context, llvm::ExecutionEngin
 		m_use_gfni = true;
 	}
 
-	// Aarch64 CPUs
-	if (cpu == "cyclone" || cpu.contains("cortex"))
+#ifdef ARCH_ARM64
+	if (utils::has_dotprod())
 	{
-		m_use_fma = true;
-		// AVX does not use intrinsics so far
-		m_use_avx = true;
+		m_use_dotprod = true;
 	}
+#endif
 }
 
-llvm::Value* cpu_translator::bitcast(llvm::Value* val, llvm::Type* type) const
+llvm::Value* cpu_translator::bitcast(llvm::Value* val, llvm::Type* type, std::source_location src_loc) const
 {
 	uint s1 = type->getScalarSizeInBits();
 	uint s2 = val->getType()->getScalarSizeInBits();
@@ -209,15 +222,81 @@ llvm::Value* cpu_translator::bitcast(llvm::Value* val, llvm::Type* type) const
 
 	if (s1 != s2)
 	{
-		fmt::throw_exception("cpu_translator::bitcast(): incompatible type sizes (%u vs %u)", s1, s2);
+		fmt::throw_exception("cpu_translator::bitcast(): incompatible type sizes (%u vs %u)\nCalled from: %s", s1, s2, src_loc);
 	}
 
-	if (const auto c1 = llvm::dyn_cast<llvm::Constant>(val))
+	if (val->getType() == type)
+	{
+		return val;
+	}
+
+	llvm::CastInst* i;
+	llvm::Value* source_val = val;
+
+	// Try to reuse older bitcasts
+	while ((i = llvm::dyn_cast_or_null<llvm::CastInst>(source_val)) && i->getOpcode() == llvm::Instruction::BitCast)
+	{
+		source_val = i->getOperand(0);
+
+		if (source_val->getType() == type)
+		{
+			return source_val;
+		}
+	}
+
+	// Skip use iteration for values that don't have use lists
+#if LLVM_VERSION_MAJOR >= 21
+	if (source_val->hasUseList())
+#endif
+	{
+		for (llvm::Value* it_val : source_val->uses())
+		{
+			if (!it_val)
+			{
+				continue;
+			}
+
+			llvm::CastInst* bci = llvm::dyn_cast_or_null<llvm::CastInst>(it_val);
+
+			// Walk through bitcasts
+			while (bci && bci->getOpcode() == llvm::Instruction::BitCast)
+			{
+				if (bci->getParent() != m_ir->GetInsertBlock())
+				{
+					break;
+				}
+
+				if (bci->getType() == type)
+				{
+					return bci;
+				}
+
+				// Check if bci has use list before accessing use_begin()
+#if LLVM_VERSION_MAJOR >= 21
+				if (!bci->hasUseList())
+				{
+					break;
+				}
+#endif
+
+				if (bci->use_begin() == bci->use_end())
+				{
+					break;
+				}
+
+				bci = llvm::dyn_cast_or_null<llvm::CastInst>(*bci->use_begin());
+			}
+		}
+	}
+
+	// Do bitcast on the source
+
+	if (const auto c1 = llvm::dyn_cast<llvm::Constant>(source_val))
 	{
 		return ensure(llvm::ConstantFoldCastOperand(llvm::Instruction::BitCast, c1, type, m_module->getDataLayout()));
 	}
 
-	return m_ir->CreateBitCast(val, type);
+	return m_ir->CreateBitCast(source_val, type);
 }
 
 template <>
@@ -486,14 +565,25 @@ void cpu_translator::erase_stores(llvm::ArrayRef<llvm::Value*> args)
 {
 	for (auto v : args)
 	{
-		for (auto it = v->use_begin(); it != v->use_end(); ++it)
+		// Skip use iteration for values that don't have use lists
+#if LLVM_VERSION_MAJOR >= 21
+		if (!v->hasUseList())
+			continue;
+#endif
+
+		for (llvm::Value* i : v->uses())
 		{
-			llvm::Value* i = *it;
 			llvm::CastInst* bci = nullptr;
 
 			// Walk through bitcasts
 			while (i && (bci = llvm::dyn_cast<llvm::CastInst>(i)) && bci->getOpcode() == llvm::Instruction::BitCast)
 			{
+				// Check if bci has use list before accessing use_begin()
+#if LLVM_VERSION_MAJOR >= 21
+				if (!bci->hasUseList())
+					break;
+#endif
+
 				i = *bci->use_begin();
 			}
 

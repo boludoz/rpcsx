@@ -4,8 +4,7 @@
 
 #include "../VKResourceManager.h"
 
-#include <rx/align.hpp>
-#include <rx/asm.hpp>
+#include <util/asm.hpp>
 
 namespace vk
 {
@@ -51,7 +50,7 @@ namespace vk
 		sampler_info.compareOp = VK_COMPARE_OP_NEVER;
 		sampler_info.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
 
-		VK_GET_SYMBOL(vkCreateSampler)(*g_render_device, &sampler_info, nullptr, &g_null_sampler);
+		vkCreateSampler(*g_render_device, &sampler_info, nullptr, &g_null_sampler);
 		return g_null_sampler;
 	}
 
@@ -110,8 +109,8 @@ namespace vk
 		tex->change_layout(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
 		VkClearColorValue clear_color = {};
-		VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, tex->mipmaps(), 0, tex->layers()};
-		VK_GET_SYMBOL(vkCmdClearColorImage)(cmd, tex->value, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_color, 1, &range);
+		VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, tex->mipmaps(), 0, tex->layers() };
+		vkCmdClearColorImage(cmd, tex->value, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_color, 1, &range);
 
 		// Prep for shader access
 		tex->change_layout(cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -124,8 +123,8 @@ namespace vk
 	{
 		auto create_texture = [&]()
 		{
-			u32 new_width = rx::alignUp(requested_width, 256u);
-			u32 new_height = rx::alignUp(requested_height, 256u);
+			u32 new_width = utils::align(requested_width, 256u);
+			u32 new_height = utils::align(requested_height, 256u);
 
 			return new vk::image(*g_render_device, g_render_device->get_memory_mapping().device_local, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
 				VK_IMAGE_TYPE_2D, format, new_width, new_height, 1, 1, 1, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
@@ -166,7 +165,7 @@ namespace vk
 		if (!scratch_buffer)
 		{
 			// Choose optimal size
-			const u64 alloc_size = rx::alignUp(min_required_size, 0x100000);
+			const u64 alloc_size = utils::align(min_required_size, 0x100000);
 
 			scratch_buffer = std::make_unique<vk::buffer>(*g_render_device, alloc_size,
 				g_render_device->get_memory_mapping().device_local, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
@@ -175,22 +174,28 @@ namespace vk
 			is_new = true;
 		}
 
-		return {scratch_buffer.get(), is_new};
+		return { scratch_buffer.get(), is_new };
 	}
 
-	vk::buffer* get_scratch_buffer(const vk::command_buffer& cmd, u64 min_required_size, bool zero_memory)
+	vk::buffer* get_scratch_buffer(const vk::command_buffer& cmd, u64 min_required_size, VkPipelineStageFlags dst_stage_flags, VkAccessFlags dst_access, bool zero_memory)
 	{
 		const auto [buf, init_mem] = get_scratch_buffer(cmd.get_queue_family(), min_required_size);
 
 		if (init_mem || zero_memory)
 		{
 			// Zero-initialize the allocated VRAM
-			const u64 zero_length = init_mem ? buf->size() : rx::alignUp(min_required_size, 4);
-			VK_GET_SYMBOL(vkCmdFillBuffer)(cmd, buf->value, 0, zero_length, 0);
+			const u64 zero_length = init_mem ? buf->size() : utils::align(min_required_size, 4);
+			vkCmdFillBuffer(cmd, buf->value, 0, zero_length, 0);
 
 			insert_buffer_memory_barrier(cmd, buf->value, 0, zero_length,
 				VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
 				VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT);
+		}
+		else if (dst_access != VK_ACCESS_NONE)
+		{
+			insert_buffer_memory_barrier(cmd, buf->value, 0, min_required_size,
+				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT, dst_stage_flags,
+				VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT, dst_access);
 		}
 
 		return buf;
@@ -205,8 +210,8 @@ namespace vk
 
 		if (g_null_sampler)
 		{
-			VK_GET_SYMBOL(vkDestroySampler)(*g_render_device, g_null_sampler, nullptr);
+			vkDestroySampler(*g_render_device, g_null_sampler, nullptr);
 			g_null_sampler = nullptr;
 		}
 	}
-} // namespace vk
+}

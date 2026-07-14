@@ -12,36 +12,38 @@ template <>
 void fmt_class_string<usio_btn>::format(std::string& out, u64 arg)
 {
 	format_enum(out, arg, [](usio_btn value)
+	{
+		switch (value)
 		{
-			switch (value)
-			{
-			case usio_btn::test: return "Test";
-			case usio_btn::coin: return "Coin";
-			case usio_btn::service: return "Service";
-			case usio_btn::enter: return "Enter/Start";
-			case usio_btn::up: return "Up";
-			case usio_btn::down: return "Down";
-			case usio_btn::left: return "Left";
-			case usio_btn::right: return "Right";
-			case usio_btn::taiko_hit_side_left: return "Taiko Hit Side Left";
-			case usio_btn::taiko_hit_side_right: return "Taiko Hit Side Right";
-			case usio_btn::taiko_hit_center_left: return "Taiko Hit Center Left";
-			case usio_btn::taiko_hit_center_right: return "Taiko Hit Center Right";
-			case usio_btn::tekken_button1: return "Tekken Button 1";
-			case usio_btn::tekken_button2: return "Tekken Button 2";
-			case usio_btn::tekken_button3: return "Tekken Button 3";
-			case usio_btn::tekken_button4: return "Tekken Button 4";
-			case usio_btn::tekken_button5: return "Tekken Button 5";
-			case usio_btn::count: return "Count";
-			}
+		case usio_btn::test: return "Test";
+		case usio_btn::coin: return "Coin";
+		case usio_btn::service: return "Service";
+		case usio_btn::enter: return "Enter/Start";
+		case usio_btn::up: return "Up";
+		case usio_btn::down: return "Down";
+		case usio_btn::left: return "Left";
+		case usio_btn::right: return "Right";
+		case usio_btn::taiko_hit_side_left: return "Taiko Hit Side Left";
+		case usio_btn::taiko_hit_side_right: return "Taiko Hit Side Right";
+		case usio_btn::taiko_hit_center_left: return "Taiko Hit Center Left";
+		case usio_btn::taiko_hit_center_right: return "Taiko Hit Center Right";
+		case usio_btn::tekken_button1: return "Tekken Button 1";
+		case usio_btn::tekken_button2: return "Tekken Button 2";
+		case usio_btn::tekken_button3: return "Tekken Button 3";
+		case usio_btn::tekken_button4: return "Tekken Button 4";
+		case usio_btn::tekken_button5: return "Tekken Button 5";
+		case usio_btn::card_tapping: return "Card Tapping";
+		case usio_btn::count: return "Count";
+		}
 
-			return unknown;
-		});
+		return unknown;
+	});
 }
 
 struct usio_memory
 {
 	std::vector<u8> backup_memory;
+	std::array<std::array<u8, 0x40>, g_cfg_usio.players.size()> card_data{};
 
 	usio_memory() = default;
 	usio_memory(const usio_memory&) = delete;
@@ -65,59 +67,59 @@ usb_device_usio::usb_device_usio(const std::array<u8, 7>& location)
 
 	device = UsbDescriptorNode(USB_DESCRIPTOR_DEVICE,
 		UsbDeviceDescriptor{
-			.bcdUSB = 0x0110,
-			.bDeviceClass = 0xff,
-			.bDeviceSubClass = 0x00,
-			.bDeviceProtocol = 0xff,
-			.bMaxPacketSize0 = 0x8,
-			.idVendor = 0x0b9a,
-			.idProduct = 0x0910,
-			.bcdDevice = 0x0910,
-			.iManufacturer = 0x01,
-			.iProduct = 0x02,
-			.iSerialNumber = 0x00,
+			.bcdUSB             = 0x0110,
+			.bDeviceClass       = 0xff,
+			.bDeviceSubClass    = 0x00,
+			.bDeviceProtocol    = 0xff,
+			.bMaxPacketSize0    = 0x8,
+			.idVendor           = 0x0b9a,
+			.idProduct          = 0x0910,
+			.bcdDevice          = 0x0910,
+			.iManufacturer      = 0x01,
+			.iProduct           = 0x02,
+			.iSerialNumber      = 0x00,
 			.bNumConfigurations = 0x01});
 
 	auto& config0 = device.add_node(UsbDescriptorNode(USB_DESCRIPTOR_CONFIG,
 		UsbDeviceConfiguration{
-			.wTotalLength = 39,
-			.bNumInterfaces = 0x01,
+			.wTotalLength        = 39,
+			.bNumInterfaces      = 0x01,
 			.bConfigurationValue = 0x01,
-			.iConfiguration = 0x00,
-			.bmAttributes = 0xc0,
-			.bMaxPower = 0x32 // ??? 100ma
+			.iConfiguration      = 0x00,
+			.bmAttributes        = 0xc0,
+			.bMaxPower           = 0x32 // ??? 100ma
 		}));
 
 	config0.add_node(UsbDescriptorNode(USB_DESCRIPTOR_INTERFACE,
 		UsbDeviceInterface{
-			.bInterfaceNumber = 0x00,
-			.bAlternateSetting = 0x00,
-			.bNumEndpoints = 0x03,
-			.bInterfaceClass = 0x00,
+			.bInterfaceNumber   = 0x00,
+			.bAlternateSetting  = 0x00,
+			.bNumEndpoints      = 0x03,
+			.bInterfaceClass    = 0x00,
 			.bInterfaceSubClass = 0x00,
 			.bInterfaceProtocol = 0x00,
-			.iInterface = 0x00}));
+			.iInterface         = 0x00}));
 
 	config0.add_node(UsbDescriptorNode(USB_DESCRIPTOR_ENDPOINT,
 		UsbDeviceEndpoint{
 			.bEndpointAddress = 0x01,
-			.bmAttributes = 0x02,
-			.wMaxPacketSize = 0x0040,
-			.bInterval = 0x00}));
+			.bmAttributes     = 0x02,
+			.wMaxPacketSize   = 0x0040,
+			.bInterval        = 0x00}));
 
 	config0.add_node(UsbDescriptorNode(USB_DESCRIPTOR_ENDPOINT,
 		UsbDeviceEndpoint{
 			.bEndpointAddress = 0x82,
-			.bmAttributes = 0x02,
-			.wMaxPacketSize = 0x0040,
-			.bInterval = 0x00}));
+			.bmAttributes     = 0x02,
+			.wMaxPacketSize   = 0x0040,
+			.bInterval        = 0x00}));
 
 	config0.add_node(UsbDescriptorNode(USB_DESCRIPTOR_ENDPOINT,
 		UsbDeviceEndpoint{
 			.bEndpointAddress = 0x83,
-			.bmAttributes = 0x03,
-			.wMaxPacketSize = 0x0008,
-			.bInterval = 16}));
+			.bmAttributes     = 0x03,
+			.wMaxPacketSize   = 0x0008,
+			.bInterval        = 16}));
 
 	load_backup();
 }
@@ -142,12 +144,12 @@ void usb_device_usio::control_transfer(u8 bmRequestType, u8 bRequest, u16 wValue
 	transfer->fake = true;
 
 	// Control transfers are nearly instant
-	// switch (bmRequestType)
+	//switch (bmRequestType)
 	{
-		// default:
-		//  Follow to default emulated handler
+	//default:
+		// Follow to default emulated handler
 		usb_device_emulated::control_transfer(bmRequestType, bRequest, wValue, wIndex, wLength, buf_size, buf, transfer);
-		// break;
+		//break;
 	}
 }
 
@@ -175,6 +177,16 @@ void usb_device_usio::load_backup()
 	}
 
 	usio_backup_file.read(memory.backup_memory.data(), file_size);
+
+	for (usz i = 0; i < memory.card_data.size(); i++)
+	{
+		if (fs::file usio_card_file;
+			usio_card_file.open(fmt::format("%s/caches/usio_card_p%d.bin", rpcs3::utils::get_hdd1_dir(), i + 1), fs::read) &&
+			usio_card_file.size() == memory.card_data[i].size())
+		{
+			usio_card_file.read(memory.card_data[i].data(), memory.card_data[i].size());
+		}
+	}
 }
 
 void usb_device_usio::save_backup()
@@ -210,69 +222,73 @@ void usb_device_usio::translate_input_taiko()
 		const usz offset = player * 8ULL;
 		auto& status = m_io_status[0];
 
-		if (const auto& pad = ::at32(handler->GetPads(), pad_number); (pad->m_port_status & CELL_PAD_STATUS_CONNECTED) && is_input_allowed())
+		if (const auto& pad = ::at32(handler->GetPads(), pad_number); pad->is_connected() && !pad->is_copilot() && is_input_allowed())
 		{
 			const auto& cfg = ::at32(g_cfg_usio.players, pad_number);
 			cfg->handle_input(pad, false, [&](usio_btn btn, pad_button /*pad_btn*/, u16 /*value*/, bool pressed, bool& /*abort*/)
+			{
+				switch (btn)
 				{
-					switch (btn)
-					{
-					case usio_btn::test:
-						if (player != 0)
-							break;
-						if (pressed && !status.test_key_pressed) // Solve the need to hold the Test key
-							status.test_on = !status.test_on;
-						status.test_key_pressed = pressed;
-						break;
-					case usio_btn::coin:
-						if (player != 0)
-							break;
-						if (pressed && !status.coin_key_pressed) // Ensure only one coin is inserted each time the Coin key is pressed
-							status.coin_counter++;
-						status.coin_key_pressed = pressed;
-						break;
-					case usio_btn::service:
-						if (player == 0 && pressed)
-							digital_input |= 0x4000;
-						break;
-					case usio_btn::enter:
-						if (player == 0 && pressed)
-							digital_input |= 0x200;
-						break;
-					case usio_btn::up:
-						if (player == 0 && pressed)
-							digital_input |= 0x2000;
-						break;
-					case usio_btn::down:
-						if (player == 0 && pressed)
-							digital_input |= 0x1000;
-						break;
-					case usio_btn::taiko_hit_side_left:
-						if (pressed)
-							std::memcpy(input_buf.data() + 32 + offset, &c_hit, sizeof(u16));
-						break;
-					case usio_btn::taiko_hit_center_right:
-						if (pressed)
-							std::memcpy(input_buf.data() + 36 + offset, &c_hit, sizeof(u16));
-						break;
-					case usio_btn::taiko_hit_side_right:
-						if (pressed)
-							std::memcpy(input_buf.data() + 38 + offset, &c_hit, sizeof(u16));
-						break;
-					case usio_btn::taiko_hit_center_left:
-						if (pressed)
-							std::memcpy(input_buf.data() + 34 + offset, &c_hit, sizeof(u16));
-						break;
-					default:
-						break;
-					}
-				});
+				case usio_btn::test:
+					if (player != 0) break;
+					if (pressed && !status.test_key_pressed) // Solve the need to hold the Test key
+						status.test_on = !status.test_on;
+					status.test_key_pressed = pressed;
+					break;
+				case usio_btn::coin:
+					if (player != 0) break;
+					if (pressed && !status.coin_key_pressed) // Ensure only one coin is inserted each time the Coin key is pressed
+						status.coin_counter++;
+					status.coin_key_pressed = pressed;
+					break;
+				case usio_btn::service:
+					if (player == 0 && pressed)
+						digital_input |= 0x4000;
+					break;
+				case usio_btn::enter:
+					if (player == 0 && pressed)
+						digital_input |= 0x200;
+					break;
+				case usio_btn::up:
+					if (player == 0 && pressed)
+						digital_input |= 0x2000;
+					break;
+				case usio_btn::down:
+					if (player == 0 && pressed)
+						digital_input |= 0x1000;
+					break;
+				case usio_btn::taiko_hit_side_left:
+					if (pressed)
+						std::memcpy(input_buf.data() + 32 + offset, &c_hit, sizeof(u16));
+					break;
+				case usio_btn::taiko_hit_center_right:
+					if (pressed)
+						std::memcpy(input_buf.data() + 36 + offset, &c_hit, sizeof(u16));
+					break;
+				case usio_btn::taiko_hit_side_right:
+					if (pressed)
+						std::memcpy(input_buf.data() + 38 + offset, &c_hit, sizeof(u16));
+					break;
+				case usio_btn::taiko_hit_center_left:
+					if (pressed)
+						std::memcpy(input_buf.data() + 34 + offset, &c_hit, sizeof(u16));
+					break;
+				case usio_btn::card_tapping:
+					if (pressed)
+						tap_card(player);
+					break;
+				default:
+					break;
+				}
+			});
 		}
 
 		if (player == 0 && status.test_on)
 			digital_input |= 0x80;
 	};
 
+	for (usz i = 0; i < m_io_status.size(); i++)
+		m_io_status[i].card_tapped = false;
 	for (usz i = 0; i < g_cfg_usio.players.size(); i++)
 		translate_from_pad(i, i);
 
@@ -297,99 +313,103 @@ void usb_device_usio::translate_input_tekken()
 		auto& status = m_io_status[player / 2];
 		auto& input = digital_input[player / 2];
 
-		if (const auto& pad = ::at32(handler->GetPads(), pad_number); (pad->m_port_status & CELL_PAD_STATUS_CONNECTED) && is_input_allowed())
+		if (const auto& pad = ::at32(handler->GetPads(), pad_number); pad->is_connected() && !pad->is_copilot() && is_input_allowed())
 		{
 			const auto& cfg = ::at32(g_cfg_usio.players, pad_number);
 			cfg->handle_input(pad, false, [&](usio_btn btn, pad_button /*pad_btn*/, u16 /*value*/, bool pressed, bool& /*abort*/)
+			{
+				switch (btn)
 				{
-					switch (btn)
+				case usio_btn::test:
+					if (player % 2 != 0)
+						break;
+					if (pressed && !status.test_key_pressed) // Solve the need to hold the Test button
+						status.test_on = !status.test_on;
+					status.test_key_pressed = pressed;
+					break;
+				case usio_btn::coin:
+					if (player % 2 != 0)
+						break;
+					if (pressed && !status.coin_key_pressed) // Ensure only one coin is inserted each time the Coin button is pressed
+						status.coin_counter++;
+					status.coin_key_pressed = pressed;
+					break;
+				case usio_btn::service:
+					if (player % 2 == 0 && pressed)
+						input |= 0x4000;
+					break;
+				case usio_btn::enter:
+					if (pressed)
 					{
-					case usio_btn::test:
-						if (player % 2 != 0)
-							break;
-						if (pressed && !status.test_key_pressed) // Solve the need to hold the Test button
-							status.test_on = !status.test_on;
-						status.test_key_pressed = pressed;
-						break;
-					case usio_btn::coin:
-						if (player % 2 != 0)
-							break;
-						if (pressed && !status.coin_key_pressed) // Ensure only one coin is inserted each time the Coin button is pressed
-							status.coin_counter++;
-						status.coin_key_pressed = pressed;
-						break;
-					case usio_btn::service:
-						if (player % 2 == 0 && pressed)
-							input |= 0x4000;
-						break;
-					case usio_btn::enter:
-						if (pressed)
-						{
-							input |= 0x800000ULL << shift;
-							if (player == 0)
-								digital_input_lm |= 0x800;
-						}
-						break;
-					case usio_btn::up:
-						if (pressed)
-						{
-							input |= 0x200000ULL << shift;
-							if (player == 0)
-								digital_input_lm |= 0x200;
-						}
-						break;
-					case usio_btn::down:
-						if (pressed)
-						{
-							input |= 0x100000ULL << shift;
-							if (player == 0)
-								digital_input_lm |= 0x400;
-						}
-						break;
-					case usio_btn::left:
-						if (pressed)
-						{
-							input |= 0x80000ULL << shift;
-							if (player == 0)
-								digital_input_lm |= 0x2000;
-						}
-						break;
-					case usio_btn::right:
-						if (pressed)
-						{
-							input |= 0x40000ULL << shift;
-							if (player == 0)
-								digital_input_lm |= 0x4000;
-						}
-						break;
-					case usio_btn::tekken_button1:
-						if (pressed)
-						{
-							input |= 0x20000ULL << shift;
-							if (player == 0)
-								digital_input_lm |= 0x100;
-						}
-						break;
-					case usio_btn::tekken_button2:
-						if (pressed)
-							input |= 0x10000ULL << shift;
-						break;
-					case usio_btn::tekken_button3:
-						if (pressed)
-							input |= 0x40000000ULL << shift;
-						break;
-					case usio_btn::tekken_button4:
-						if (pressed)
-							input |= 0x20000000ULL << shift;
-						break;
-					case usio_btn::tekken_button5:
-						if (pressed)
-							input |= 0x80000000ULL << shift;
-						break;
-					default:
-						break;
+						input |= 0x800000ULL << shift;
+						if (player == 0)
+							digital_input_lm |= 0x800;
 					}
-				});
+					break;
+				case usio_btn::up:
+					if (pressed)
+					{
+						input |= 0x200000ULL << shift;
+						if (player == 0)
+							digital_input_lm |= 0x200;
+					}
+					break;
+				case usio_btn::down:
+					if (pressed)
+					{
+						input |= 0x100000ULL << shift;
+						if (player == 0)
+							digital_input_lm |= 0x400;
+					}
+					break;
+				case usio_btn::left:
+					if (pressed)
+					{
+						input |= 0x80000ULL << shift;
+						if (player == 0)
+							digital_input_lm |= 0x2000;
+					}
+					break;
+				case usio_btn::right:
+					if (pressed)
+					{
+						input |= 0x40000ULL << shift;
+						if (player == 0)
+							digital_input_lm |= 0x4000;
+					}
+					break;
+				case usio_btn::tekken_button1:
+					if (pressed)
+					{
+						input |= 0x20000ULL << shift;
+						if (player == 0)
+							digital_input_lm |= 0x100;
+					}
+					break;
+				case usio_btn::tekken_button2:
+					if (pressed)
+						input |= 0x10000ULL << shift;
+					break;
+				case usio_btn::tekken_button3:
+					if (pressed)
+						input |= 0x40000000ULL << shift;
+					break;
+				case usio_btn::tekken_button4:
+					if (pressed)
+						input |= 0x20000000ULL << shift;
+					break;
+				case usio_btn::tekken_button5:
+					if (pressed)
+						input |= 0x80000000ULL << shift;
+					break;
+				case usio_btn::card_tapping:
+					if (pressed)
+						tap_card(player);
+					break;
+				default:
+					break;
+				}
+			});
 		}
 
 		if (player % 2 == 0 && status.test_on)
@@ -400,6 +420,8 @@ void usb_device_usio::translate_input_tekken()
 		}
 	};
 
+	for (usz i = 0; i < m_io_status.size(); i++)
+		m_io_status[i].card_tapped = false;
 	for (usz i = 0; i < g_cfg_usio.players.size(); i++)
 		translate_from_pad(i, i);
 
@@ -414,6 +436,194 @@ void usb_device_usio::translate_input_tekken()
 	input_buf[2] = 0b00010000; // DIP switches, 8 in total
 
 	response = std::move(input_buf);
+}
+
+void usb_device_usio::emulate_card_reader(std::vector<u8>& buf, u16 reg)
+{
+	static std::array<std::vector<u8>, 2> pending_response = {};
+	usz reader_index = 0;
+
+	const auto calculate_checksum = [](bool check, std::vector<u8>& data) -> bool
+	{
+		if (data.size() < 0x06)
+			return false;
+
+		const usz data_end = data.size() - 2;
+		u8 sum = data[3] + data[4];
+
+		for (usz i = 5; i < data_end; i++)
+			sum -= data[i];
+
+		if (check)
+			return *reinterpret_cast<le_t<u16>*>(&data[data_end]) == sum;
+
+		*reinterpret_cast<le_t<u16>*>(&data[data_end]) = sum;
+		return true;
+	};
+
+	switch (reg)
+	{
+	case 0x0080:
+	case 0x0090:
+	{
+		reader_index = reg == 0x0080 ? 0 : 1;
+		buf = {0x02, 0x03, 0x00, 0x00, 0xFF, 0x0F, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0x10, 0x00};
+		*reinterpret_cast<le_t<u16>*>(buf.data() + 2) = ::narrow<u16>(pending_response[reader_index].size());
+		break;
+	}
+	case 0x7000:
+	case 0x7800:
+	{
+		reader_index = reg == 0x7000 ? 0 : 1;
+		buf = std::move(pending_response[reader_index]);
+		pending_response[reader_index].clear(); // Ensure its empty state after being moved
+		break;
+	}
+	case 0x7400:
+	case 0x7C00:
+	{
+		if (!calculate_checksum(true, buf))
+			break;
+		reader_index = reg == 0x7400 ? 0 : 1;
+		const auto& status = ::at32(m_io_status, reader_index);
+		const usz card_player = reader_index * 2 + status.card_index;
+		const u8 payload_length = buf[3];
+		const u8 command = buf[4];
+		const u8* const payload = &buf[6];
+		switch (command)
+		{
+		case 0xE8:
+		{
+			pending_response[reader_index] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x0D, 0xF3, 0xD5, 0x07, 0xDC, 0xF4, 0x3F, 0x11, 0x4D, 0x85, 0x61, 0xF1, 0x26, 0x6A, 0x87, 0xC9, 0x00};
+			break;
+		}
+		case 0xEE:
+		{
+			pending_response[reader_index] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x0A, 0xF6, 0xD5, 0x07, 0xFF, 0x3F, 0x0E, 0xF1, 0xFF, 0x3F, 0x0E, 0xF1, 0xAA, 0x00};
+			break;
+		}
+		case 0xF1:
+		{
+			pending_response[reader_index] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x03, 0xFD, 0xD5, 0x41, 0x00, 0xEA, 0x00};
+			break;
+		}
+		case 0xF2:
+		{
+			pending_response[reader_index] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x02, 0xFE, 0xD5, 0x33, 0xF8, 0x00};
+			break;
+		}
+		case 0xF7:
+		{
+			pending_response[reader_index] = {0x00, 0x00, 0xFF, 0x03, 0xFD, 0xD5, 0x4B, 0x00, 0xE0, 0x00};
+			break;
+		}
+		case 0xFA:
+		{
+			pending_response[reader_index] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x02, 0xFE, 0xD5, 0x33, 0xF8, 0x00};
+			break;
+		}
+		case 0xFB:
+		{
+			if (payload_length >= 5)
+			{
+				if (*reinterpret_cast<const le_t<u16>*>(&payload[0]) == 0x0140)
+				{
+					if (payload[3] < 4)
+					{
+						pending_response[reader_index] = {0x00, 0x00, 0xFF, 0x13, 0xED, 0xD5, 0x41, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xEA, 0x00};
+						std::memcpy(pending_response[reader_index].data() + 8, g_fxo->get<usio_memory>().card_data[card_player].data() + payload[3] * 0x10, 0x10);
+					}
+					else
+					{
+						pending_response[reader_index] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x03, 0xFD, 0xD5, 0x41, 0x13, 0xD7, 0x00};
+					}
+				}
+				else
+				{
+					pending_response[reader_index] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x03, 0xFD, 0xD5, 0x09, 0x00, 0x22, 0x00};
+				}
+			}
+			break;
+		}
+		case 0xFC:
+		{
+			if (payload_length >= 2)
+			{
+				switch (payload[0])
+				{
+				case 0x52:
+					pending_response[reader_index] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x04, 0xFC, 0xD5, 0x53, 0x01, 0x00, 0xD7, 0x00};
+					break;
+				case 0x0E:
+					pending_response[reader_index] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x02, 0xFE, 0xD5, 0x0F, 0x1C, 0x00};
+					break;
+				case 0x4A:
+					if (status.card_tapped)
+					{
+						pending_response[reader_index] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x0C, 0xF4, 0xD5, 0x4B, 0x01, 0x01, 0x00, 0x04, 0x08, 0x04, 0x00, 0x00, 0x00, 0x00, 0xCE, 0x00};
+						std::memcpy(pending_response[reader_index].data() + 0x13, g_fxo->get<usio_memory>().card_data[card_player].data(), 4);
+					}
+					else
+					{
+						pending_response[reader_index] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x03, 0xFD, 0xD5, 0x4B, 0x00, 0xE0, 0x00};
+					}
+					break;
+				case 0x32:
+					pending_response[reader_index] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x02, 0xFE, 0xD5, 0x33, 0xF8, 0x00};
+					break;
+				default:
+					break;
+				}
+			}
+			break;
+		}
+		case 0xFD:
+		{
+			if (payload_length >= 2)
+			{
+				switch (payload[0])
+				{
+				case 0x18:
+					pending_response[reader_index] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x02, 0xFE, 0xD5, 0x19, 0x12, 0x00};
+					break;
+				case 0x12:
+					pending_response[reader_index] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x02, 0xFE, 0xD5, 0x13, 0x18, 0x00};
+					break;
+				default:
+					break;
+				}
+			}
+			break;
+		}
+		case 0xFE:
+		{
+			pending_response[reader_index] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x05, 0xFB, 0xD5, 0x0D, 0x00, 0x06, 0x00, 0x18, 0x00};
+			break;
+		}
+		case 0xFF:
+		{
+			pending_response[reader_index] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00};
+			break;
+		}
+		default:
+		{
+			usio_log.trace("Unhandled card reader command: 0x%02X", command);
+			break;
+		}
+		}
+		calculate_checksum(false, pending_response[reader_index]);
+		break;
+	}
+	default:
+		break;
+	}
+}
+
+void usb_device_usio::tap_card(usz player)
+{
+	auto& status = ::at32(m_io_status, player / 2);
+	status.card_tapped = true;
+	status.card_index = player % 2;
 }
 
 void usb_device_usio::usio_write(u8 channel, u16 reg, std::vector<u8>& data)
@@ -439,7 +649,7 @@ void usb_device_usio::usio_write(u8 channel, u16 reg, std::vector<u8>& data)
 		case 0x000A:
 		{
 			if (get_u16("ClearSram") == 0x6666)
-				usio_log.trace("ClearSram");
+			    usio_log.trace("ClearSram");
 			break;
 		}
 		case 0x0028:
@@ -461,6 +671,16 @@ void usb_device_usio::usio_write(u8 channel, u16 reg, std::vector<u8>& data)
 		case 0x007A:
 		{
 			usio_log.trace("SetHopperRequest(Hopper: %d, Limit: 0x%04X)", (reg - 0x4A) / 0x10, get_u16("SetHopperLimit"));
+			break;
+		}
+		case 0x0080:
+		case 0x008D:
+		case 0x0090:
+		case 0x009D:
+		case 0x7400:
+		case 0x7C00:
+		{
+			emulate_card_reader(data, reg);
 			break;
 		}
 		default:
@@ -504,15 +724,11 @@ void usb_device_usio::usio_read(u8 channel, u16 reg, u16 size)
 			break;
 		}
 		case 0x0080:
-		{
-			// Card reader check - 1
-			response = {0x02, 0x03, 0x06, 0x00, 0xFF, 0x0F, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x10, 0x00};
-			break;
-		}
+		case 0x0090:
 		case 0x7000:
+		case 0x7800:
 		{
-			// Card reader check - 2
-			// No data returned
+			emulate_card_reader(response, reg);
 			break;
 		}
 		case 0x1000:
@@ -533,7 +749,7 @@ void usb_device_usio::usio_read(u8 channel, u16 reg, u16 size)
 			// Seems to contain a few extra bytes of info in addition to the firmware string
 			// Firmware
 			// "NBGI.;USIO01;Ver1.00;JPN,Multipurpose with PPG."
-			constexpr std::array<u8, 0x180> info{0x4E, 0x42, 0x47, 0x49, 0x2E, 0x3B, 0x55, 0x53, 0x49, 0x4F, 0x30, 0x31, 0x3B, 0x56, 0x65, 0x72, 0x31, 0x2E, 0x30, 0x30, 0x3B, 0x4A, 0x50, 0x4E, 0x2C, 0x4D, 0x75, 0x6C, 0x74, 0x69, 0x70, 0x75, 0x72, 0x70, 0x6F, 0x73, 0x65, 0x20, 0x77, 0x69, 0x74, 0x68, 0x20, 0x50, 0x50, 0x47, 0x2E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4E, 0x42, 0x47, 0x49, 0x31, 0x3B, 0x55, 0x53, 0x49, 0x4F, 0x30, 0x31, 0x3B, 0x56, 0x65, 0x72, 0x31, 0x2E, 0x30, 0x30, 0x3B, 0x4A, 0x50, 0x4E, 0x2C, 0x4D, 0x75, 0x6C, 0x74, 0x69, 0x70, 0x75, 0x72, 0x70, 0x6F, 0x73, 0x65, 0x20, 0x77, 0x69, 0x74, 0x68, 0x20, 0x50, 0x50, 0x47, 0x2E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x13, 0x00, 0x30, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x03, 0x02, 0x00, 0x08, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x03, 0x00, 0x75, 0x6C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4E, 0x42, 0x47, 0x49, 0x32, 0x3B, 0x55, 0x53, 0x49, 0x4F, 0x30, 0x31, 0x3B, 0x56, 0x65, 0x72, 0x31, 0x2E, 0x30, 0x30, 0x3B, 0x4A, 0x50, 0x4E, 0x2C, 0x4D, 0x75, 0x6C, 0x74, 0x69, 0x70, 0x75, 0x72, 0x70, 0x6F, 0x73, 0x65, 0x20, 0x77, 0x69, 0x74, 0x68, 0x20, 0x50, 0x50, 0x47, 0x2E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x13, 0x00, 0x30, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x03, 0x02, 0x00, 0x08, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x03, 0x00, 0x75, 0x6C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+			constexpr std::array<u8, 0x180> info {0x4E, 0x42, 0x47, 0x49, 0x2E, 0x3B, 0x55, 0x53, 0x49, 0x4F, 0x30, 0x31, 0x3B, 0x56, 0x65, 0x72, 0x31, 0x2E, 0x30, 0x30, 0x3B, 0x4A, 0x50, 0x4E, 0x2C, 0x4D, 0x75, 0x6C, 0x74, 0x69, 0x70, 0x75, 0x72, 0x70, 0x6F, 0x73, 0x65, 0x20, 0x77, 0x69, 0x74, 0x68, 0x20, 0x50, 0x50, 0x47, 0x2E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4E, 0x42, 0x47, 0x49, 0x31, 0x3B, 0x55, 0x53, 0x49, 0x4F, 0x30, 0x31, 0x3B, 0x56, 0x65, 0x72, 0x31, 0x2E, 0x30, 0x30, 0x3B, 0x4A, 0x50, 0x4E, 0x2C, 0x4D, 0x75, 0x6C, 0x74, 0x69, 0x70, 0x75, 0x72, 0x70, 0x6F, 0x73, 0x65, 0x20, 0x77, 0x69, 0x74, 0x68, 0x20, 0x50, 0x50, 0x47, 0x2E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x13, 0x00, 0x30, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x03, 0x02, 0x00, 0x08, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x03, 0x00, 0x75, 0x6C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4E, 0x42, 0x47, 0x49, 0x32, 0x3B, 0x55, 0x53, 0x49, 0x4F, 0x30, 0x31, 0x3B, 0x56, 0x65, 0x72, 0x31, 0x2E, 0x30, 0x30, 0x3B, 0x4A, 0x50, 0x4E, 0x2C, 0x4D, 0x75, 0x6C, 0x74, 0x69, 0x70, 0x75, 0x72, 0x70, 0x6F, 0x73, 0x65, 0x20, 0x77, 0x69, 0x74, 0x68, 0x20, 0x50, 0x50, 0x47, 0x2E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x13, 0x00, 0x30, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x03, 0x02, 0x00, 0x08, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x03, 0x00, 0x75, 0x6C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 			response = {info.begin() + (reg - 0x1800), info.end()};
 			break;
 		}
@@ -598,17 +814,17 @@ void usb_device_usio::usio_init(u8 channel, u16 reg, u16 size)
 void usb_device_usio::interrupt_transfer(u32 buf_size, u8* buf, u32 endpoint, UsbTransfer* transfer)
 {
 	constexpr u8 USIO_COMMAND_WRITE = 0x90;
-	constexpr u8 USIO_COMMAND_READ = 0x10;
-	constexpr u8 USIO_COMMAND_INIT = 0xA0;
+	constexpr u8 USIO_COMMAND_READ  = 0x10;
+	constexpr u8 USIO_COMMAND_INIT  = 0xA0;
 
 	static bool expecting_data = false;
 	static std::vector<u8> usio_data;
 	static u32 response_seek = 0;
-	static u8 usio_channel = 0;
+	static u8 usio_channel   = 0;
 	static u16 usio_register = 0;
-	static u16 usio_length = 0;
+	static u16 usio_length   = 0;
 
-	transfer->fake = true;
+	transfer->fake            = true;
 	transfer->expected_result = HC_CC_NOERR;
 	// The latency varies per operation but it doesn't seem to matter for this device so let's go fast!
 	transfer->expected_time = get_timestamp() + 1'000;
@@ -642,9 +858,9 @@ void usb_device_usio::interrupt_transfer(u32 buf_size, u8* buf, u32 endpoint, Us
 			return;
 		}
 
-		usio_channel = buf[0] & 0xF;
+		usio_channel  = buf[0] & 0xF;
 		usio_register = *reinterpret_cast<le_t<u16>*>(&buf[2]);
-		usio_length = *reinterpret_cast<le_t<u16>*>(&buf[4]);
+		usio_length   = *reinterpret_cast<le_t<u16>*>(&buf[4]);
 
 		if ((buf[0] & USIO_COMMAND_WRITE) == USIO_COMMAND_WRITE)
 		{

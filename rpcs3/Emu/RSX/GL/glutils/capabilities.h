@@ -2,7 +2,7 @@
 
 #include "../OpenGL.h"
 #include <util/types.hpp>
-#include <rx/asm.hpp>
+#include <util/asm.hpp>
 #include <util/logs.hpp>
 
 namespace gl
@@ -23,6 +23,7 @@ namespace gl
 		bool initialized = false;
 		version_info glsl_version;
 
+		bool RENDERDOC_debug = false;
 		bool EXT_direct_state_access_supported = false;
 		bool EXT_depth_bounds_test_supported = false;
 		bool AMD_pinned_memory_supported = false;
@@ -55,4 +56,4 @@ namespace gl
 	};
 
 	const capabilities& get_driver_caps();
-} // namespace gl
+}

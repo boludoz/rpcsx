@@ -1,11 +1,8 @@
 // Rock Band 3 MIDI Pro Adapter Emulator (Guitar Mode)
 
 #include "stdafx.h"
-
-#ifndef WITHOUT_RTMIDI
-
 #include "RB3MidiGuitar.h"
-#include "cellos/sys_usbd.h"
+#include "Emu/Cell/lv2/sys_usbd.h"
 
 LOG_CHANNEL(rb3_midi_guitar_log);
 
@@ -191,6 +188,7 @@ void usb_device_rb3_midi_guitar::interrupt_transfer(u32 buf_size, u8* buf, u32 /
 	// no reason we can't make it faster
 	transfer->expected_time = get_timestamp() + 1'000;
 
+
 	// default input state
 	const std::array<u8, 27> bytes = {
 		0x00, 0x00, 0x08, 0x80, 0x80, 0x00, 0x00, 0x00,
@@ -267,7 +265,16 @@ void usb_device_rb3_midi_guitar::parse_midi_message(u8* msg, usz size)
 	// read strings
 	if (size == 8 && msg[0] == 0xF0 && msg[4] == 0x05)
 	{
-		button_state.string_velocities[msg[5] - 1] = msg[6];
+        // if the velocity remains the same, the game does not know that you've just played a string
+        u8& velocity = ::at32(button_state.string_velocities, msg[5] - 1);
+        if (msg[6] != 0 && msg[6] == velocity)
+        {
+		    velocity = msg[6] ^ 1;  // to be sure to change the velocity
+        }
+        else
+        {
+		    velocity = msg[6];
+        }
 	}
 
 	// read buttons
@@ -319,39 +326,39 @@ void usb_device_rb3_midi_guitar::write_state(u8* buf)
 	{
 		switch (i)
 		{
-		case 1:
-		case 6:
-		case 13:
-			buf[9] |= 0b1000'0000;
-			break;
-		case 2:
-		case 7:
-		case 14:
-			buf[10] |= 0b1000'0000;
-			break;
-		case 3:
-		case 8:
-		case 15:
-			buf[11] |= 0b1000'0000;
-			break;
-		case 4:
-		case 9:
-		case 16:
-			buf[12] |= 0b1000'0000;
-			break;
-		case 5:
-		case 10:
-		case 17:
-			buf[13] |= 0b1000'0000;
-			break;
-		default:
-			break;
+			case 1:
+			case 6:
+			case 13:
+				buf[9] |= 0b1000'0000;
+				break;
+			case 2:
+			case 7:
+			case 14:
+				buf[10] |= 0b1000'0000;
+				break;
+			case 3:
+			case 8:
+			case 15:
+				buf[11] |= 0b1000'0000;
+				break;
+			case 4:
+			case 9:
+			case 16:
+				buf[12] |= 0b1000'0000;
+				break;
+			case 5:
+			case 10:
+			case 17:
+				buf[13] |= 0b1000'0000;
+				break;
+			default:
+				break;
 		}
 
 		// enable the solo bit for frets >= 13
 		if (i >= 13)
 		{
-			buf[8] |= 0b1000'0000;
+				buf[8] |= 0b1000'0000;
 		}
 	}
 
@@ -373,5 +380,3 @@ void usb_device_rb3_midi_guitar::write_state(u8* buf)
 
 	buf[2] = button_state.dpad;
 }
-
-#endif

@@ -1,11 +1,11 @@
 #include "util/types.hpp"
 #include "util/logs.hpp"
-#include "rx/asm.hpp"
+#include "util/asm.hpp"
 #include "util/sysinfo.hpp"
 #include "util/endian.hpp"
-#include "util/lockless.h"
-#include "util/File.h"
-#include "util/StrFmt.h"
+#include "Utilities/lockless.h"
+#include "Utilities/File.h"
+#include "Utilities/StrFmt.h"
 #include "serialization_ext.hpp"
 
 #include <zlib.h>
@@ -112,7 +112,7 @@ bool uncompressed_serialization_file_handler::handle_file_op(utils::serial& ar, 
 		ar.data_offset = pos;
 	}
 
-	const usz read_pre_buffer = ar.data.empty() ? 0 : rx::sub_saturate<usz>(ar.data_offset, pos);
+	const usz read_pre_buffer = ar.data.empty() ? 0 : utils::sub_saturate<usz>(ar.data_offset, pos);
 
 	if (read_pre_buffer)
 	{
@@ -128,8 +128,8 @@ bool uncompressed_serialization_file_handler::handle_file_op(utils::serial& ar, 
 
 	// Adjustment to prevent overflow
 	const usz subtrahend = ar.data.empty() ? 0 : 1;
-	const usz read_past_buffer = rx::sub_saturate<usz>(pos + (size - subtrahend), ar.data_offset + (ar.data.size() - subtrahend));
-	const usz read_limit = rx::sub_saturate<usz>(ar.m_max_data, ar.data_offset);
+	const usz read_past_buffer = utils::sub_saturate<usz>(pos + (size - subtrahend), ar.data_offset + (ar.data.size() - subtrahend));
+	const usz read_limit = utils::sub_saturate<usz>(ar.m_max_data, ar.data_offset); 
 
 	if (read_past_buffer)
 	{
@@ -139,7 +139,7 @@ bool uncompressed_serialization_file_handler::handle_file_op(utils::serial& ar, 
 		const usz old_size = ar.data.size();
 
 		// Try to prefetch data by reading more than requested
-		ar.data.resize(std::min<usz>(read_limit, std::max<usz>({ar.data.capacity(), ar.data.size() + read_past_buffer * 3 / 2, ar.expect_little_data() ? usz{4096} : usz{0x10'0000}})));
+		ar.data.resize(std::min<usz>(read_limit, std::max<usz>({ ar.data.capacity(), ar.data.size() + read_past_buffer * 3 / 2, ar.expect_little_data() ? usz{4096} : usz{0x10'0000} })));
 		ar.data.resize(m_file->read_at(old_size + ar.data_offset, data ? const_cast<void*>(data) : ar.data.data() + old_size, ar.data.size() - old_size) + old_size);
 	}
 
@@ -218,14 +218,8 @@ void compressed_serialization_file_handler::initialize(utils::serial& ar)
 
 		if (!ar.expect_little_data())
 		{
-			m_stream_data_prepare_thread = std::make_unique<named_thread<std::function<void()>>>("CompressedPrepare Thread"sv, [this]()
-				{
-					this->stream_data_prepare_thread_op();
-				});
-			m_file_writer_thread = std::make_unique<named_thread<std::function<void()>>>("CompressedWriter Thread"sv, [this]()
-				{
-					this->file_writer_thread_op();
-				});
+			m_stream_data_prepare_thread = std::make_unique<named_thread<std::function<void()>>>("CompressedPrepare Thread"sv, [this]() { this->stream_data_prepare_thread_op(); });
+			m_file_writer_thread = std::make_unique<named_thread<std::function<void()>>>("CompressedWriter Thread"sv, [this]() { this->file_writer_thread_op(); });
 		}
 	}
 	else
@@ -246,10 +240,10 @@ void compressed_serialization_file_handler::initialize(utils::serial& ar)
 		m_zs.avail_out = 0;
 		m_zs.next_in = nullptr;
 		m_zs.next_out = nullptr;
-#ifndef _MSC_VER
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wold-style-cast"
-#endif
+	#ifndef _MSC_VER
+	#pragma GCC diagnostic push
+	#pragma GCC diagnostic ignored "-Wold-style-cast"
+	#endif
 		ensure(inflateInit2(&m_zs, 16 + 15) == Z_OK);
 		m_read_inited = true;
 		m_errored = false;
@@ -302,23 +296,23 @@ bool compressed_serialization_file_handler::handle_file_op(utils::serial& ar, us
 			{
 				// Avoid flooding RAM, wait if there is too much pending memory
 				const usz new_value = m_pending_bytes.atomic_op([&](usz& v)
+				{
+					v &= ~pending_data_wait_bit;
+
+					if (v >= pending_compress_bytes_bound)
 					{
-						v &= ~pending_data_wait_bit;
+						v |= pending_data_wait_bit;
+					}
+					else
+					{
+						// Overflow detector
+						ensure(~v - pending_data_wait_bit > ar.data.size());
 
-						if (v >= pending_compress_bytes_bound)
-						{
-							v |= pending_data_wait_bit;
-						}
-						else
-						{
-							// Overflow detector
-							ensure(~v - pending_data_wait_bit > ar.data.size());
+						v += ar.data.size();
+					}
 
-							v += ar.data.size();
-						}
-
-						return v;
-					});
+					return v;
+				});
 
 				if (new_value & pending_data_wait_bit)
 				{
@@ -410,7 +404,7 @@ bool compressed_serialization_file_handler::handle_file_op(utils::serial& ar, us
 	// 	ar.seek_pos(pos);
 	// }
 
-	const usz read_pre_buffer = rx::sub_saturate<usz>(ar.data_offset, pos);
+	const usz read_pre_buffer = utils::sub_saturate<usz>(ar.data_offset, pos);
 
 	if (read_pre_buffer)
 	{
@@ -421,8 +415,8 @@ bool compressed_serialization_file_handler::handle_file_op(utils::serial& ar, us
 
 	// Adjustment to prevent overflow
 	const usz subtrahend = ar.data.empty() ? 0 : 1;
-	const usz read_past_buffer = rx::sub_saturate<usz>(pos + (size - subtrahend), ar.data_offset + (ar.data.size() - subtrahend));
-	const usz read_limit = rx::sub_saturate<usz>(ar.m_max_data, ar.data_offset);
+	const usz read_past_buffer = utils::sub_saturate<usz>(pos + (size - subtrahend), ar.data_offset + (ar.data.size() - subtrahend));
+	const usz read_limit = utils::sub_saturate<usz>(ar.m_max_data, ar.data_offset); 
 
 	if (read_past_buffer)
 	{
@@ -432,7 +426,7 @@ bool compressed_serialization_file_handler::handle_file_op(utils::serial& ar, us
 		const usz old_size = ar.data.size();
 
 		// Try to prefetch data by reading more than requested
-		const usz new_size = std::min<usz>(read_limit, std::max<usz>({ar.data.capacity(), ar.data.size() + read_past_buffer * 3 / 2, ar.expect_little_data() ? usz{4096} : usz{0x10'0000}}));
+		const usz new_size = std::min<usz>(read_limit, std::max<usz>({ ar.data.capacity(), ar.data.size() + read_past_buffer * 3 / 2, ar.expect_little_data() ? usz{4096} : usz{0x10'0000} }));
 
 		if (new_size < old_size)
 		{
@@ -506,7 +500,7 @@ usz compressed_serialization_file_handler::read_at(utils::serial& ar, usz read_p
 			m_stream_data_index = m_zs.avail_in ? m_zs.next_in - m_stream_data.data() : m_stream_data.size();
 
 			// Adjust again in case the values simply did not fit into uInt
-			m_zs.avail_out = adjust_for_uint(rx::sub_saturate<usz>(total_to_read, read_size));
+			m_zs.avail_out = adjust_for_uint(utils::sub_saturate<usz>(total_to_read, read_size));
 			m_zs.avail_in = adjust_for_uint(m_stream_data.size() - m_stream_data_index);
 
 			if (need_more_file_memory)
@@ -593,14 +587,14 @@ void compressed_serialization_file_handler::finalize(utils::serial& ar)
 	m_file_writer_thread.reset();
 
 	m_zs.avail_in = 0;
-	m_zs.next_in = nullptr;
+	m_zs.next_in  = nullptr;
 
 	m_stream_data.resize(0x10'0000);
 
 	do
 	{
 		m_zs.avail_out = static_cast<uInt>(m_stream_data.size());
-		m_zs.next_out = m_stream_data.data();
+		m_zs.next_out  = m_stream_data.data();
 
 		if (deflate(&m_zs, Z_FINISH) == Z_STREAM_ERROR)
 		{
@@ -608,7 +602,8 @@ void compressed_serialization_file_handler::finalize(utils::serial& ar)
 		}
 
 		m_file->write(m_stream_data.data(), m_stream_data.size() - m_zs.avail_out);
-	} while (m_zs.avail_out == 0);
+	}
+	while (m_zs.avail_out == 0);
 
 	m_stream_data = {};
 	ensure(deflateEnd(&m_zs) == Z_OK);
@@ -638,7 +633,7 @@ void compressed_serialization_file_handler::stream_data_prepare_thread_op()
 			}
 
 			m_zs.avail_in = adjust_for_uint(data.size());
-			m_zs.next_in = data.data();
+			m_zs.next_in  = data.data();
 
 			usz buffer_offset = 0;
 			m_stream_data.resize(::compressBound(m_zs.avail_in));
@@ -646,7 +641,7 @@ void compressed_serialization_file_handler::stream_data_prepare_thread_op()
 			do
 			{
 				m_zs.avail_out = adjust_for_uint(m_stream_data.size() - buffer_offset);
-				m_zs.next_out = m_stream_data.data() + buffer_offset;
+				m_zs.next_out  = m_stream_data.data() + buffer_offset;
 
 				if (deflate(&m_zs, Z_NO_FLUSH) == Z_STREAM_ERROR)
 				{
@@ -666,7 +661,8 @@ void compressed_serialization_file_handler::stream_data_prepare_thread_op()
 				{
 					m_stream_data.resize(m_stream_data.size() + (m_zs.avail_in / 4) + (m_stream_data.size() / 16) + 1);
 				}
-			} while (m_zs.avail_out == 0 || m_zs.avail_in != 0);
+			}
+			while (m_zs.avail_out == 0 || m_zs.avail_in != 0);
 
 			if (m_errored)
 			{
@@ -761,7 +757,8 @@ void compressed_serialization_file_handler::blocked_compressed_write(const std::
 		}
 
 		m_zs.avail_in = adjust_for_uint(data.size() - (m_zs.next_in - data.data()));
-	} while (m_zs.avail_out == 0);
+	}
+	while (m_zs.avail_out == 0);
 }
 
 usz compressed_serialization_file_handler::get_size(const utils::serial& ar, usz recommended) const
@@ -779,7 +776,7 @@ usz compressed_serialization_file_handler::get_size(const utils::serial& ar, usz
 		return memory_available;
 	}
 
-	return std::max<usz>(rx::mul_saturate<usz>(m_file->size(), 6), memory_available);
+	return std::max<usz>(utils::mul_saturate<usz>(m_file->size(), 6), memory_available);
 }
 
 struct compressed_zstd_stream_data
@@ -817,20 +814,14 @@ void compressed_zstd_serialization_file_handler::initialize(utils::serial& ar)
 
 		// Make sure at least one thread is free
 		// Limit thread count in order to make sure memory limits are under control (TODO: scale with RAM size)
-		const usz thread_count = std::min<u32>(std::max<u32>(utils::get_thread_count(), 2) - 1, 16);
+		const usz thread_count = std::min<u32>(std::max<u32>(utils::get_thread_count(), 2) - 1, 32);
 
 		for (usz i = 0; i < thread_count; i++)
 		{
-			m_compression_threads.emplace_back().m_thread = std::make_unique<named_thread<std::function<void()>>>(fmt::format("CompressedPrepare Thread %d", i + 1), [this]()
-				{
-					this->stream_data_prepare_thread_op();
-				});
+			m_compression_threads.emplace_back().m_thread = std::make_unique<named_thread<std::function<void()>>>(fmt::format("CompressedPrepare Thread %d", i + 1), [this]() { this->stream_data_prepare_thread_op(); });
 		}
 
-		m_file_writer_thread = std::make_unique<named_thread<std::function<void()>>>("CompressedWriter Thread"sv, [this]()
-			{
-				this->file_writer_thread_op();
-			});
+		m_file_writer_thread = std::make_unique<named_thread<std::function<void()>>>("CompressedWriter Thread"sv, [this]() { this->file_writer_thread_op(); });
 	}
 	else
 	{
@@ -973,7 +964,7 @@ bool compressed_zstd_serialization_file_handler::handle_file_op(utils::serial& a
 	// 	ar.seek_pos(pos);
 	// }
 
-	const usz read_pre_buffer = rx::sub_saturate<usz>(ar.data_offset, pos);
+	const usz read_pre_buffer = utils::sub_saturate<usz>(ar.data_offset, pos);
 
 	if (read_pre_buffer)
 	{
@@ -984,8 +975,8 @@ bool compressed_zstd_serialization_file_handler::handle_file_op(utils::serial& a
 
 	// Adjustment to prevent overflow
 	const usz subtrahend = ar.data.empty() ? 0 : 1;
-	const usz read_past_buffer = rx::sub_saturate<usz>(pos + (size - subtrahend), ar.data_offset + (ar.data.size() - subtrahend));
-	const usz read_limit = rx::sub_saturate<usz>(ar.m_max_data, ar.data_offset);
+	const usz read_past_buffer = utils::sub_saturate<usz>(pos + (size - subtrahend), ar.data_offset + (ar.data.size() - subtrahend));
+	const usz read_limit = utils::sub_saturate<usz>(ar.m_max_data, ar.data_offset); 
 
 	if (read_past_buffer)
 	{
@@ -995,7 +986,7 @@ bool compressed_zstd_serialization_file_handler::handle_file_op(utils::serial& a
 		const usz old_size = ar.data.size();
 
 		// Try to prefetch data by reading more than requested
-		const usz new_size = std::min<usz>(read_limit, std::max<usz>({ar.data.capacity(), ar.data.size() + read_past_buffer * 3 / 2, ar.expect_little_data() ? usz{4096} : usz{0x10'0000}}));
+		const usz new_size = std::min<usz>(read_limit, std::max<usz>({ ar.data.capacity(), ar.data.size() + read_past_buffer * 3 / 2, ar.expect_little_data() ? usz{4096} : usz{0x10'0000} }));
 
 		if (new_size < old_size)
 		{
@@ -1085,7 +1076,7 @@ usz compressed_zstd_serialization_file_handler::read_at(utils::serial& ar, usz r
 		if (m_stream_data.size() == old_file_buf_size)
 		{
 			// EOF
-			// ensure(read_size == total_to_read);
+			//ensure(read_size == total_to_read);
 			break;
 		}
 
@@ -1132,7 +1123,7 @@ void compressed_zstd_serialization_file_handler::finalize(utils::serial& ar)
 
 	if (m_read_inited)
 	{
-		// ZSTD_decompressEnd(m_stream->m_zd);
+		//ZSTD_decompressEnd(m_stream->m_zd);
 		ensure(ZSTD_freeDCtx(m_zd));
 		m_read_inited = false;
 		return;
@@ -1141,50 +1132,37 @@ void compressed_zstd_serialization_file_handler::finalize(utils::serial& ar)
 	const stx::shared_ptr<std::vector<u8>> empty_data = stx::make_single<std::vector<u8>>();
 	const stx::shared_ptr<std::vector<u8>> null_ptr = stx::null_ptr;
 
-	for (auto& context : m_compression_threads)
+	for (bool has_pending_threads = true; has_pending_threads; thread_ctrl::wait_for(500))
 	{
-		// Try to notify all on the first iteration
-		if (context.m_input.compare_and_swap_test(null_ptr, empty_data))
+		has_pending_threads = false;
+
+		// Try to notify all in bulk
+		for (auto& context : m_compression_threads)
 		{
-			context.notified = true;
-			context.m_input.notify_one();
+			if (!context.notified && !context.m_input && context.m_input.compare_and_swap_test(null_ptr, empty_data))
+			{
+				context.notify_pending = true;
+			}
 		}
-	}
 
-	for (auto& context : m_compression_threads)
-	{
-		// Notify to abort
-		while (!context.notified)
+		for (auto& context : m_compression_threads)
 		{
-			const auto data = context.m_input.compare_and_swap(null_ptr, empty_data);
-
-			if (!data)
+			if (context.notify_pending)
 			{
 				context.notified = true;
-				context.m_input.notify_one();
-				break;
+				context.notify_pending = false;
+				context.m_input.notify_all();
 			}
-
-			// Wait until valid input is processed
-			thread_ctrl::wait_for(1000);
 		}
-	}
 
-	for (auto& context : m_compression_threads)
-	{
-		// Wait for notification to be consumed
-		while (context.m_input)
+		for (auto& context : m_compression_threads)
 		{
-			thread_ctrl::wait_for(1000);
-		}
-	}
-
-	for (auto& context : m_compression_threads)
-	{
-		// Wait for data to be writen to be read by the thread
-		while (context.m_output)
-		{
-			thread_ctrl::wait_for(1000);
+			// Wait for notification to be sent and received
+			// And wait for data to be written to be read by the thread
+			if (!context.notified || context.m_input || context.m_output)
+			{
+				has_pending_threads = true;
+			}
 		}
 	}
 
@@ -1278,7 +1256,7 @@ void compressed_zstd_serialization_file_handler::stream_data_prepare_thread_op()
 			thread_ctrl::wait_for(1000);
 		}
 
-		// if (m_output_buffer_index % m_compression_threads.size() == thread_index)
+		//if (m_output_buffer_index % m_compression_threads.size() == thread_index)
 		{
 			output.notify_all();
 		}
@@ -1326,7 +1304,7 @@ usz compressed_zstd_serialization_file_handler::get_size(const utils::serial& ar
 	}
 
 	return recommended;
-	// return std::max<usz>(rx::mul_saturate<usz>(ZSTD_decompressBound(m_file->size()), 2), memory_available);
+	//return std::max<usz>(utils::mul_saturate<usz>(ZSTD_decompressBound(m_file->size()), 2), memory_available);
 }
 
 bool null_serialization_file_handler::handle_file_op(utils::serial&, usz, usz, const void*)

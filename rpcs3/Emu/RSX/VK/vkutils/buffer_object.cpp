@@ -10,14 +10,14 @@ namespace vk
 		info.buffer = buffer;
 		info.format = format;
 		info.offset = offset;
-		info.range = size;
-		info.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
-		CHECK_RESULT(VK_GET_SYMBOL(vkCreateBufferView)(m_device, &info, nullptr, &value));
+		info.range  = size;
+		info.sType  = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
+		CHECK_RESULT(vkCreateBufferView(m_device, &info, nullptr, &value));
 	}
 
 	buffer_view::~buffer_view()
 	{
-		VK_GET_SYMBOL(vkDestroyBufferView)(m_device, value, nullptr);
+		vkDestroyBufferView(m_device, value, nullptr);
 	}
 
 	bool buffer_view::in_range(u32 address, u32 size, u32& offset) const
@@ -39,20 +39,30 @@ namespace vk
 		return false;
 	}
 
-	buffer::buffer(const vk::render_device& dev, u64 size, const memory_type_info& memory_type, u32 access_flags, VkBufferUsageFlags usage, VkBufferCreateFlags flags, vmm_allocation_pool allocation_pool)
+	buffer::buffer(
+		const vk::render_device& dev,
+		u64 size,
+		const memory_type_info& memory_type,
+		u32 access_flags,
+		VkBufferUsageFlags usage,
+		VkBufferCreateFlags flags,
+		vmm_allocation_pool allocation_pool)
 		: m_device(dev)
 	{
+		const bool nullable = !!(flags & VK_BUFFER_CREATE_ALLOW_NULL_RPCS3);
+		const bool no_vmem_recovery = !!(flags & VK_BUFFER_CREATE_IGNORE_VMEM_PRESSURE_RPCS3);
+
 		info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		info.flags = flags;
+		info.flags = flags & ~VK_BUFFER_CREATE_SPECIAL_FLAGS_RPCS3;
 		info.size = size;
 		info.usage = usage;
 		info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-		CHECK_RESULT(VK_GET_SYMBOL(vkCreateBuffer)(m_device, &info, nullptr, &value));
+		CHECK_RESULT(vkCreateBuffer(m_device, &info, nullptr, &value));
 
 		// Allocate vram for this buffer
 		VkMemoryRequirements memory_reqs;
-		VK_GET_SYMBOL(vkGetBufferMemoryRequirements)(m_device, value, &memory_reqs);
+		vkGetBufferMemoryRequirements(m_device, value, &memory_reqs);
 
 		memory_type_info allocation_type_info = memory_type.get(dev, access_flags, memory_reqs.memoryTypeBits);
 		if (!allocation_type_info)
@@ -60,8 +70,27 @@ namespace vk
 			fmt::throw_exception("No compatible memory type was found!");
 		}
 
-		memory = std::make_unique<memory_block>(m_device, memory_reqs.size, memory_reqs.alignment, allocation_type_info, allocation_pool);
-		VK_GET_SYMBOL(vkBindBufferMemory)(dev, value, memory->get_vk_device_memory(), memory->get_vk_device_memory_offset());
+		memory_allocation_request request
+		{
+			.size = memory_reqs.size,
+			.alignment = memory_reqs.alignment,
+			.memory_type = &allocation_type_info,
+			.pool = allocation_pool,
+			.throw_on_fail = !nullable,
+			.recover_vmem_on_fail = !no_vmem_recovery
+		};
+		memory = std::make_unique<memory_block>(m_device, request);
+
+		if (auto device_memory = memory->get_vk_device_memory();
+			device_memory != VK_NULL_HANDLE)
+		{
+			vkBindBufferMemory(dev, value, device_memory, memory->get_vk_device_memory_offset());
+			return;
+		}
+
+		ensure(nullable);
+		vkDestroyBuffer(m_device, value, nullptr);
+		value = VK_NULL_HANDLE;
 	}
 
 	buffer::buffer(const vk::render_device& dev, VkBufferUsageFlags usage, void* host_pointer, u64 size)
@@ -79,17 +108,17 @@ namespace vk
 		ex_info.pNext = nullptr;
 
 		info.pNext = &ex_info;
-		CHECK_RESULT(VK_GET_SYMBOL(vkCreateBuffer)(m_device, &info, nullptr, &value));
+		CHECK_RESULT(vkCreateBuffer(m_device, &info, nullptr, &value));
 
 		auto& memory_map = dev.get_memory_mapping();
-		ensure(memory_map._vkGetMemoryHostPointerPropertiesEXT);
+		ensure(_vkGetMemoryHostPointerPropertiesEXT);
 
 		VkMemoryHostPointerPropertiesEXT memory_properties{};
 		memory_properties.sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT;
-		CHECK_RESULT(memory_map._vkGetMemoryHostPointerPropertiesEXT(dev, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, host_pointer, &memory_properties));
+		CHECK_RESULT(_vkGetMemoryHostPointerPropertiesEXT(dev, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, host_pointer, &memory_properties));
 
 		VkMemoryRequirements memory_reqs;
-		VK_GET_SYMBOL(vkGetBufferMemoryRequirements)(m_device, value, &memory_reqs);
+		vkGetBufferMemoryRequirements(m_device, value, &memory_reqs);
 
 		auto required_memory_type_bits = memory_reqs.memoryTypeBits & memory_properties.memoryTypeBits;
 		if (!required_memory_type_bits)
@@ -109,12 +138,12 @@ namespace vk
 		}
 
 		memory = std::make_unique<memory_block_host>(m_device, host_pointer, size, allocation_type_info);
-		CHECK_RESULT(VK_GET_SYMBOL(vkBindBufferMemory)(dev, value, memory->get_vk_device_memory(), memory->get_vk_device_memory_offset()));
+		CHECK_RESULT(vkBindBufferMemory(dev, value, memory->get_vk_device_memory(), memory->get_vk_device_memory_offset()));
 	}
 
 	buffer::~buffer()
 	{
-		VK_GET_SYMBOL(vkDestroyBuffer)(m_device, value, nullptr);
+		vkDestroyBuffer(m_device, value, nullptr);
 	}
 
 	void* buffer::map(u64 offset, u64 size)
@@ -131,4 +160,4 @@ namespace vk
 	{
 		return static_cast<u32>(info.size);
 	}
-} // namespace vk
+}

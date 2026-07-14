@@ -1,11 +1,5 @@
 #include "stdafx.h"
-#include "Emu/RSX/VK/VulkanAPI.h"
 #include "instance.h"
-
-#ifdef ANDROID
-#include <fstream>
-#include <dlfcn.h>
-#endif
 
 namespace vk
 {
@@ -15,38 +9,31 @@ namespace vk
 		u32 count;
 		if (_class == enumeration_class::instance)
 		{
-			if (VK_GET_SYMBOL(vkEnumerateInstanceExtensionProperties)(layer_name, &count, nullptr) != VK_SUCCESS)
+			if (vkEnumerateInstanceExtensionProperties(layer_name, &count, nullptr) != VK_SUCCESS)
 				return;
 		}
 		else
 		{
 			ensure(pdev);
-			if (VK_GET_SYMBOL(vkEnumerateDeviceExtensionProperties)(pdev, layer_name, &count, nullptr) != VK_SUCCESS)
+			if (vkEnumerateDeviceExtensionProperties(pdev, layer_name, &count, nullptr) != VK_SUCCESS)
 				return;
 		}
 
 		m_vk_exts.resize(count);
 		if (_class == enumeration_class::instance)
 		{
-			VK_GET_SYMBOL(vkEnumerateInstanceExtensionProperties)(layer_name, &count, m_vk_exts.data());
+			vkEnumerateInstanceExtensionProperties(layer_name, &count, m_vk_exts.data());
 		}
 		else
 		{
-			VK_GET_SYMBOL(vkEnumerateDeviceExtensionProperties)(pdev, layer_name, &count, m_vk_exts.data());
+			vkEnumerateDeviceExtensionProperties(pdev, layer_name, &count, m_vk_exts.data());
 		}
 	}
 
 	bool supported_extensions::is_supported(std::string_view ext) const
 	{
-		return std::any_of(m_vk_exts.cbegin(), m_vk_exts.cend(), [&](const VkExtensionProperties& p)
-			{
-				return p.extensionName == ext;
-			});
+		return std::any_of(m_vk_exts.cbegin(), m_vk_exts.cend(), [&](const VkExtensionProperties& p) { return p.extensionName == ext; });
 	}
-
-#ifdef ANDROID
-	void* instance::g_vk_loader = nullptr;
-#endif
 
 	// Instance
 	instance::~instance()
@@ -59,8 +46,7 @@ namespace vk
 
 	void instance::destroy()
 	{
-		if (!m_instance)
-			return;
+		if (!m_instance) return;
 
 		if (m_debugger)
 		{
@@ -70,33 +56,22 @@ namespace vk
 
 		if (m_surface)
 		{
-			VK_GET_SYMBOL(vkDestroySurfaceKHR)(m_instance, m_surface, nullptr);
+			vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
 			m_surface = VK_NULL_HANDLE;
 		}
 
-		VK_GET_SYMBOL(vkDestroyInstance)(m_instance, nullptr);
+		vkDestroyInstance(m_instance, nullptr);
 		m_instance = VK_NULL_HANDLE;
-
-#if defined(ANDROID) && defined(ARCH_ARM64)
-		if (g_vk_loader != nullptr && owns_loader)
-		{
-			::dlclose(g_vk_loader);
-			g_vk_loader = nullptr;
-
-			symbol_cache::cache_instance().clear();
-		}
-#endif
 	}
 
 	void instance::enable_debugging()
 	{
-		if (!g_cfg.video.debug_output)
-			return;
+		if (!g_cfg.video.debug_output) return;
 
 		PFN_vkDebugReportCallbackEXT callback = vk::dbgFunc;
 
-		_vkCreateDebugReportCallback = reinterpret_cast<PFN_vkCreateDebugReportCallbackEXT>(VK_GET_SYMBOL(vkGetInstanceProcAddr)(m_instance, "vkCreateDebugReportCallbackEXT"));
-		_vkDestroyDebugReportCallback = reinterpret_cast<PFN_vkDestroyDebugReportCallbackEXT>(VK_GET_SYMBOL(vkGetInstanceProcAddr)(m_instance, "vkDestroyDebugReportCallbackEXT"));
+		_vkCreateDebugReportCallback = reinterpret_cast<PFN_vkCreateDebugReportCallbackEXT>(vkGetInstanceProcAddr(m_instance, "vkCreateDebugReportCallbackEXT"));
+		_vkDestroyDebugReportCallback = reinterpret_cast<PFN_vkDestroyDebugReportCallbackEXT>(vkGetInstanceProcAddr(m_instance, "vkDestroyDebugReportCallbackEXT"));
 
 		VkDebugReportCallbackCreateInfoEXT dbgCreateInfo = {};
 		dbgCreateInfo.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT;
@@ -112,20 +87,6 @@ namespace vk
 #endif
 	bool instance::create(const char* app_name, bool fast)
 	{
-#if defined(ANDROID) && defined(ARCH_ARM64)
-		if (g_vk_loader == nullptr)
-		{
-			g_vk_loader = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_LOCAL);
-
-			if (g_vk_loader == nullptr)
-			{
-				g_vk_loader = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);
-			}
-
-			owns_loader = true;
-			symbol_cache::cache_instance().initialize();
-		}
-#endif
 		// Initialize a vulkan instance
 		VkApplicationInfo app = {};
 
@@ -134,7 +95,7 @@ namespace vk
 		app.applicationVersion = 0;
 		app.pEngineName = app_name;
 		app.engineVersion = 0;
-		app.apiVersion = VK_API_VERSION_1_0;
+		app.apiVersion = VK_API_VERSION_1_2;
 
 		// Set up instance information
 
@@ -162,19 +123,15 @@ namespace vk
 				extensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
 			}
 
-			if (support.is_supported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME))
-			{
-				extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
-			}
-
 #ifdef __APPLE__
+			extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+			extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
 			if (support.is_supported(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME))
 			{
 				extensions.push_back(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME);
-				layers.push_back(kMVKMoltenVKDriverLayerName);
 
-				mvk_settings.push_back(VkLayerSettingEXT{kMVKMoltenVKDriverLayerName, "MVK_CONFIG_RESUME_LOST_DEVICE", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, &setting_true});
-				mvk_settings.push_back(VkLayerSettingEXT{kMVKMoltenVKDriverLayerName, "MVK_CONFIG_FAST_MATH_ENABLED", VK_LAYER_SETTING_TYPE_INT32_EXT, 1, &setting_fast_math});
+				mvk_settings.push_back(VkLayerSettingEXT{ kMVKMoltenVKDriverLayerName, "MVK_CONFIG_RESUME_LOST_DEVICE", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, &setting_true });
+				mvk_settings.push_back(VkLayerSettingEXT{ kMVKMoltenVKDriverLayerName, "MVK_CONFIG_FAST_MATH_ENABLED", VK_LAYER_SETTING_TYPE_INT32_EXT, 1, &setting_fast_math });
 
 				mvk_layer_settings_create_info.sType = VK_STRUCTURE_TYPE_LAYER_SETTINGS_CREATE_INFO_EXT;
 				mvk_layer_settings_create_info.pNext = next_info;
@@ -184,11 +141,6 @@ namespace vk
 				next_info = &mvk_layer_settings_create_info;
 			}
 #endif
-
-			if (support.is_supported(VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME))
-			{
-				extensions.push_back(VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME);
-			}
 
 			if (support.is_supported(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME))
 			{
@@ -203,7 +155,7 @@ namespace vk
 #ifdef _WIN32
 			extensions.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 #elif defined(__APPLE__)
-			extensions.push_back(VK_MVK_MACOS_SURFACE_EXTENSION_NAME);
+			extensions.push_back(VK_EXT_METAL_SURFACE_EXTENSION_NAME);
 #else
 			bool found_surface_ext = false;
 #ifdef HAVE_X11
@@ -213,14 +165,14 @@ namespace vk
 				found_surface_ext = true;
 			}
 #endif
-#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+#ifdef HAVE_WAYLAND
 			if (support.is_supported(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME))
 			{
 				extensions.push_back(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
 				found_surface_ext = true;
 			}
 #endif //(WAYLAND)
-#ifdef VK_USE_PLATFORM_ANDROID_KHR
+#ifdef ANDROID
 			if (support.is_supported(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME))
 			{
 				extensions.push_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
@@ -236,17 +188,34 @@ namespace vk
 			if (g_cfg.video.debug_output)
 				layers.push_back("VK_LAYER_KHRONOS_validation");
 		}
+#ifdef __APPLE__ 
+		// MoltenVK's ICD will not be detected without these extensions enabled.
+		else
+		{
+			extensions_loaded = true;
+			extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+			extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+		}
+#endif
 
 		VkInstanceCreateInfo instance_info = {};
 		instance_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 		instance_info.pApplicationInfo = &app;
 		instance_info.enabledLayerCount = static_cast<u32>(layers.size());
 		instance_info.ppEnabledLayerNames = layers.data();
+#ifdef __APPLE__
+		instance_info.enabledExtensionCount = static_cast<u32>(extensions.size());
+		instance_info.ppEnabledExtensionNames = extensions.data();
+#else
 		instance_info.enabledExtensionCount = fast ? 0 : static_cast<u32>(extensions.size());
 		instance_info.ppEnabledExtensionNames = fast ? nullptr : extensions.data();
+#endif
 		instance_info.pNext = next_info;
+#ifdef __APPLE__
+		instance_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
 
-		if (VkResult result = VK_GET_SYMBOL(vkCreateInstance)(&instance_info, nullptr, &m_instance); result != VK_SUCCESS)
+		if (VkResult result = vkCreateInstance(&instance_info, nullptr, &m_instance); result != VK_SUCCESS)
 		{
 			if (result == VK_ERROR_LAYER_NOT_PRESENT)
 			{
@@ -277,7 +246,7 @@ namespace vk
 	{
 		u32 num_gpus;
 		// This may fail on unsupported drivers, so just assume no devices
-		if (VK_GET_SYMBOL(vkEnumeratePhysicalDevices)(m_instance, &num_gpus, nullptr) != VK_SUCCESS)
+		if (vkEnumeratePhysicalDevices(m_instance, &num_gpus, nullptr) != VK_SUCCESS)
 			return gpus;
 
 		if (gpus.size() != num_gpus)
@@ -285,7 +254,7 @@ namespace vk
 			std::vector<VkPhysicalDevice> pdevs(num_gpus);
 			gpus.resize(num_gpus);
 
-			CHECK_RESULT(VK_GET_SYMBOL(vkEnumeratePhysicalDevices)(m_instance, &num_gpus, pdevs.data()));
+			CHECK_RESULT(vkEnumeratePhysicalDevices(m_instance, &num_gpus, pdevs.data()));
 
 			for (u32 i = 0; i < num_gpus; ++i)
 				gpus[i].create(m_instance, pdevs[i], extensions_loaded);
@@ -296,8 +265,9 @@ namespace vk
 
 	swapchain_base* instance::create_swapchain(display_handle_t window_handle, vk::physical_device& dev)
 	{
-		WSI_config surface_config{
-			.supports_automatic_wm_reports = true,
+		WSI_config surface_config
+		{
+			.supports_automatic_wm_reports = true
 		};
 		m_surface = make_WSI_surface(m_instance, window_handle, &surface_config);
 
@@ -307,7 +277,7 @@ namespace vk
 
 		for (u32 index = 0; index < device_queues; index++)
 		{
-			VK_GET_SYMBOL(vkGetPhysicalDeviceSurfaceSupportKHR)(dev, index, m_surface, &supports_present[index]);
+			vkGetPhysicalDeviceSurfaceSupportKHR(dev, index, m_surface, &supports_present[index]);
 		}
 
 		u32 graphics_queue_idx = -1;
@@ -315,15 +285,15 @@ namespace vk
 		u32 transfer_queue_idx = -1;
 
 		auto test_queue_family = [&](u32 index, u32 desired_flags)
-		{
-			if (const auto flags = dev.get_queue_properties(index).queueFlags;
-				(flags & desired_flags) == desired_flags)
 			{
-				return true;
-			}
+				if (const auto flags = dev.get_queue_properties(index).queueFlags;
+					(flags & desired_flags) == desired_flags)
+				{
+					return true;
+				}
 
-			return false;
-		};
+				return false;
+			};
 
 		for (u32 i = 0; i < device_queues; ++i)
 		{
@@ -366,7 +336,7 @@ namespace vk
 
 		if (!present_possible)
 		{
-			// Native(sw) swapchain
+			//Native(sw) swapchain
 			rsx_log.error("It is not possible for the currently selected GPU to present to the window (Likely caused by NVIDIA driver running the current display)");
 			rsx_log.warning("Falling back to software present support (native windowing API)");
 			auto swapchain = new swapchain_NATIVE(dev, -1, graphics_queue_idx, transfer_queue_idx);
@@ -376,10 +346,10 @@ namespace vk
 
 		// Get the list of VkFormat's that are supported:
 		u32 formatCount;
-		CHECK_RESULT(VK_GET_SYMBOL(vkGetPhysicalDeviceSurfaceFormatsKHR)(dev, m_surface, &formatCount, nullptr));
+		CHECK_RESULT(vkGetPhysicalDeviceSurfaceFormatsKHR(dev, m_surface, &formatCount, nullptr));
 
 		std::vector<VkSurfaceFormatKHR> surfFormats(formatCount);
-		CHECK_RESULT(VK_GET_SYMBOL(vkGetPhysicalDeviceSurfaceFormatsKHR)(dev, m_surface, &formatCount, surfFormats.data()));
+		CHECK_RESULT(vkGetPhysicalDeviceSurfaceFormatsKHR(dev, m_surface, &formatCount, surfFormats.data()));
 
 		VkFormat format;
 		VkColorSpaceKHR color_space;
@@ -390,11 +360,10 @@ namespace vk
 		}
 		else
 		{
-			if (!formatCount)
-				fmt::throw_exception("Format count is zero!");
+			if (!formatCount) fmt::throw_exception("Format count is zero!");
 			format = surfFormats[0].format;
 
-			// Prefer BGRA8_UNORM to avoid sRGB compression (RADV)
+			//Prefer BGRA8_UNORM to avoid sRGB compression (RADV)
 			for (auto& surface_format : surfFormats)
 			{
 				if (surface_format.format == VK_FORMAT_B8G8R8A8_UNORM)
@@ -409,34 +378,4 @@ namespace vk
 
 		return new swapchain_WSI(dev, present_queue_idx, graphics_queue_idx, transfer_queue_idx, format, m_surface, color_space, !surface_config.supports_automatic_wm_reports);
 	}
-
-#ifdef ANDROID
-	void symbol_cache::initialize()
-	{
-		for (auto& symbol : registered_symbols)
-		{
-			auto sym = dlsym(instance::get_vk_loader(), symbol.first.c_str());
-
-			if (sym == nullptr)
-			{
-				rsx_log.error("vk: Failed to find instance of '%s'", symbol.first);
-			}
-
-			*symbol.second = sym;
-		}
-	}
-
-	void symbol_cache::clear()
-	{
-		for (auto& symbol : registered_symbols)
-		{
-			*symbol.second = nullptr;
-		}
-	}
-
-	void symbol_cache::register_symbol(const char* name, void** ptr)
-	{
-		registered_symbols.emplace_back(name, ptr);
-	}
-#endif
-} // namespace vk
+}

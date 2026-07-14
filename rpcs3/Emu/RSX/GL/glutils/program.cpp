@@ -20,18 +20,15 @@ namespace gl
 
 					if (string_begin == std::string::npos)
 					{
-						if (c == '\n')
-							break;
-						if (is_space)
-							continue;
+						if (c == '\n') break;
+						if (is_space) continue;
 
 						string_begin = i;
 					}
 
 					if (is_space)
 					{
-						if (!count)
-							break;
+						if (!count) break;
 					}
 					else if (c == '(')
 					{
@@ -49,10 +46,11 @@ namespace gl
 			auto is_exempt = [&source](const std::string_view& token) -> bool
 			{
 				const char* handled_keywords[] =
-					{
-						"SSBO_LOCATION(x)",
-						"UBO_LOCATION(x)",
-						"IMAGE_LOCATION(x)"};
+				{
+					"SSBO_LOCATION(x)",
+					"UBO_LOCATION(x)",
+					"IMAGE_LOCATION(x)"
+				};
 
 				for (const auto& keyword : handled_keywords)
 				{
@@ -130,6 +128,8 @@ namespace gl
 				case ::glsl::program_domain::glsl_compute_program:
 					base_name = "shaderlog/ComputeProgram";
 					break;
+				default:
+					fmt::throw_exception("Unexpected program type %d", static_cast<int>(type));
 				}
 
 				fs::write_file(fs::get_cache_dir() + base_name + std::to_string(m_id) + ".glsl", fs::rewrite, str, length);
@@ -141,7 +141,7 @@ namespace gl
 			flush_command_queue(m_init_fence);
 		}
 
-		void shader::create(::glsl::program_domain type_, const std::string& src)
+		void shader::create(::glsl::program_domain type_, const std::string & src)
 		{
 			type = type_;
 			source = src;
@@ -207,7 +207,7 @@ namespace gl
 			return *this;
 		}
 
-		bool program::uniforms_t::has_location(const std::string& name, int* location)
+		bool program::uniforms_t::has_location(const std::string & name, int* location)
 		{
 			auto found = locations.find(name);
 			if (found != locations.end())
@@ -220,7 +220,7 @@ namespace gl
 				return (found->second >= 0);
 			}
 
-			auto result = glGetUniformLocation(m_program.id(), name.c_str());
+			auto result = glGetUniformLocation(m_program->id(), name.c_str());
 			locations[name] = result;
 
 			if (location)
@@ -247,7 +247,7 @@ namespace gl
 				}
 			}
 
-			auto result = glGetUniformLocation(m_program.id(), name.c_str());
+			auto result = glGetUniformLocation(m_program->id(), name.c_str());
 
 			if (result < 0)
 			{
@@ -316,5 +316,5 @@ namespace gl
 				rsx_log.error("Validation failed: %s", error_msg.c_str());
 			}
 		}
-	} // namespace glsl
-} // namespace gl
+	}
+}

@@ -1,11 +1,11 @@
 #pragma once
 
-#include "util/Config.h"
+#include "Utilities/Config.h"
 
 struct cfg_ipc : cfg::node
 {
-	cfg::_bool ipc_server_enabled{this, "IPC Server enabled", false};
-	cfg::_int<1025, 65535> ipc_port{this, "IPC Port", 28012};
+	cfg::_bool ipc_server_enabled{ this, "IPC Server enabled", false };
+	cfg::_int<1025, 65535> ipc_port{ this, "IPC Port", 28012 };
 
 	void load();
 	void save() const;

@@ -3,12 +3,11 @@
 
 #include "Emu/System.h"
 #include "Emu/Cell/ErrorCodes.h"
-#include "cellos/sys_rsx.h"
-#include "cellos/sys_memory.h"
+#include "Emu/Cell/lv2/sys_rsx.h"
+#include "Emu/Cell/lv2/sys_memory.h"
 #include "Emu/RSX/RSXThread.h"
 
-#include "rx/asm.hpp"
-#include "rx/align.hpp"
+#include "util/asm.hpp"
 
 #include <thread>
 
@@ -27,7 +26,7 @@ namespace rsx
 		}
 
 		// User memory + fifo size
-		buffer_size = rx::alignUp<u32>(buffer_size, 0x100000) + 0x10000000;
+		buffer_size = utils::align<u32>(buffer_size, 0x100000) + 0x10000000;
 		// We are not allowed to drain all memory so add a little
 		g_fxo->init<lv2_memory_container>(buffer_size + 0x1000000);
 
@@ -248,4 +247,4 @@ namespace rsx
 
 		get_current_cpu_thread()->state += (cpu_flag::exit + cpu_flag::wait);
 	}
-} // namespace rsx
+}

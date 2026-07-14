@@ -2,9 +2,9 @@
 #include "dyn_lib.hpp"
 
 #ifdef _WIN32
-#include <windows.h>
+	#include <Windows.h>
 #else
-#include <dlfcn.h>
+	#include <dlfcn.h>
 #endif
 
 namespace utils
@@ -74,4 +74,4 @@ namespace utils
 		return dlsym(dlopen(lib, RTLD_NOLOAD), name);
 #endif
 	}
-} // namespace utils
+}

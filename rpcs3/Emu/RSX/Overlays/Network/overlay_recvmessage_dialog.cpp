@@ -106,8 +106,7 @@ namespace rsx
 
 		void recvmessage_dialog::on_button_pressed(pad_button button_press, bool is_auto_repeat)
 		{
-			if (fade_animation.active)
-				return;
+			if (fade_animation.active) return;
 
 			bool close_dialog = false;
 
@@ -128,11 +127,11 @@ namespace rsx
 				{
 					return_code = selection_code::error;
 				}
-				Emu.GetCallbacks().play_sound(fs::get_config_dir() + "sounds/snd_decide.wav");
+				play_sound(sound_effect::accept);
 				close_dialog = true;
 				break;
 			case pad_button::circle:
-				Emu.GetCallbacks().play_sound(fs::get_config_dir() + "sounds/snd_cancel.wav");
+				play_sound(sound_effect::cancel);
 				close_dialog = true;
 				break;
 			case pad_button::dpad_up:
@@ -168,7 +167,7 @@ namespace rsx
 			// Play a sound unless this is a fast auto repeat which would induce a nasty noise
 			else if (!is_auto_repeat || m_auto_repeat_ms_interval >= m_auto_repeat_ms_interval_default)
 			{
-				Emu.GetCallbacks().play_sound(fs::get_config_dir() + "sounds/snd_cursor.wav");
+				play_sound(sound_effect::cursor);
 			}
 		}
 
@@ -211,10 +210,10 @@ namespace rsx
 				break; // Title already set in constructor
 			}
 
-			const bool preserve = options & SCE_NP_BASIC_RECV_MESSAGE_OPTIONS_PRESERVE;
+			const bool preserve         = options & SCE_NP_BASIC_RECV_MESSAGE_OPTIONS_PRESERVE;
 			const bool include_bootable = options & SCE_NP_BASIC_RECV_MESSAGE_OPTIONS_INCLUDE_BOOTABLE;
 
-			m_rpcn = rpcn::rpcn_client::get_instance(true);
+			m_rpcn = rpcn::rpcn_client::get_instance(0, true);
 
 			// Get list of messages
 			const auto messages = m_rpcn->get_messages_and_register_cb(type, include_bootable, recvmessage_callback, this);
@@ -258,11 +257,8 @@ namespace rsx
 			// Block until the user exits the dialog
 			overlayman.attach_thread_input(
 				uid, "Recvmessage dialog", nullptr,
-				[notify](s32)
-				{
-					*notify = true;
-					notify->notify_one();
-				});
+				[notify](s32) { *notify = true; notify->notify_one(); }
+			);
 
 			while (!Emu.IsStopped() && !*notify && !nps.abort_gui_flag)
 			{
@@ -294,8 +290,8 @@ namespace rsx
 
 					chosen_msg_id = ::at32(m_entry_ids, selected_index);
 				}
-				recv_result = result_from_action;
-				result = CELL_OK;
+				recv_result   = result_from_action;
+				result        = CELL_OK;
 
 				if (!preserve)
 				{
@@ -340,4 +336,4 @@ namespace rsx
 			}
 		}
 	} // namespace overlays
-} // namespace rsx
+} // namespace RSX

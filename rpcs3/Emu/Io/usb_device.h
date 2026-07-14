@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Emu/Cell/lv2/sys_usbd.h"
+
 #ifdef _MSC_VER
 #pragma warning(push, 0)
 #else
@@ -15,20 +17,18 @@
 #pragma GCC diagnostic pop
 #endif
 
-#include "cellos/sys_usbd.h"
-
 struct UsbTransfer;
 
 // Usb descriptors
 enum : u8
 {
-	USB_DESCRIPTOR_DEVICE = 0x01,
-	USB_DESCRIPTOR_CONFIG = 0x02,
-	USB_DESCRIPTOR_STRING = 0x03,
-	USB_DESCRIPTOR_INTERFACE = 0x04,
-	USB_DESCRIPTOR_ENDPOINT = 0x05,
-	USB_DESCRIPTOR_HID = 0x21,
-	USB_DESCRIPTOR_ACI = 0x24,
+	USB_DESCRIPTOR_DEVICE       = 0x01,
+	USB_DESCRIPTOR_CONFIG       = 0x02,
+	USB_DESCRIPTOR_STRING       = 0x03,
+	USB_DESCRIPTOR_INTERFACE    = 0x04,
+	USB_DESCRIPTOR_ENDPOINT     = 0x05,
+	USB_DESCRIPTOR_HID          = 0x21,
+	USB_DESCRIPTOR_ACI          = 0x24,
 	USB_DESCRIPTOR_ENDPOINT_ASI = 0x25,
 };
 
@@ -86,27 +86,75 @@ struct UsbDeviceHID
 	le_t<u16, 1> wDescriptorLength;
 };
 
+struct UsbAudioInputTerminal
+{
+	u8 bDescriptorSubtype;
+	u8 bTerminalID;
+	le_t<u16, 1> wTerminalType;
+	u8 bAssocTerminal;
+	u8 bNrChannels;
+	le_t<u16, 1> wChannelConfig;
+	u8 iChannelNames;
+	u8 iTerminal;
+};
+
+struct UsbAudioOutputTerminal
+{
+	u8 bDescriptorSubtype;
+	u8 bTerminalID;
+	le_t<u16, 1> wTerminalType;
+	u8 bAssocTerminal;
+	u8 bSourceID;
+	u8 iTerminal;
+};
+
+struct UsbAudioInterface
+{
+	u8 bDescriptorSubtype;
+	u8 bTerminalLink;
+	u8 bDelay;
+	le_t<u16, 1> wFormatTag;
+};
+
+struct UsbAudioEndpoint
+{
+	u8 bEndpointAddress;
+	u8 bmAttributes;
+	le_t<u16, 1> wMaxPacketSize;
+	u8 bInterval;
+	u8 bRefresh;
+    u8 bSynchAddress;
+};
+
+struct UsbAudioStreamingEndpoint
+{
+	u8 bDescriptorSubtype;
+	u8 bmAttributes;
+	u8 bLockDelayUnits;
+	le_t<u16, 1> wLockDelay;
+};
+
 struct UsbTransfer
 {
 	u32 assigned_number = 0;
 	u32 transfer_id = 0;
 
 	s32 result = 0;
-	u32 count = 0;
+	u32 count  = 0;
 	UsbDeviceIsoRequest iso_request{};
 
 	std::vector<u8> setup_buf;
 	libusb_transfer* transfer = nullptr;
-	bool busy = false;
+	bool busy                 = false;
 
 	// For control transfers
-	u8* control_destbuf = nullptr;
+	u8 *control_destbuf = nullptr;
 
 	// For fake transfers
-	bool fake = false;
-	u64 expected_time = 0;
+	bool fake           = false;
+	u64 expected_time   = 0;
 	s32 expected_result = 0;
-	u32 expected_count = 0;
+	u32 expected_count  = 0;
 };
 
 // Usb descriptor helper
@@ -163,8 +211,7 @@ struct UsbDescriptorNode
 		for (const auto& node : subnodes)
 		{
 			const u32 remaining = max_size - size;
-			if (remaining == 0)
-				break;
+			if (remaining == 0) break;
 			size += node.write_data(ptr + size, remaining);
 		}
 		return size;
@@ -184,21 +231,25 @@ public:
 
 	virtual u32 get_configuration(u8* buf);
 	virtual bool set_configuration(u8 cfg_num);
-	virtual bool set_interface(u8 int_num);
+	virtual bool set_interface(u8 int_num, u8 alt_num);
 
 	virtual void control_transfer(u8 bmRequestType, u8 bRequest, u16 wValue, u16 wIndex, u16 wLength, u32 buf_size, u8* buf, UsbTransfer* transfer) = 0;
-	virtual void interrupt_transfer(u32 buf_size, u8* buf, u32 endpoint, UsbTransfer* transfer) = 0;
-	virtual void isochronous_transfer(UsbTransfer* transfer) = 0;
+	virtual void interrupt_transfer(u32 buf_size, u8* buf, u32 endpoint, UsbTransfer* transfer)                                                     = 0;
+	virtual void isochronous_transfer(UsbTransfer* transfer)                                                                                        = 0;
 
 public:
+	// Look up an endpoint descriptor by address in the descriptor tree
+	const UsbDeviceEndpoint* find_endpoint(u8 endpoint_addr) const;
+
 	// device ID if the device has been ldded(0 otherwise)
 	u32 assigned_number = 0;
 	// base device descriptor, every other descriptor is a subnode
 	UsbDescriptorNode device;
 
 protected:
-	u8 current_config = 1;
+	u8 current_config    = 1;
 	u8 current_interface = 0;
+	u8 current_altsetting = 0;
 	std::array<u8, 7> location{};
 
 protected:
@@ -215,7 +266,7 @@ public:
 	void read_descriptors() override;
 	u32 get_configuration(u8* buf) override;
 	bool set_configuration(u8 cfg_num) override;
-	bool set_interface(u8 int_num) override;
+	bool set_interface(u8 int_num, u8 alt_num) override;
 	void control_transfer(u8 bmRequestType, u8 bRequest, u16 wValue, u16 wIndex, u16 wLength, u32 buf_size, u8* buf, UsbTransfer* transfer) override;
 	void interrupt_transfer(u32 buf_size, u8* buf, u32 endpoint, UsbTransfer* transfer) override;
 	void isochronous_transfer(UsbTransfer* transfer) override;
@@ -224,7 +275,7 @@ protected:
 	void send_libusb_transfer(libusb_transfer* transfer);
 
 protected:
-	libusb_device* lusb_device = nullptr;
+	libusb_device* lusb_device        = nullptr;
 	libusb_device_handle* lusb_handle = nullptr;
 };
 

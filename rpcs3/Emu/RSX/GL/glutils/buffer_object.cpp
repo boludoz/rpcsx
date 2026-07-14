@@ -131,13 +131,17 @@ namespace gl
 		DSA_CALL2(NamedBufferSubData, m_id, offset, length, data);
 	}
 
+	void buffer::fill(GLsizeiptr offset, GLsizeiptr length, GLuint pattern)
+	{
+		DSA_CALL2(ClearNamedBufferSubData, m_id, GL_R32UI, offset, length, GL_RED, GL_UNSIGNED_INT, &pattern);
+	}
+
 	GLubyte* buffer::map(GLsizeiptr offset, GLsizeiptr length, access access_)
 	{
 		ensure(m_memory_type == memory_type::host_visible);
 
 		GLenum access_bits = static_cast<GLenum>(access_);
-		if (access_bits == GL_MAP_WRITE_BIT)
-			access_bits |= GL_MAP_UNSYNCHRONIZED_BIT;
+		if (access_bits == GL_MAP_WRITE_BIT) access_bits |= GL_MAP_UNSYNCHRONIZED_BIT;
 
 		auto raw_data = DSA_CALL2_RET(MapNamedBufferRange, id(), offset, length, access_bits);
 		return reinterpret_cast<GLubyte*>(raw_data);
@@ -151,13 +155,13 @@ namespace gl
 
 	void buffer::bind_range(u32 index, u32 offset, u32 size) const
 	{
-		m_bound_range = {offset, size};
+		m_bound_range = { offset, size };
 		glBindBufferRange(static_cast<GLenum>(current_target()), index, id(), offset, size);
 	}
 
 	void buffer::bind_range(target target_, u32 index, u32 offset, u32 size) const
 	{
-		m_bound_range = {offset, size};
+		m_bound_range = { offset, size };
 		glBindBufferRange(static_cast<GLenum>(target_), index, id(), offset, size);
 	}
 
@@ -201,4 +205,4 @@ namespace gl
 
 		return false;
 	}
-} // namespace gl
+}

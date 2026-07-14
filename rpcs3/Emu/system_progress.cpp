@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "system_progress.hpp"
-#include "rpcsx/fw/ps3/cellMsgDialog.h"
+#include "Emu/Cell/Modules/cellMsgDialog.h"
 #include "Emu/RSX/RSXThread.h"
 #include "Emu/RSX/Overlays/overlay_manager.h"
 #include "Emu/RSX/Overlays/overlay_message_dialog.h"
@@ -8,7 +8,7 @@
 #include "Emu/RSX/Overlays/overlay_compile_notification.h"
 #include "Emu/System.h"
 
-#include "rx/asm.hpp"
+#include "util/asm.hpp"
 
 LOG_CHANNEL(sys_log, "SYS");
 
@@ -85,10 +85,10 @@ void progress_dialog_server::operator()()
 			if (manager)
 			{
 				MsgDialogType type{};
-				type.se_mute_on = true;
-				type.se_normal = true;
-				type.bg_invisible = true;
-				type.disable_cancel = true;
+				type.se_mute_on         = true;
+				type.se_normal          = true;
+				type.bg_invisible       = true;
+				type.disable_cancel     = true;
 				type.progress_bar_count = 1;
 
 				native_dlg = manager->create<rsx::overlays::progress_dialog>(true);
@@ -152,25 +152,25 @@ void progress_dialog_server::operator()()
 
 		if (!show_overlay_message && !native_dlg && (dlg = Emu.GetCallbacks().get_msg_dialog()))
 		{
-			dlg->type.se_normal = true;
-			dlg->type.bg_invisible = true;
+			dlg->type.se_normal          = true;
+			dlg->type.bg_invisible       = true;
 			dlg->type.progress_bar_count = 1;
 			dlg->on_close = [](s32 /*status*/)
 			{
 				Emu.CallFromMainThread([]()
-					{
-						// Abort everything
-						sys_log.notice("Aborted progress dialog");
-						Emu.GracefulShutdown(false, true);
-					});
+				{
+					// Abort everything
+					sys_log.notice("Aborted progress dialog");
+					Emu.GracefulShutdown(false, true);
+				});
 
 				g_system_progress_canceled = true;
 			};
 
 			Emu.CallFromMainThread([dlg, text0]()
-				{
-					dlg->Create(text0, text0);
-				});
+			{
+				dlg->Create(text0, text0);
+			});
 		}
 
 		u32 ftotal = 0;
@@ -197,15 +197,16 @@ void progress_dialog_server::operator()()
 			const auto [text_new, ftotal_new, fdone_new, ftotal_bits_new, fknown_bits_new, ptotal_new, pdone_new] = get_state();
 
 			// Force-update every 20 seconds to update remaining time
-			if (wait_no_update_count == 100u * 20 || ftotal != ftotal_new || fdone != fdone_new || fknown_bits != fknown_bits_new || ftotal_bits != ftotal_bits_new || ptotal != ptotal_new || pdone != pdone_new || text_new != text1)
+			if (wait_no_update_count == 100u * 20 || ftotal != ftotal_new || fdone != fdone_new || fknown_bits != fknown_bits_new
+				|| ftotal_bits != ftotal_bits_new || ptotal != ptotal_new || pdone != pdone_new || text_new != text1)
 			{
 				wait_no_update_count = 0;
 				ftotal = ftotal_new;
-				fdone = fdone_new;
+				fdone  = fdone_new;
 				ftotal_bits = ftotal_bits_new;
 				fknown_bits = fknown_bits_new;
 				ptotal = ptotal_new;
-				pdone = pdone_new;
+				pdone  = pdone_new;
 
 				const bool text_changed = !text_new.empty() && text_new != text1;
 
@@ -226,7 +227,7 @@ void progress_dialog_server::operator()()
 					if (pdone < ptotal && g_cfg.misc.show_ppu_compilation_hint)
 					{
 						const u64 passed_usec = (get_system_time() - start_time);
-						const u64 remaining_usec = pdone ? rx::rational_mul<u64>(passed_usec, static_cast<u64>(ptotal) - pdone, pdone) : (passed_usec * ptotal);
+						const u64 remaining_usec = pdone ? utils::rational_mul<u64>(passed_usec, static_cast<u64>(ptotal) - pdone, pdone) : (passed_usec * ptotal);
 
 						// Only show compile notification if we estimate at least 100ms
 						if (remaining_usec >= 100'000ULL)
@@ -260,8 +261,8 @@ void progress_dialog_server::operator()()
 				// Assume not all programs were found if files were not compiled (as it may contain more)
 				const bool use_bits = fknown_bits && ftotal_bits;
 				const u64 known_files = use_bits ? fknown_bits : ftotal;
-				const u64 total = rx::rational_mul<u64>(std::max<u64>(ptotal, 1), std::max<u64>(use_bits ? ftotal_bits : ftotal, 1), std::max<u64>(known_files, 1));
-				const u64 done = pdone;
+				const u64 total = utils::rational_mul<u64>(std::max<u64>(ptotal, 1), std::max<u64>(use_bits ? ftotal_bits : ftotal, 1), std::max<u64>(known_files, 1));
+				const u64 done  = pdone;
 				const u32 value = static_cast<u32>(done >= total ? 100 : done * 100 / total);
 
 				std::string progr;
@@ -280,7 +281,7 @@ void progress_dialog_server::operator()()
 					if (of_1000 >= 2)
 					{
 						const u64 passed = (get_system_time() - start_time);
-						const u64 total = rx::rational_mul<u64>(passed, 1000, of_1000);
+						const u64 total = utils::rational_mul<u64>(passed, 1000, of_1000);
 						const u64 remaining = total - passed;
 
 						// Stabilize the result by using the maximum one from the recent history
@@ -358,15 +359,15 @@ void progress_dialog_server::operator()()
 				else if (dlg)
 				{
 					Emu.CallFromMainThread([=]()
+					{
+						if (text_changed)
 						{
-							if (text_changed)
-							{
-								dlg->SetMsg(text1);
-							}
+							dlg->SetMsg(text1);
+						}
 
-							dlg->ProgressBarSetMsg(0, progr);
-							dlg->ProgressBarSetValue(0, value);
-						});
+						dlg->ProgressBarSetMsg(0, progr);
+						dlg->ProgressBarSetValue(0, value);
+					});
 				}
 			}
 
@@ -409,9 +410,9 @@ void progress_dialog_server::operator()()
 		else if (dlg)
 		{
 			Emu.CallFromMainThread([=]()
-				{
-					dlg->Close(true);
-				});
+			{
+				dlg->Close(true);
+			});
 		}
 
 		// Cleanup
@@ -427,7 +428,10 @@ void progress_dialog_server::operator()()
 	if (g_system_progress_stopping)
 	{
 		const std::string text = get_localized_string(
-			g_system_progress_stopping == system_progress_stop_state::stop_state_continuous_savestate ? localized_string_id::PROGRESS_DIALOG_SAVESTATE_PLEASE_WAIT : localized_string_id::PROGRESS_DIALOG_STOPPING_PLEASE_WAIT);
+			g_system_progress_stopping == system_progress_stop_state::stop_state_continuous_savestate
+				? localized_string_id::PROGRESS_DIALOG_SAVESTATE_PLEASE_WAIT
+				: localized_string_id::PROGRESS_DIALOG_STOPPING_PLEASE_WAIT
+		);
 		if (native_dlg)
 		{
 			native_dlg->set_text(text);

@@ -6,9 +6,9 @@ namespace rsx
 {
 	namespace overlays
 	{
-		video_view::video_view(const std::string& video_path, const std::string& thumbnail_path)
+		video_view::video_view(const std::string& video_path, const std::string& audio_path, const std::string& thumbnail_path)
 		{
-			init_video(video_path);
+			init_video(video_path, audio_path);
 
 			if (!thumbnail_path.empty())
 			{
@@ -17,9 +17,9 @@ namespace rsx
 			}
 		}
 
-		video_view::video_view(const std::string& video_path, const std::vector<u8>& thumbnail_buf)
+		video_view::video_view(const std::string& video_path, const std::string& audio_path, const std::vector<u8>& thumbnail_buf)
 		{
-			init_video(video_path);
+			init_video(video_path, audio_path);
 
 			if (!thumbnail_buf.empty())
 			{
@@ -28,10 +28,10 @@ namespace rsx
 			}
 		}
 
-		video_view::video_view(const std::string& video_path, u8 thumbnail_id)
+		video_view::video_view(const std::string& video_path, const std::string& audio_path, u8 thumbnail_id)
 			: m_thumbnail_id(thumbnail_id)
 		{
-			init_video(video_path);
+			init_video(video_path, audio_path);
 			set_image_resource(thumbnail_id);
 		}
 
@@ -39,22 +39,20 @@ namespace rsx
 		{
 		}
 
-		void video_view::init_video(const std::string& video_path)
+		void video_view::init_video(const std::string& video_path, const std::string& audio_path)
 		{
-			if (video_path.empty())
-				return;
+			if (video_path.empty()) return;
 
-			m_video_source = Emu.GetCallbacks().make_video_source();
-			ensure(!!m_video_source);
-
+			m_video_source = ensure(Emu.GetCallbacks().make_video_source());
 			m_video_source->set_update_callback([this]()
+			{
+				if (m_video_active)
 				{
-					if (m_video_active)
-					{
-						m_is_compiled = false;
-					}
-				});
+					m_is_compiled = false;
+				}
+			});
 			m_video_source->set_video_path(video_path);
+			m_video_source->set_audio_path(audio_path);
 		}
 
 		void video_view::set_active(bool active)
@@ -113,5 +111,5 @@ namespace rsx
 
 			return external_ref ? image_view::get_compiled() : overlay_element::get_compiled();
 		}
-	} // namespace overlays
-} // namespace rsx
+	}
+}

@@ -4,8 +4,8 @@
 
 #include "util/types.hpp"
 #include "util/sysinfo.hpp"
-#include "util/StrFmt.h"
-#include "util/JIT.h"
+#include "Utilities/StrFmt.h"
+#include "Utilities/JIT.h"
 #include "util/v128.hpp"
 
 #ifdef _MSC_VER
@@ -43,6 +43,7 @@
 
 #include <functional>
 #include <unordered_map>
+#include <source_location>
 
 // Helper function
 llvm::Value* peek_through_bitcasts(llvm::Value*);
@@ -129,13 +130,13 @@ struct llvm_value_t
 
 	using type = void;
 	using base = llvm_value_t;
-	static constexpr uint esize = 0;
-	static constexpr bool is_int = false;
-	static constexpr bool is_sint = false;
-	static constexpr bool is_uint = false;
-	static constexpr bool is_float = false;
-	static constexpr uint is_array = false;
-	static constexpr uint is_vector = false;
+	static constexpr uint esize      = 0;
+	static constexpr bool is_int     = false;
+	static constexpr bool is_sint    = false;
+	static constexpr bool is_uint    = false;
+	static constexpr bool is_float   = false;
+	static constexpr uint is_array   = false;
+	static constexpr uint is_vector  = false;
 	static constexpr uint is_pointer = false;
 
 	static llvm::Type* get_type(llvm::LLVMContext& context)
@@ -175,7 +176,7 @@ struct llvm_value_t<bool> : llvm_value_t<void>
 	using base = llvm_value_t<void>;
 	using base::base;
 
-	static constexpr uint esize = 1;
+	static constexpr uint esize  = 1;
 	static constexpr bool is_int = true;
 
 	static llvm::Type* get_type(llvm::LLVMContext& context)
@@ -191,7 +192,7 @@ struct llvm_value_t<i2> : llvm_value_t<void>
 	using base = llvm_value_t<void>;
 	using base::base;
 
-	static constexpr uint esize = 2;
+	static constexpr uint esize  = 2;
 	static constexpr bool is_int = true;
 
 	static llvm::Type* get_type(llvm::LLVMContext& context)
@@ -207,7 +208,7 @@ struct llvm_value_t<i4> : llvm_value_t<void>
 	using base = llvm_value_t<void>;
 	using base::base;
 
-	static constexpr uint esize = 4;
+	static constexpr uint esize  = 4;
 	static constexpr bool is_int = true;
 
 	static llvm::Type* get_type(llvm::LLVMContext& context)
@@ -223,7 +224,7 @@ struct llvm_value_t<char> : llvm_value_t<void>
 	using base = llvm_value_t<void>;
 	using base::base;
 
-	static constexpr uint esize = 8;
+	static constexpr uint esize  = 8;
 	static constexpr bool is_int = true;
 
 	static llvm::Type* get_type(llvm::LLVMContext& context)
@@ -389,7 +390,7 @@ struct llvm_value_t<f32> : llvm_value_t<void>
 	using base = llvm_value_t<void>;
 	using base::base;
 
-	static constexpr uint esize = 32;
+	static constexpr uint esize    = 32;
 	static constexpr bool is_float = true;
 
 	static llvm::Type* get_type(llvm::LLVMContext& context)
@@ -405,7 +406,7 @@ struct llvm_value_t<f64> : llvm_value_t<void>
 	using base = llvm_value_t<void>;
 	using base::base;
 
-	static constexpr uint esize = 64;
+	static constexpr uint esize    = 64;
 	static constexpr bool is_float = true;
 
 	static llvm::Type* get_type(llvm::LLVMContext& context)
@@ -423,18 +424,18 @@ struct llvm_value_t<T*> : llvm_value_t<T>
 	using base = llvm_value_t<T>;
 	using base::base;
 
-	static constexpr uint esize = 64;
-	static constexpr bool is_int = false;
-	static constexpr bool is_sint = false;
-	static constexpr bool is_uint = false;
-	static constexpr bool is_float = false;
-	static constexpr uint is_array = false;
-	static constexpr uint is_vector = false;
+	static constexpr uint esize      = 64;
+	static constexpr bool is_int     = false;
+	static constexpr bool is_sint    = false;
+	static constexpr bool is_uint    = false;
+	static constexpr bool is_float   = false;
+	static constexpr uint is_array   = false;
+	static constexpr uint is_vector  = false;
 	static constexpr uint is_pointer = llvm_value_t<T>::is_pointer + 1;
 
 	static llvm::Type* get_type(llvm::LLVMContext& context)
 	{
-		return llvm_value_t<T>::get_type(context)->getPointerTo();
+		return llvm::PointerType::getUnqual(context);
 	}
 };
 
@@ -448,13 +449,13 @@ struct llvm_value_t<T[N]> : llvm_value_t<std::conditional_t<(std::extent_v<T> > 
 	using base = llvm_value_t<std::conditional_t<(std::extent_v<T> > 1), T, std::remove_extent_t<T>>>;
 	using base::base;
 
-	static constexpr uint esize = std::is_array_v<T> ? 0 : base::esize;
-	static constexpr bool is_int = !std::is_array_v<T> && base::is_int;
-	static constexpr bool is_sint = !std::is_array_v<T> && base::is_sint;
-	static constexpr bool is_uint = !std::is_array_v<T> && base::is_uint;
-	static constexpr bool is_float = !std::is_array_v<T> && base::is_float;
-	static constexpr uint is_array = std::is_array_v<T> ? N : 0;
-	static constexpr uint is_vector = std::is_array_v<T> ? 0 : N;
+	static constexpr uint esize      = std::is_array_v<T> ? 0 : base::esize;
+	static constexpr bool is_int     = !std::is_array_v<T> && base::is_int;
+	static constexpr bool is_sint    = !std::is_array_v<T> && base::is_sint;
+	static constexpr bool is_uint    = !std::is_array_v<T> && base::is_uint;
+	static constexpr bool is_float   = !std::is_array_v<T> && base::is_float;
+	static constexpr uint is_array   = std::is_array_v<T> ? N : 0;
+	static constexpr uint is_vector  = std::is_array_v<T> ? 0 : N;
 	static constexpr uint is_pointer = 0;
 
 	static llvm::Type* get_type(llvm::LLVMContext& context)
@@ -560,6 +561,32 @@ struct llvm_placeholder_t
 		if (value && value->getType() == llvm_value_t<T>::get_type(value->getContext()))
 		{
 			return {{value}};
+		}
+
+		value = nullptr;
+		return {};
+	}
+};
+
+template <typename T, typename U = llvm_common_t<llvm_value_t<T>>>
+struct llvm_place_stealer_t
+{
+	// TODO: placeholder extracting actual constant values (u64, f64, vector, etc)
+
+	using type = T;
+
+	static constexpr bool is_ok = true;
+
+	llvm::Value* eval(llvm::IRBuilder<>*) const
+	{
+		return nullptr;
+	}
+
+	std::tuple<> match(llvm::Value*& value, llvm::Module*) const
+	{
+		if (value && value->getType() == llvm_value_t<T>::get_type(value->getContext()))
+		{
+			return {};
 		}
 
 		value = nullptr;
@@ -707,13 +734,13 @@ struct llvm_add
 };
 
 template <typename T1, typename T2>
-inline llvm_add<T1, T2> operator+(T1&& a1, T2&& a2)
+inline llvm_add<T1, T2> operator +(T1&& a1, T2&& a2)
 {
 	return {a1, a2};
 }
 
 template <typename T1>
-inline llvm_add<T1, llvm_const_int<typename is_llvm_expr<T1>::type>> operator+(T1&& a1, u64 c)
+inline llvm_add<T1, llvm_const_int<typename is_llvm_expr<T1>::type>> operator +(T1&& a1, u64 c)
 {
 	return {a1, {c}};
 }
@@ -819,19 +846,19 @@ struct llvm_sub
 };
 
 template <typename T1, typename T2>
-inline llvm_sub<T1, T2> operator-(T1&& a1, T2&& a2)
+inline llvm_sub<T1, T2> operator -(T1&& a1, T2&& a2)
 {
 	return {a1, a2};
 }
 
 template <typename T1>
-inline llvm_sub<T1, llvm_const_int<typename is_llvm_expr<T1>::type>> operator-(T1&& a1, u64 c)
+inline llvm_sub<T1, llvm_const_int<typename is_llvm_expr<T1>::type>> operator -(T1&& a1, u64 c)
 {
 	return {a1, {c}};
 }
 
 template <typename T1>
-inline llvm_sub<llvm_const_int<typename is_llvm_expr<T1>::type>, T1> operator-(u64 c, T1&& a1)
+inline llvm_sub<llvm_const_int<typename is_llvm_expr<T1>::type>, T1> operator -(u64 c, T1&& a1)
 {
 	return {{c}, a1};
 }
@@ -892,7 +919,7 @@ struct llvm_mul
 };
 
 template <typename T1, typename T2>
-inline llvm_mul<T1, T2> operator*(T1&& a1, T2&& a2)
+inline llvm_mul<T1, T2> operator *(T1&& a1, T2&& a2)
 {
 	return {a1, a2};
 }
@@ -909,8 +936,7 @@ struct llvm_div
 
 	static constexpr auto opc =
 		llvm_value_t<T>::is_float ? llvm::Instruction::FDiv :
-		llvm_value_t<T>::is_uint  ? llvm::Instruction::UDiv :
-									llvm::Instruction::SDiv;
+		llvm_value_t<T>::is_uint ? llvm::Instruction::UDiv : llvm::Instruction::SDiv;
 
 	llvm::Value* eval(llvm::IRBuilder<>* ir) const
 	{
@@ -944,7 +970,7 @@ struct llvm_div
 };
 
 template <typename T1, typename T2>
-inline llvm_div<T1, T2> operator/(T1&& a1, T2&& a2)
+inline llvm_div<T1, T2> operator /(T1&& a1, T2&& a2)
 {
 	return {a1, a2};
 }
@@ -1021,7 +1047,7 @@ struct llvm_neg
 };
 
 template <typename T1>
-inline llvm_neg<T1> operator-(T1 a1)
+inline llvm_neg<T1> operator -(T1 a1)
 {
 	return {a1};
 }
@@ -1068,13 +1094,13 @@ struct llvm_shl
 };
 
 template <typename T1, typename T2>
-inline llvm_shl<T1, T2> operator<<(T1&& a1, T2&& a2)
+inline llvm_shl<T1, T2> operator <<(T1&& a1, T2&& a2)
 {
 	return {a1, a2};
 }
 
 template <typename T1>
-inline llvm_shl<T1, llvm_const_int<typename is_llvm_expr<T1>::type>> operator<<(T1&& a1, u64 c)
+inline llvm_shl<T1, llvm_const_int<typename is_llvm_expr<T1>::type>> operator <<(T1&& a1, u64 c)
 {
 	return {a1, {c}};
 }
@@ -1123,13 +1149,13 @@ struct llvm_shr
 };
 
 template <typename T1, typename T2>
-inline llvm_shr<T1, T2> operator>>(T1&& a1, T2&& a2)
+inline llvm_shr<T1, T2> operator >>(T1&& a1, T2&& a2)
 {
 	return {a1, a2};
 }
 
 template <typename T1>
-inline llvm_shr<T1, llvm_const_int<typename is_llvm_expr<T1>::type>> operator>>(T1&& a1, u64 c)
+inline llvm_shr<T1, llvm_const_int<typename is_llvm_expr<T1>::type>> operator >>(T1&& a1, u64 c)
 {
 	return {a1, {c}};
 }
@@ -1150,7 +1176,11 @@ struct llvm_fshl
 	static llvm::Function* get_fshl(llvm::IRBuilder<>* ir)
 	{
 		const auto _module = ir->GetInsertBlock()->getParent()->getParent();
+#if LLVM_VERSION_MAJOR >= 21 || (LLVM_VERSION_MAJOR == 20 && LLVM_VERSION_MINOR >= 1)
+		return llvm::Intrinsic::getOrInsertDeclaration(_module, llvm::Intrinsic::fshl, {llvm_value_t<T>::get_type(ir->getContext())});
+#else
 		return llvm::Intrinsic::getDeclaration(_module, llvm::Intrinsic::fshl, {llvm_value_t<T>::get_type(ir->getContext())});
+#endif
 	}
 
 	static llvm::Value* fold(llvm::IRBuilder<>* ir, llvm::Value* v1, llvm::Value* v2, llvm::Value* v3)
@@ -1222,7 +1252,11 @@ struct llvm_fshr
 	static llvm::Function* get_fshr(llvm::IRBuilder<>* ir)
 	{
 		const auto _module = ir->GetInsertBlock()->getParent()->getParent();
+#if LLVM_VERSION_MAJOR >= 21 || (LLVM_VERSION_MAJOR == 20 && LLVM_VERSION_MINOR >= 1)
+		return llvm::Intrinsic::getOrInsertDeclaration(_module, llvm::Intrinsic::fshr, {llvm_value_t<T>::get_type(ir->getContext())});
+#else
 		return llvm::Intrinsic::getDeclaration(_module, llvm::Intrinsic::fshr, {llvm_value_t<T>::get_type(ir->getContext())});
+#endif
 	}
 
 	static llvm::Value* fold(llvm::IRBuilder<>* ir, llvm::Value* v1, llvm::Value* v2, llvm::Value* v3)
@@ -1372,13 +1406,13 @@ struct llvm_and
 };
 
 template <typename T1, typename T2>
-inline llvm_and<T1, T2> operator&(T1&& a1, T2&& a2)
+inline llvm_and<T1, T2> operator &(T1&& a1, T2&& a2)
 {
 	return {a1, a2};
 }
 
 template <typename T1>
-inline llvm_and<T1, llvm_const_int<typename is_llvm_expr<T1>::type>> operator&(T1&& a1, u64 c)
+inline llvm_and<T1, llvm_const_int<typename is_llvm_expr<T1>::type>> operator &(T1&& a1, u64 c)
 {
 	return {a1, {c}};
 }
@@ -1425,13 +1459,13 @@ struct llvm_or
 };
 
 template <typename T1, typename T2>
-inline llvm_or<T1, T2> operator|(T1&& a1, T2&& a2)
+inline llvm_or<T1, T2> operator |(T1&& a1, T2&& a2)
 {
 	return {a1, a2};
 }
 
 template <typename T1>
-inline llvm_or<T1, llvm_const_int<typename is_llvm_expr<T1>::type>> operator|(T1&& a1, u64 c)
+inline llvm_or<T1, llvm_const_int<typename is_llvm_expr<T1>::type>> operator |(T1&& a1, u64 c)
 {
 	return {a1, {c}};
 }
@@ -1478,19 +1512,19 @@ struct llvm_xor
 };
 
 template <typename T1, typename T2>
-inline llvm_xor<T1, T2> operator^(T1&& a1, T2&& a2)
+inline llvm_xor<T1, T2> operator ^(T1&& a1, T2&& a2)
 {
 	return {a1, a2};
 }
 
 template <typename T1>
-inline llvm_xor<T1, llvm_const_int<typename is_llvm_expr<T1>::type>> operator^(T1&& a1, u64 c)
+inline llvm_xor<T1, llvm_const_int<typename is_llvm_expr<T1>::type>> operator ^(T1&& a1, u64 c)
 {
 	return {a1, {c}};
 }
 
 template <typename T1>
-inline llvm_xor<T1, llvm_const_int<typename is_llvm_expr<T1>::type, true>> operator~(T1&& a1)
+inline llvm_xor<T1, llvm_const_int<typename is_llvm_expr<T1>::type, true>> operator ~(T1&& a1)
 {
 	return {a1, {u64{umax}}};
 }
@@ -1508,12 +1542,11 @@ struct llvm_cmp
 	static_assert(llvm_value_t<T>::is_int || is_float, "llvm_cmp<>: invalid type");
 
 	// Convert unsigned comparison predicate to signed if necessary
-	static constexpr llvm::CmpInst::Predicate pred = llvm_value_t<T>::is_uint          ? UPred :
-	                                                 UPred == llvm::ICmpInst::ICMP_UGT ? llvm::ICmpInst::ICMP_SGT :
-	                                                 UPred == llvm::ICmpInst::ICMP_UGE ? llvm::ICmpInst::ICMP_SGE :
-	                                                 UPred == llvm::ICmpInst::ICMP_ULT ? llvm::ICmpInst::ICMP_SLT :
-	                                                 UPred == llvm::ICmpInst::ICMP_ULE ? llvm::ICmpInst::ICMP_SLE :
-	                                                                                     UPred;
+	static constexpr llvm::CmpInst::Predicate pred = llvm_value_t<T>::is_uint ? UPred :
+		UPred == llvm::ICmpInst::ICMP_UGT ? llvm::ICmpInst::ICMP_SGT :
+		UPred == llvm::ICmpInst::ICMP_UGE ? llvm::ICmpInst::ICMP_SGE :
+		UPred == llvm::ICmpInst::ICMP_ULT ? llvm::ICmpInst::ICMP_SLT :
+		UPred == llvm::ICmpInst::ICMP_ULE ? llvm::ICmpInst::ICMP_SLE : UPred;
 
 	static_assert(llvm_value_t<T>::is_sint || llvm_value_t<T>::is_uint || is_float || UPred == llvm::ICmpInst::ICMP_EQ || UPred == llvm::ICmpInst::ICMP_NE, "llvm_cmp<>: invalid operation on sign-undefined type");
 
@@ -1570,13 +1603,12 @@ struct llvm_ord
 
 	// Convert comparison predicate to ordered
 	static constexpr llvm::CmpInst::Predicate pred =
-		base::pred == llvm::ICmpInst::ICMP_EQ  ? llvm::ICmpInst::FCMP_OEQ :
-		base::pred == llvm::ICmpInst::ICMP_NE  ? llvm::ICmpInst::FCMP_ONE :
+		base::pred == llvm::ICmpInst::ICMP_EQ ? llvm::ICmpInst::FCMP_OEQ :
+		base::pred == llvm::ICmpInst::ICMP_NE ? llvm::ICmpInst::FCMP_ONE :
 		base::pred == llvm::ICmpInst::ICMP_SGT ? llvm::ICmpInst::FCMP_OGT :
 		base::pred == llvm::ICmpInst::ICMP_SGE ? llvm::ICmpInst::FCMP_OGE :
 		base::pred == llvm::ICmpInst::ICMP_SLT ? llvm::ICmpInst::FCMP_OLT :
-		base::pred == llvm::ICmpInst::ICMP_SLE ? llvm::ICmpInst::FCMP_OLE :
-												 base::pred;
+		base::pred == llvm::ICmpInst::ICMP_SLE ? llvm::ICmpInst::FCMP_OLE : base::pred;
 
 	static_assert(base::is_float, "llvm_ord<>: invalid type");
 
@@ -1625,13 +1657,12 @@ struct llvm_uno
 
 	// Convert comparison predicate to unordered
 	static constexpr llvm::CmpInst::Predicate pred =
-		base::pred == llvm::ICmpInst::ICMP_EQ  ? llvm::ICmpInst::FCMP_UEQ :
-		base::pred == llvm::ICmpInst::ICMP_NE  ? llvm::ICmpInst::FCMP_UNE :
+		base::pred == llvm::ICmpInst::ICMP_EQ ? llvm::ICmpInst::FCMP_UEQ :
+		base::pred == llvm::ICmpInst::ICMP_NE ? llvm::ICmpInst::FCMP_UNE :
 		base::pred == llvm::ICmpInst::ICMP_SGT ? llvm::ICmpInst::FCMP_UGT :
 		base::pred == llvm::ICmpInst::ICMP_SGE ? llvm::ICmpInst::FCMP_UGE :
 		base::pred == llvm::ICmpInst::ICMP_SLT ? llvm::ICmpInst::FCMP_ULT :
-		base::pred == llvm::ICmpInst::ICMP_SLE ? llvm::ICmpInst::FCMP_ULE :
-												 base::pred;
+		base::pred == llvm::ICmpInst::ICMP_SLE ? llvm::ICmpInst::FCMP_ULE : base::pred;
 
 	static_assert(base::is_float, "llvm_uno<>: invalid type");
 
@@ -1671,73 +1702,73 @@ template <typename T>
 llvm_uno(T&&) -> llvm_uno<T&&>;
 
 template <typename T1, typename T2>
-inline llvm_cmp<T1, T2, llvm::ICmpInst::ICMP_EQ> operator==(T1&& a1, T2&& a2)
+inline llvm_cmp<T1, T2, llvm::ICmpInst::ICMP_EQ> operator ==(T1&& a1, T2&& a2)
 {
 	return {a1, a2};
 }
 
 template <typename T1>
-inline llvm_cmp<T1, llvm_const_int<typename is_llvm_expr<T1>::type>, llvm::ICmpInst::ICMP_EQ> operator==(T1&& a1, u64 c)
+inline llvm_cmp<T1, llvm_const_int<typename is_llvm_expr<T1>::type>, llvm::ICmpInst::ICMP_EQ> operator ==(T1&& a1, u64 c)
 {
 	return {a1, {c}};
 }
 
 template <typename T1, typename T2>
-inline llvm_cmp<T1, T2, llvm::ICmpInst::ICMP_NE> operator!=(T1&& a1, T2&& a2)
+inline llvm_cmp<T1, T2, llvm::ICmpInst::ICMP_NE> operator !=(T1&& a1, T2&& a2)
 {
 	return {a1, a2};
 }
 
 template <typename T1>
-inline llvm_cmp<T1, llvm_const_int<typename is_llvm_expr<T1>::type>, llvm::ICmpInst::ICMP_NE> operator!=(T1&& a1, u64 c)
+inline llvm_cmp<T1, llvm_const_int<typename is_llvm_expr<T1>::type>, llvm::ICmpInst::ICMP_NE> operator !=(T1&& a1, u64 c)
 {
 	return {a1, {c}};
 }
 
 template <typename T1, typename T2>
-inline llvm_cmp<T1, T2, llvm::ICmpInst::ICMP_UGT> operator>(T1&& a1, T2&& a2)
+inline llvm_cmp<T1, T2, llvm::ICmpInst::ICMP_UGT> operator >(T1&& a1, T2&& a2)
 {
 	return {a1, a2};
 }
 
 template <typename T1>
-inline llvm_cmp<T1, llvm_const_int<typename is_llvm_expr<T1>::type>, llvm::ICmpInst::ICMP_UGT> operator>(T1&& a1, u64 c)
+inline llvm_cmp<T1, llvm_const_int<typename is_llvm_expr<T1>::type>, llvm::ICmpInst::ICMP_UGT> operator >(T1&& a1, u64 c)
 {
 	return {a1, {c}};
 }
 
 template <typename T1, typename T2>
-inline llvm_cmp<T1, T2, llvm::ICmpInst::ICMP_UGE> operator>=(T1&& a1, T2&& a2)
+inline llvm_cmp<T1, T2, llvm::ICmpInst::ICMP_UGE> operator >=(T1&& a1, T2&& a2)
 {
 	return {a1, a2};
 }
 
 template <typename T1>
-inline llvm_cmp<T1, llvm_const_int<typename is_llvm_expr<T1>::type>, llvm::ICmpInst::ICMP_UGE> operator>=(T1&& a1, u64 c)
+inline llvm_cmp<T1, llvm_const_int<typename is_llvm_expr<T1>::type>, llvm::ICmpInst::ICMP_UGE> operator >=(T1&& a1, u64 c)
 {
 	return {a1, {c}};
 }
 
 template <typename T1, typename T2>
-inline llvm_cmp<T1, T2, llvm::ICmpInst::ICMP_ULT> operator<(T1&& a1, T2&& a2)
+inline llvm_cmp<T1, T2, llvm::ICmpInst::ICMP_ULT> operator <(T1&& a1, T2&& a2)
 {
 	return {a1, a2};
 }
 
 template <typename T1>
-inline llvm_cmp<T1, llvm_const_int<typename is_llvm_expr<T1>::type>, llvm::ICmpInst::ICMP_ULT> operator<(T1&& a1, u64 c)
+inline llvm_cmp<T1, llvm_const_int<typename is_llvm_expr<T1>::type>, llvm::ICmpInst::ICMP_ULT> operator <(T1&& a1, u64 c)
 {
 	return {a1, {c}};
 }
 
 template <typename T1, typename T2>
-inline llvm_cmp<T1, T2, llvm::ICmpInst::ICMP_ULE> operator<=(T1&& a1, T2&& a2)
+inline llvm_cmp<T1, T2, llvm::ICmpInst::ICMP_ULE> operator <=(T1&& a1, T2&& a2)
 {
 	return {a1, a2};
 }
 
 template <typename T1>
-inline llvm_cmp<T1, llvm_const_int<typename is_llvm_expr<T1>::type>, llvm::ICmpInst::ICMP_ULE> operator<=(T1&& a1, u64 c)
+inline llvm_cmp<T1, llvm_const_int<typename is_llvm_expr<T1>::type>, llvm::ICmpInst::ICMP_ULE> operator <=(T1&& a1, u64 c)
 {
 	return {a1, {c}};
 }
@@ -1879,13 +1910,12 @@ struct llvm_fpcast
 	using type = U;
 
 	static constexpr auto opc =
-		llvm_value_t<T>::is_sint                        ? llvm::Instruction::SIToFP :
-		llvm_value_t<U>::is_sint                        ? llvm::Instruction::FPToSI :
-		llvm_value_t<T>::is_int                         ? llvm::Instruction::UIToFP :
-		llvm_value_t<U>::is_int                         ? llvm::Instruction::FPToUI :
+		llvm_value_t<T>::is_sint ? llvm::Instruction::SIToFP :
+		llvm_value_t<U>::is_sint ? llvm::Instruction::FPToSI :
+		llvm_value_t<T>::is_int ? llvm::Instruction::UIToFP :
+		llvm_value_t<U>::is_int ? llvm::Instruction::FPToUI :
 		llvm_value_t<T>::esize > llvm_value_t<U>::esize ? llvm::Instruction::FPTrunc :
-		llvm_value_t<T>::esize < llvm_value_t<U>::esize ? llvm::Instruction::FPExt :
-														  llvm::Instruction::BitCast;
+		llvm_value_t<T>::esize < llvm_value_t<U>::esize ? llvm::Instruction::FPExt : llvm::Instruction::BitCast;
 
 	llvm_expr_t<A1> a1;
 	static_assert(llvm_value_t<T>::is_float || llvm_value_t<U>::is_float, "llvm_fpcast<>: invalid type(s)");
@@ -1938,9 +1968,8 @@ struct llvm_trunc
 	static constexpr bool is_ok =
 		llvm_value_t<T>::is_int &&
 		llvm_value_t<U>::is_int &&
-		llvm_value_t<T>::esize > llvm_value_t<U>::esize&&
-									 llvm_value_t<T>::is_vector ==
-			llvm_value_t<U>::is_vector;
+		llvm_value_t<T>::esize > llvm_value_t<U>::esize &&
+		llvm_value_t<T>::is_vector == llvm_value_t<U>::is_vector;
 
 	llvm::Value* eval(llvm::IRBuilder<>* ir) const
 	{
@@ -2226,7 +2255,11 @@ struct llvm_add_sat
 	static llvm::Function* get_add_sat(llvm::IRBuilder<>* ir)
 	{
 		const auto _module = ir->GetInsertBlock()->getParent()->getParent();
+#if LLVM_VERSION_MAJOR >= 21 || (LLVM_VERSION_MAJOR == 20 && LLVM_VERSION_MINOR >= 1)
+		return llvm::Intrinsic::getOrInsertDeclaration(_module, intr, {llvm_value_t<T>::get_type(ir->getContext())});
+#else
 		return llvm::Intrinsic::getDeclaration(_module, intr, {llvm_value_t<T>::get_type(ir->getContext())});
+#endif
 	}
 
 	llvm::Value* eval(llvm::IRBuilder<>* ir) const
@@ -2241,7 +2274,7 @@ struct llvm_add_sat
 			if constexpr (llvm_value_t<T>::is_sint)
 			{
 				const auto max = llvm::ConstantInt::get(v1->getType(), llvm::APInt::getSignedMaxValue(llvm_value_t<T>::esize));
-				const auto sat = ir->CreateXor(ir->CreateAShr(v1, llvm_value_t<T>::esize - 1), max);          // Max -> min if v1 < 0
+				const auto sat = ir->CreateXor(ir->CreateAShr(v1, llvm_value_t<T>::esize - 1), max); // Max -> min if v1 < 0
 				const auto ovf = ir->CreateAnd(ir->CreateXor(v2, sum), ir->CreateNot(ir->CreateXor(v1, v2))); // Get overflow
 				return ir->CreateSelect(ir->CreateICmpSLT(ovf, llvm::ConstantInt::get(v1->getType(), 0)), sat, sum);
 			}
@@ -2309,7 +2342,11 @@ struct llvm_sub_sat
 	static llvm::Function* get_sub_sat(llvm::IRBuilder<>* ir)
 	{
 		const auto _module = ir->GetInsertBlock()->getParent()->getParent();
+#if LLVM_VERSION_MAJOR >= 21 || (LLVM_VERSION_MAJOR == 20 && LLVM_VERSION_MINOR >= 1)
+		return llvm::Intrinsic::getOrInsertDeclaration(_module, intr, {llvm_value_t<T>::get_type(ir->getContext())});
+#else
 		return llvm::Intrinsic::getDeclaration(_module, intr, {llvm_value_t<T>::get_type(ir->getContext())});
+#endif
 	}
 
 	llvm::Value* eval(llvm::IRBuilder<>* ir) const
@@ -2325,7 +2362,7 @@ struct llvm_sub_sat
 			{
 				const auto max = llvm::ConstantInt::get(v1->getType(), llvm::APInt::getSignedMaxValue(llvm_value_t<T>::esize));
 				const auto sat = ir->CreateXor(ir->CreateAShr(v1, llvm_value_t<T>::esize - 1), max); // Max -> min if v1 < 0
-				const auto ovf = ir->CreateAnd(ir->CreateXor(v1, dif), ir->CreateXor(v1, v2));       // Get overflow (subtraction)
+				const auto ovf = ir->CreateAnd(ir->CreateXor(v1, dif), ir->CreateXor(v1, v2)); // Get overflow (subtraction)
 				return ir->CreateSelect(ir->CreateICmpSLT(ovf, llvm::ConstantInt::get(v1->getType(), 0)), sat, dif);
 			}
 
@@ -2374,7 +2411,7 @@ struct llvm_extract
 	static_assert(llvm_value_t<U>::is_int && !llvm_value_t<U>::is_vector, "llvm_extract<>: invalid index type");
 
 	static constexpr bool is_ok = llvm_value_t<T>::is_vector &&
-	                              llvm_value_t<U>::is_int && !llvm_value_t<U>::is_vector;
+		llvm_value_t<U>::is_int && !llvm_value_t<U>::is_vector;
 
 	llvm::Value* eval(llvm::IRBuilder<>* ir) const
 	{
@@ -2422,7 +2459,7 @@ struct llvm_insert
 	static_assert(std::is_same_v<V, std::remove_extent_t<T>>, "llvm_insert<>: invalid element type");
 
 	static constexpr bool is_ok = llvm_extract<A1, I2>::is_ok &&
-	                              std::is_same_v<V, std::remove_extent_t<T>>;
+		std::is_same_v<V, std::remove_extent_t<T>>;
 
 	llvm::Value* eval(llvm::IRBuilder<>* ir) const
 	{
@@ -2958,7 +2995,7 @@ struct llvm_calli
 		return r;
 	}();
 
-	llvm::Value* (*c)(llvm::Value**, llvm::IRBuilder<>*){};
+	llvm::Value*(*c)(llvm::Value**, llvm::IRBuilder<>*){};
 
 	llvm::Value* eval(llvm::IRBuilder<>* ir) const
 	{
@@ -2991,8 +3028,7 @@ struct llvm_calli
 		return *this;
 	}
 
-	template <typename... Args>
-		requires(sizeof...(Args) == sizeof...(A))
+	template <typename... Args> requires (sizeof...(Args) == sizeof...(A))
 	llvm_calli& set_order_equality_hint(Args... args)
 	{
 		order_equality_hint = {static_cast<usz>(args)...};
@@ -3072,13 +3108,28 @@ protected:
 
 	// Allow PSHUFB intrinsic
 	bool m_use_ssse3 = true;
+#ifdef ARCH_ARM64
+	// all arm CPUS have FMA
+	bool m_use_fma = true;
 
+	// Should be nonsense to set this for ARM,
+	// but this flag is only used in SPU verification
+	// For now, setting this flag will speed up SPU verification
+	// but I will remove this later with explicit parralelism - Whatcookie
+	bool m_use_avx = true;
+
+	// ARMv8 SDOT/UDOT
+	bool m_use_dotprod = false;
+
+	// Allow direct TBL2/TBX2 emission.
+	bool m_use_tbl2 = true;
+#else
 	// Allow FMA
 	bool m_use_fma = false;
 
 	// Allow AVX
 	bool m_use_avx = false;
-
+#endif
 	// Allow skylake-x tier AVX-512
 	bool m_use_avx512 = false;
 
@@ -3157,7 +3208,7 @@ public:
 
 	// Call external function: provide name and function pointer
 	template <typename RetT = void, typename RT, typename... FArgs, LLVMValue... Args>
-	llvm::CallInst* call(std::string_view lame, RT (*_func)(FArgs...), Args... args)
+	llvm::CallInst* call(std::string_view lame, RT(*_func)(FArgs...), Args... args)
 	{
 		static_assert(sizeof...(FArgs) == sizeof...(Args), "spu_llvm_recompiler::call(): unexpected arg number");
 		const auto type = llvm::FunctionType::get(get_type<std::conditional_t<std::is_void_v<RetT>, RT, RetT>>(), {args->getType()...}, false);
@@ -3175,9 +3226,8 @@ public:
 		return inst;
 	}
 
-	template <typename RT, typename... FArgs, DSLValue... Args>
-		requires(sizeof...(Args) != 0)
-	auto call(std::string_view name, RT (*_func)(FArgs...), Args&&... args)
+	template <typename RT, typename... FArgs, DSLValue... Args> requires (sizeof...(Args) != 0)
+	auto call(std::string_view name, RT(*_func)(FArgs...), Args&&... args)
 	{
 		llvm_value_t<RT> r;
 		r.value = call(name, _func, std::forward<Args>(args).eval(m_ir)...);
@@ -3193,7 +3243,7 @@ public:
 	}
 
 	// Bitcast with immediate constant folding
-	llvm::Value* bitcast(llvm::Value* val, llvm::Type* type) const;
+	llvm::Value* bitcast(llvm::Value* val, llvm::Type* type, std::source_location src_loc = std::source_location::current()) const;
 
 	template <typename T>
 	llvm::Value* bitcast(llvm::Value* val)
@@ -3203,6 +3253,12 @@ public:
 
 	template <typename T>
 	static llvm_placeholder_t<T> match()
+	{
+		return {};
+	}
+
+	template <typename T>
+	static llvm_place_stealer_t<T> match_stealer()
 	{
 		return {};
 	}
@@ -3490,32 +3546,32 @@ public:
 	static auto absd(T&& a, U&& b)
 	{
 		return expr(max(a, b) - min(a, b), [](llvm::Value*& value, llvm::Module* _m) -> llvm_match_tuple<T, U>
-			{
-				static const auto M = match<CT>();
+		{
+			static const auto M = match<CT>();
 
-				if (auto [ok, _max, _min] = match_expr(value, _m, M - M); ok)
+			if (auto [ok, _max, _min] = match_expr(value, _m, M - M); ok)
+			{
+				if (auto [ok1, a, b] = match_expr(_max.value, _m, max(M, M)); ok1 && !a.eq(b))
 				{
-					if (auto [ok1, a, b] = match_expr(_max.value, _m, max(M, M)); ok1 && !a.eq(b))
+					if (auto [ok2, c, d] = match_expr(_min.value, _m, min(M, M)); ok2 && !c.eq(d))
 					{
-						if (auto [ok2, c, d] = match_expr(_min.value, _m, min(M, M)); ok2 && !c.eq(d))
+						if ((a.eq(c) && b.eq(d)) || (a.eq(d) && b.eq(c)))
 						{
-							if ((a.eq(c) && b.eq(d)) || (a.eq(d) && b.eq(c)))
+							if (auto r1 = llvm_expr_t<T>{}.match(a.value, _m); a.eq())
 							{
-								if (auto r1 = llvm_expr_t<T>{}.match(a.value, _m); a.eq())
+								if (auto r2 = llvm_expr_t<U>{}.match(b.value, _m); b.eq())
 								{
-									if (auto r2 = llvm_expr_t<U>{}.match(b.value, _m); b.eq())
-									{
-										return std::tuple_cat(r1, r2);
-									}
+									return std::tuple_cat(r1, r2);
 								}
 							}
 						}
 					}
 				}
+			}
 
-				value = nullptr;
-				return {};
-			});
+			value = nullptr;
+			return {};
+		});
 	}
 
 	// Infinite-precision shift left
@@ -3525,23 +3581,23 @@ public:
 		static constexpr u32 esz = llvm_value_t<CT>::esize;
 
 		return expr(select(b < esz, a << b, splat<CT>(0)), [](llvm::Value*& value, llvm::Module* _m) -> llvm_match_tuple<T, U>
-			{
-				static const auto M = match<CT>();
+		{
+			static const auto M = match<CT>();
 
-				if (auto [ok, b, a, b2] = match_expr(value, _m, select(M < esz, M << M, splat<CT>(0))); ok && b.eq(b2))
+			if (auto [ok, b, a, b2] = match_expr(value, _m, select(M < esz, M << M, splat<CT>(0))); ok && b.eq(b2))
+			{
+				if (auto r1 = llvm_expr_t<T>{}.match(a.value, _m); a.eq())
 				{
-					if (auto r1 = llvm_expr_t<T>{}.match(a.value, _m); a.eq())
+					if (auto r2 = llvm_expr_t<U>{}.match(b.value, _m); b.eq())
 					{
-						if (auto r2 = llvm_expr_t<U>{}.match(b.value, _m); b.eq())
-						{
-							return std::tuple_cat(r1, r2);
-						}
+						return std::tuple_cat(r1, r2);
 					}
 				}
+			}
 
-				value = nullptr;
-				return {};
-			});
+			value = nullptr;
+			return {};
+		});
 	}
 
 	// Infinite-precision logical shift right (unsigned)
@@ -3551,23 +3607,23 @@ public:
 		static constexpr u32 esz = llvm_value_t<CT>::esize;
 
 		return expr(select(b < esz, a >> b, splat<CT>(0)), [](llvm::Value*& value, llvm::Module* _m) -> llvm_match_tuple<T, U>
-			{
-				static const auto M = match<CT>();
+		{
+			static const auto M = match<CT>();
 
-				if (auto [ok, b, a, b2] = match_expr(value, _m, select(M < esz, M >> M, splat<CT>(0))); ok && b.eq(b2))
+			if (auto [ok, b, a, b2] = match_expr(value, _m, select(M < esz, M >> M, splat<CT>(0))); ok && b.eq(b2))
+			{
+				if (auto r1 = llvm_expr_t<T>{}.match(a.value, _m); a.eq())
 				{
-					if (auto r1 = llvm_expr_t<T>{}.match(a.value, _m); a.eq())
+					if (auto r2 = llvm_expr_t<U>{}.match(b.value, _m); b.eq())
 					{
-						if (auto r2 = llvm_expr_t<U>{}.match(b.value, _m); b.eq())
-						{
-							return std::tuple_cat(r1, r2);
-						}
+						return std::tuple_cat(r1, r2);
 					}
 				}
+			}
 
-				value = nullptr;
-				return {};
-			});
+			value = nullptr;
+			return {};
+		});
 	}
 
 	// Infinite-precision arithmetic shift right (signed)
@@ -3577,30 +3633,34 @@ public:
 		static constexpr u32 esz = llvm_value_t<CT>::esize;
 
 		return expr(a >> select(b > (esz - 1), splat<CT>(esz - 1), b), [](llvm::Value*& value, llvm::Module* _m) -> llvm_match_tuple<T, U>
-			{
-				static const auto M = match<CT>();
+		{
+			static const auto M = match<CT>();
 
-				if (auto [ok, a, b, b2] = match_expr(value, _m, M >> select(M > (esz - 1), splat<CT>(esz - 1), M)); ok && b.eq(b2))
+			if (auto [ok, a, b, b2] = match_expr(value, _m, M >> select(M > (esz - 1), splat<CT>(esz - 1), M)); ok && b.eq(b2))
+			{
+				if (auto r1 = llvm_expr_t<T>{}.match(a.value, _m); a.eq())
 				{
-					if (auto r1 = llvm_expr_t<T>{}.match(a.value, _m); a.eq())
+					if (auto r2 = llvm_expr_t<U>{}.match(b.value, _m); b.eq())
 					{
-						if (auto r2 = llvm_expr_t<U>{}.match(b.value, _m); b.eq())
-						{
-							return std::tuple_cat(r1, r2);
-						}
+						return std::tuple_cat(r1, r2);
 					}
 				}
+			}
 
-				value = nullptr;
-				return {};
-			});
+			value = nullptr;
+			return {};
+		});
 	}
 
 	template <typename... Types>
 	llvm::Function* get_intrinsic(llvm::Intrinsic::ID id)
 	{
 		const auto _module = m_ir->GetInsertBlock()->getParent()->getParent();
+#if LLVM_VERSION_MAJOR >= 21 || (LLVM_VERSION_MAJOR == 20 && LLVM_VERSION_MINOR >= 1)
+		return llvm::Intrinsic::getOrInsertDeclaration(_module, id, {get_type<Types>()...});
+#else
 		return llvm::Intrinsic::getDeclaration(_module, id, {get_type<Types>()...});
+#endif
 	}
 
 	template <typename T1, typename T2>
@@ -3626,9 +3686,82 @@ public:
 		const auto data0 = a.eval(m_ir);
 		const auto data1 = b.eval(m_ir);
 		const auto data2 = c.eval(m_ir);
+
+#if LLVM_VERSION_MAJOR >= 22
+		// LLVM 22+ changed the intrinsic signature from v4i32 to v16i8 for operands 2 and 3
+		result.value = m_ir->CreateCall(get_intrinsic(llvm::Intrinsic::x86_avx512_vpdpbusd_128),
+			{data0, m_ir->CreateBitCast(data1, get_type<u8[16]>()), m_ir->CreateBitCast(data2, get_type<u8[16]>())});
+#else
 		result.value = m_ir->CreateCall(get_intrinsic(llvm::Intrinsic::x86_avx512_vpdpbusd_128), {data0, data1, data2});
+#endif
 		return result;
 	}
+
+#ifdef ARCH_ARM64
+template <typename T1, typename T2, typename T3>
+	value_t<u32[4]> udot(T1 a, T2 b, T3 c)
+	{
+		value_t<u32[4]> result;
+
+		const auto data0 = a.eval(m_ir);
+		const auto data1 = b.eval(m_ir);
+		const auto data2 = c.eval(m_ir);
+
+		result.value = m_ir->CreateCall(get_intrinsic<u32[4], u8[16]>(llvm::Intrinsic::aarch64_neon_udot), {data0, data1, data2});
+		return result;
+	}
+
+	template <typename T1, typename T2, typename T3>
+	value_t<u32[4]> sdot(T1 a, T2 b, T3 c)
+	{
+		value_t<u32[4]> result;
+
+		const auto data0 = a.eval(m_ir);
+		const auto data1 = b.eval(m_ir);
+		const auto data2 = c.eval(m_ir);
+
+		result.value = m_ir->CreateCall(get_intrinsic<u32[4], u8[16]>(llvm::Intrinsic::aarch64_neon_sdot), {data0, data1, data2});
+		return result;
+	}
+
+	template <typename T1, typename T2>
+	value_t<s32[4]> smull(T1 a, T2 b)
+	{
+		value_t<s32[4]> result;
+
+		const auto data0 = a.eval(m_ir);
+		const auto data1 = b.eval(m_ir);
+
+		result.value = m_ir->CreateCall(get_intrinsic<s32[4]>(llvm::Intrinsic::aarch64_neon_smull), {data0, data1});
+		return result;
+	}
+
+	template <typename T1, typename T2>
+	value_t<u32[4]> umull(T1 a, T2 b)
+	{
+		value_t<u32[4]> result;
+
+		const auto data0 = a.eval(m_ir);
+		const auto data1 = b.eval(m_ir);
+
+		result.value = m_ir->CreateCall(get_intrinsic<u32[4]>(llvm::Intrinsic::aarch64_neon_umull), {data0, data1});
+		return result;
+	}
+	
+template <typename T1, typename T2>
+	auto addp(T1 a, T2 b)
+	{
+		using T_vector = typename is_llvm_expr<T1>::type;
+		const auto data1 = a.eval(m_ir);
+		const auto data2 = b.eval(m_ir);
+
+		const auto func = get_intrinsic<T_vector>(llvm::Intrinsic::aarch64_neon_addp);
+
+		value_t<T_vector> result;
+		result.value = m_ir->CreateCall(func, {data1, data2});
+		return result;
+	}
+#endif
 
 	template <typename T1, typename T2>
 	value_t<u8[16]> vpermb(T1 a, T2 b)
@@ -3860,9 +3993,9 @@ public:
 		else
 		{
 			m_intrinsics.try_emplace(name, [=, this](llvm::CallInst* ci)
-				{
-					return replace_with(ci).eval(m_ir);
-				});
+			{
+				return replace_with(ci).eval(m_ir);
+			});
 		}
 	}
 
@@ -3878,42 +4011,176 @@ public:
 		erase_stores({args.value...});
 	}
 
+	// Debug breakpoint
+	void debugtrap()
+	{
+		const auto _rty = llvm::Type::getVoidTy(m_context);
+		const auto type = llvm::FunctionType::get(_rty, {}, false);
+		const auto func = llvm::cast<llvm::Function>(m_ir->GetInsertBlock()->getParent()->getParent()->getOrInsertFunction("llvm.debugtrap", type).getCallee());
+		m_ir->CreateCall(func);
+	}
+
 	template <typename T, typename U>
 	static auto pshufb(T&& a, U&& b)
 	{
 		return llvm_calli<u8[16], T, U>{"x86_pshufb", {std::forward<T>(a), std::forward<U>(b)}}.if_const([](llvm::Value* args[], llvm::IRBuilder<>* ir) -> llvm::Value*
+		{
+			const auto zeros = llvm::ConstantAggregateZero::get(llvm_value_t<u8[16]>::get_type(ir->getContext()));
+
+			if (auto c = llvm::dyn_cast<llvm::Constant>(args[1]))
 			{
-				const auto zeros = llvm::ConstantAggregateZero::get(llvm_value_t<u8[16]>::get_type(ir->getContext()));
+				// Convert PSHUFB index back to LLVM vector shuffle mask
+				v128 mask{};
 
-				if (auto c = llvm::dyn_cast<llvm::Constant>(args[1]))
+				const auto cv = llvm::dyn_cast<llvm::ConstantDataVector>(c);
+
+				if (cv)
 				{
-					// Convert PSHUFB index back to LLVM vector shuffle mask
-					v128 mask{};
-
-					const auto cv = llvm::dyn_cast<llvm::ConstantDataVector>(c);
-
-					if (cv)
+					for (u32 i = 0; i < 16; i++)
 					{
-						for (u32 i = 0; i < 16; i++)
-						{
-							const u64 b = cv->getElementAsInteger(i);
-							mask._u8[i] = b < 128 ? b % 16 : 16;
-						}
-					}
-
-					if (cv || llvm::isa<llvm::ConstantAggregateZero>(c))
-					{
-						llvm::Value* r = nullptr;
-						r = llvm::ConstantDataVector::get(ir->getContext(), llvm::ArrayRef(reinterpret_cast<const u8*>(&mask), 16));
-						r = ir->CreateZExt(r, llvm_value_t<u32[16]>::get_type(ir->getContext()));
-						r = ir->CreateShuffleVector(args[0], zeros, r);
-						return r;
+						const u64 b = cv->getElementAsInteger(i);
+						mask._u8[i] = b < 128 ? b % 16 : 16;
 					}
 				}
 
-				return nullptr;
-			});
+				if (cv || llvm::isa<llvm::ConstantAggregateZero>(c))
+				{
+					llvm::Value* r = nullptr;
+					r = llvm::ConstantDataVector::get(ir->getContext(), llvm::ArrayRef(reinterpret_cast<const u8*>(&mask), 16));
+					r = ir->CreateZExt(r, llvm_value_t<u32[16]>::get_type(ir->getContext()));
+					r = ir->CreateShuffleVector(args[0], zeros, r);
+					return r;
+				}
+			}
+
+			return nullptr;
+		});
 	}
+
+#ifdef ARCH_ARM64
+	template <typename T1, typename T2>
+	value_t<u8[16]> tbl(T1 a, T2 b)
+	{
+		value_t<u8[16]> result;
+		const auto data0 = a.eval(m_ir);
+		const auto index = b.eval(m_ir);
+		const auto zeros = llvm::ConstantAggregateZero::get(get_type<u8[16]>());
+
+		if (auto c = llvm::dyn_cast<llvm::Constant>(index))
+		{
+			v128 mask{};
+			const auto cv = llvm::dyn_cast<llvm::ConstantDataVector>(c);
+
+			if (cv)
+			{
+				for (u32 i = 0; i < 16; i++)
+				{
+					const u64 b_val = cv->getElementAsInteger(i);
+					mask._u8[i] = (b_val < 16) ? static_cast<u8>(b_val) : static_cast<u8>(16);
+				}
+			}
+
+			if (cv || llvm::isa<llvm::ConstantAggregateZero>(c))
+			{
+				result.value = llvm::ConstantDataVector::get(m_context, llvm::ArrayRef(reinterpret_cast<const u8*>(&mask), 16));
+				result.value = m_ir->CreateZExt(result.value, get_type<u32[16]>());
+				result.value = m_ir->CreateShuffleVector(data0, zeros, result.value);
+				return result;
+			}
+		}
+
+		result.value = m_ir->CreateCall(get_intrinsic<u8[16]>(llvm::Intrinsic::aarch64_neon_tbl1), { data0, index });
+		return result;
+	}
+
+	template <typename T1, typename T2, typename T3>
+	value_t<u8[16]> tbl2(T1 a, T2 b, T3 indices)
+	{
+		value_t<u8[16]> result;
+		const auto data0 = a.eval(m_ir);
+		const auto data1 = b.eval(m_ir);
+		const auto index = indices.eval(m_ir);
+
+		if (m_use_tbl2)
+		{
+			if (auto c = llvm::dyn_cast<llvm::Constant>(index))
+			{
+				v128 mask{};
+				v128 bitmask{};
+				const auto cv = llvm::dyn_cast<llvm::ConstantDataVector>(c);
+
+				if (cv)
+				{
+					for (u32 i = 0; i < 16; i++)
+					{
+						const u64 b_val = cv->getElementAsInteger(i);
+						mask._u8[i] = (b_val < 32) ? static_cast<u8>(b_val) : static_cast<u8>(0);
+						bitmask._u8[i] = (b_val < 32) ? static_cast<u8>(0xFF) : static_cast<u8>(0x00);
+					}
+				}
+				else if (llvm::isa<llvm::ConstantAggregateZero>(c))
+				{
+					bitmask = v128::from8p(0xFF);
+				}
+
+				if (cv || llvm::isa<llvm::ConstantAggregateZero>(c))
+				{
+					auto m_val = llvm::ConstantDataVector::get(m_context, llvm::ArrayRef(reinterpret_cast<const u8*>(&mask), 16));
+					auto m_ext = m_ir->CreateZExt(m_val, get_type<u32[16]>());
+					auto lookup = m_ir->CreateShuffleVector(data0, data1, m_ext);
+
+					auto z_mask = llvm::ConstantDataVector::get(m_context, llvm::ArrayRef(reinterpret_cast<const u8*>(&bitmask), 16));
+					result.value = m_ir->CreateAnd(lookup, z_mask);
+					return result;
+				}
+			}
+
+			result.value = m_ir->CreateCall(get_intrinsic<u8[16]>(llvm::Intrinsic::aarch64_neon_tbl2), { data0, data1, index });
+			return result;
+		}
+
+		const auto data0_lookup = m_ir->CreateCall(get_intrinsic<u8[16]>(llvm::Intrinsic::aarch64_neon_tbl1), { data0, index });
+		const auto data1_index = m_ir->CreateSub(index, llvm::ConstantInt::get(get_type<u8[16]>(), 16));
+		const auto data1_lookup = m_ir->CreateCall(get_intrinsic<u8[16]>(llvm::Intrinsic::aarch64_neon_tbl1), { data1, data1_index });
+
+		result.value = m_ir->CreateOr(data0_lookup, data1_lookup);
+		return result;
+	}
+
+	template <typename T1, typename T2, typename T3>
+	value_t<u8[16]> tbx(T1 fallback, T2 a, T3 indices)
+	{
+		value_t<u8[16]> result;
+		const auto v_fallback = fallback.eval(m_ir);
+		const auto data0 = a.eval(m_ir);
+		const auto index = indices.eval(m_ir);
+
+		result.value = m_ir->CreateCall(get_intrinsic<u8[16]>(llvm::Intrinsic::aarch64_neon_tbx1), { v_fallback, data0, index });
+		return result;
+	}
+
+	template <typename T1, typename T2, typename T3, typename T4>
+	value_t<u8[16]> tbx2(T1 fallback, T2 a, T3 b, T4 indices)
+	{
+		value_t<u8[16]> result;
+		const auto v_fallback = fallback.eval(m_ir);
+		const auto data0 = a.eval(m_ir);
+		const auto data1 = b.eval(m_ir);
+		const auto index = indices.eval(m_ir);
+
+		if (m_use_tbl2)
+		{
+			result.value = m_ir->CreateCall(get_intrinsic<u8[16]>(llvm::Intrinsic::aarch64_neon_tbx2), { v_fallback, data0, data1, index });
+			return result;
+		}
+
+		const auto first_lookup = m_ir->CreateCall(get_intrinsic<u8[16]>(llvm::Intrinsic::aarch64_neon_tbx1), { v_fallback, data0, index });
+		const auto data1_index = m_ir->CreateSub(index, llvm::ConstantInt::get(get_type<u8[16]>(), 16));
+
+		result.value = m_ir->CreateCall(get_intrinsic<u8[16]>(llvm::Intrinsic::aarch64_neon_tbx1), { first_lookup, data1, data1_index });
+		return result;
+	}
+#endif
 
 	// (m << 3) >= 0 ? a : b
 	template <typename T, typename U, typename V>
@@ -3995,7 +4262,8 @@ struct fmt_unveil<llvm::TypeSize>
 
 // Inline assembly wrappers.
 // TODO: Move these to proper location and replace macros with templates
-static inline llvm::InlineAsm* compile_inline_asm(
+static inline
+llvm::InlineAsm* compile_inline_asm(
 	llvm::Type* returnType,
 	llvm::ArrayRef<llvm::Type*> argTypes,
 	const std::string& code,
@@ -4006,14 +4274,15 @@ static inline llvm::InlineAsm* compile_inline_asm(
 }
 
 // Helper for ASM generation with dynamic number of arguments
-static inline llvm::CallInst* llvm_asm(
+static inline
+llvm::CallInst* llvm_asm(
 	llvm::IRBuilder<>* irb,
 	const std::string& asm_,
 	llvm::ArrayRef<llvm::Value*> args,
 	const std::string& constraints,
 	llvm::LLVMContext& context)
 {
-	llvm::ArrayRef<llvm::Type*> types_ref = std::nullopt;
+	llvm::ArrayRef<llvm::Type*> types_ref {};
 	std::vector<llvm::Type*> types;
 	types.reserve(args.size());
 
@@ -4033,11 +4302,11 @@ static inline llvm::CallInst* llvm_asm(
 	return c;
 }
 
-#define LLVM_ASM(asm_, args, constraints, irb, ctx) \
+#define LLVM_ASM(asm_, args, constraints, irb, ctx)\
 	llvm_asm(irb, asm_, args, constraints, ctx)
 
 // Helper for ASM generation with 0 args
-#define LLVM_ASM_VOID(asm_, irb, ctx) \
+#define LLVM_ASM_VOID(asm_, irb, ctx)\
 	llvm_asm(irb, asm_, {}, "", ctx)
 
 #endif

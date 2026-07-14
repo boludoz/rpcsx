@@ -4,7 +4,7 @@
 #include "VKQueryPool.h"
 #include "VKRenderPass.h"
 #include "VKResourceManager.h"
-#include "rx/asm.hpp"
+#include "util/asm.hpp"
 #include "VKGSRender.h"
 
 namespace vk
@@ -15,8 +15,8 @@ namespace vk
 		// 1. Any sample has been determined to have passed the Z test
 		// 2. The backend has fully processed the query and found no hits
 
-		u32 result[2] = {0, 0};
-		switch (const auto error = VK_GET_SYMBOL(vkGetQueryPoolResults)(*owner, *query.pool, index, 1, 8, result, 8, flags | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT))
+		u32 result[2] = { 0, 0 };
+		switch (const auto error = vkGetQueryPoolResults(*owner, *query.pool, index, 1, 8, result, 8, flags | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT))
 		{
 		case VK_SUCCESS:
 		{
@@ -89,7 +89,7 @@ namespace vk
 		}
 
 		// From spec: "After query pool creation, each query must be reset before it is used."
-		VK_GET_SYMBOL(vkCmdResetQueryPool)(cmd, *m_current_query_pool.get(), 0, m_current_query_pool->size());
+		vkCmdResetQueryPool(cmd, *m_current_query_pool.get(), 0, m_current_query_pool->size());
 		m_pool_lifetime_counter = m_current_query_pool->size();
 	}
 
@@ -148,12 +148,12 @@ namespace vk
 		query_info.pool = m_current_query_pool.get();
 		query_info.active = true;
 
-		VK_GET_SYMBOL(vkCmdBeginQuery)(cmd, *query_info.pool, index, control_flags);
+		vkCmdBeginQuery(cmd, *query_info.pool, index, control_flags);
 	}
 
 	void query_pool_manager::end_query(vk::command_buffer& cmd, u32 index)
 	{
-		VK_GET_SYMBOL(vkCmdEndQuery)(cmd, *query_slot_status[index].pool, index);
+		vkCmdEndQuery(cmd, *query_slot_status[index].pool, index);
 	}
 
 	bool query_pool_manager::check_query_status(u32 index)
@@ -172,7 +172,7 @@ namespace vk
 
 			while (!query_info.ready)
 			{
-				rx::pause();
+				utils::pause();
 				poke_query(query_info, index, result_flags);
 			}
 		}
@@ -184,10 +184,10 @@ namespace vk
 	{
 		// We're technically supposed to stop any active renderpasses before streaming the results out, but that doesn't matter on IMR hw
 		// On TBDR setups like the apple M series, the stop is required (results are all 0 if you don't flush the RP), but this introduces a very heavy performance loss.
-		VK_GET_SYMBOL(vkCmdCopyQueryPoolResults)(cmd, *query_slot_status[index].pool, index, count, dst, dst_offset, 4, VK_QUERY_RESULT_WAIT_BIT);
+		vkCmdCopyQueryPoolResults(cmd, *query_slot_status[index].pool, index, count, dst, dst_offset, 4, VK_QUERY_RESULT_WAIT_BIT);
 	}
 
-	void query_pool_manager::free_query(vk::command_buffer& /*cmd*/, u32 index)
+	void query_pool_manager::free_query(vk::command_buffer&/*cmd*/, u32 index)
 	{
 		// Release reference and discard
 		auto& query = query_slot_status[index];
@@ -248,4 +248,4 @@ namespace vk
 	{
 		m_pool_man->on_query_pool_released(m_object);
 	}
-} // namespace vk
+}

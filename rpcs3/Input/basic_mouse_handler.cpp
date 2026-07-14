@@ -152,10 +152,7 @@ void basic_mouse_handler::Key(QKeyEvent* event, bool pressed)
 	}
 
 	const int key = event->key();
-	if (const auto it = std::find_if(m_buttons.cbegin(), m_buttons.cend(), [key](const auto& entry)
-			{
-				return entry.second.code == key && entry.second.is_key;
-			});
+	if (const auto it = std::find_if(m_buttons.cbegin(), m_buttons.cend(), [key](const auto& entry){ return entry.second.code == key && entry.second.is_key; });
 		it != m_buttons.cend())
 	{
 		MouseHandlerBase::Button(0, it->first, pressed);
@@ -170,10 +167,7 @@ void basic_mouse_handler::MouseButton(QMouseEvent* event, bool pressed)
 	}
 
 	const int button = event->button();
-	if (const auto it = std::find_if(m_buttons.cbegin(), m_buttons.cend(), [button](const auto& entry)
-			{
-				return entry.second.code == button && !entry.second.is_key;
-			});
+	if (const auto it = std::find_if(m_buttons.cbegin(), m_buttons.cend(), [button](const auto& entry){ return entry.second.code == button && !entry.second.is_key; });
 		it != m_buttons.cend())
 	{
 		MouseHandlerBase::Button(0, it->first, pressed);
@@ -203,28 +197,31 @@ bool basic_mouse_handler::get_mouse_lock_state() const
 basic_mouse_handler::mouse_button basic_mouse_handler::get_mouse_button(const cfg::string& button)
 {
 	const std::string name = button.to_string();
-	const auto it = std::find_if(mouse_list.cbegin(), mouse_list.cend(), [&name](const auto& entry)
-		{
-			return entry.second == name;
-		});
+	const auto it = std::find_if(mouse_list.cbegin(), mouse_list.cend(), [&name](const auto& entry){ return entry.second == name; });
 
 	if (it != mouse_list.cend())
 	{
+		u32 btn = it->first;
+		if (btn >= mouse::button) btn -= mouse::button;
+
 		return mouse_button{
-			.code = static_cast<int>(it->first),
-			.is_key = false};
+			.code = static_cast<int>(btn),
+			.is_key = false
+		};
 	}
 
 	if (const u32 key = keyboard_pad_handler::GetKeyCode(QString::fromStdString(name)))
 	{
 		return mouse_button{
 			.code = static_cast<int>(key),
-			.is_key = true};
+			.is_key = true
+		};
 	}
 
 	return mouse_button{
 		.code = Qt::MouseButton::NoButton,
-		.is_key = false};
+		.is_key = false
+	};
 }
 
 void basic_mouse_handler::MouseMove(QMouseEvent* event)
@@ -242,8 +239,7 @@ void basic_mouse_handler::MouseMove(QMouseEvent* event)
 
 void basic_mouse_handler::MouseMove(const QPoint& e_pos)
 {
-	if (!m_target)
-		return;
+	if (!m_target) return;
 
 	// get the screen dimensions
 	const QSize screen = m_target->size();

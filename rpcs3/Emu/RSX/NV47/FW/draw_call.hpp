@@ -18,10 +18,10 @@ namespace rsx
 	class draw_clause
 	{
 		// Stores the first and count argument from draw/draw indexed parameters between begin/end clauses.
-		simple_array<draw_range_t> draw_command_ranges{};
+		rsx::simple_array<draw_range_t> draw_command_ranges{};
 
 		// Stores rasterization barriers for primitive types sensitive to adjacency
-		simple_array<barrier_t> draw_command_barriers{};
+		rsx::simple_array<barrier_t> draw_command_barriers{};
 
 		// Counter used to parse the commands in order
 		u32 current_range_index{};
@@ -29,8 +29,14 @@ namespace rsx
 		// Location of last execution barrier
 		u32 last_execution_barrier_index{};
 
+		// Mask of all active barriers
+		u32 draw_command_barrier_mask = 0;
+
 		// Draw-time iterator to the draw_command_barriers struct
-		mutable simple_array<barrier_t>::iterator current_barrier_it;
+		mutable rsx::simple_array<barrier_t>::iterator current_barrier_it {};
+
+		// Subranges memory cache
+		mutable rsx::simple_array<draw_range_t> subranges_store;
 
 		// Helper functions
 		// Add a new draw command
@@ -65,13 +71,13 @@ namespace rsx
 		primitive_type primitive{};
 		draw_command command{};
 
-		bool is_immediate_draw{};         // Set if part of the draw is submitted via push registers
-		bool is_disjoint_primitive{};     // Set if primitive type does not rely on adjacency information
-		bool primitive_barrier_enable{};  // Set once to signal that a primitive restart barrier can be inserted
-		bool is_rendering{};              // Set while we're actually pushing the draw calls to host GPU
-		bool is_trivial_instanced_draw{}; // Set if the draw call can be executed on the host GPU as a single instanced draw.
+		bool is_immediate_draw{};          // Set if part of the draw is submitted via push registers
+		bool is_disjoint_primitive{};      // Set if primitive type does not rely on adjacency information
+		bool primitive_barrier_enable{};   // Set once to signal that a primitive restart barrier can be inserted
+		bool is_rendering{};               // Set while we're actually pushing the draw calls to host GPU
+		bool is_trivial_instanced_draw{};  // Set if the draw call can be executed on the host GPU as a single instanced draw.
 
-		simple_array<u32> inline_vertex_array{};
+		rsx::simple_array<u32> inline_vertex_array{};
 
 		void operator()(utils::serial& ar);
 
@@ -133,13 +139,13 @@ namespace rsx
 
 					if (draw_command_ranges[index].first > first)
 					{
-						insert_draw_command(index, {0, first, count});
+						insert_draw_command(index, { 0, first, count });
 						return;
 					}
 				}
 			}
 
-			append_draw_command({0, first, count});
+			append_draw_command({ 0, first, count });
 		}
 
 		/**
@@ -217,7 +223,9 @@ namespace rsx
 
 		primitive_class classify_mode() const
 		{
-			return primitive >= rsx::primitive_type::triangles ? primitive_class::polygon : primitive_class::non_polygon;
+			return primitive >= rsx::primitive_type::triangles
+				? primitive_class::polygon
+				: primitive_class::non_polygon;
 		}
 
 		void reset(rsx::primitive_type type);
@@ -243,6 +251,12 @@ namespace rsx
 				is_rendering = false;
 				return false;
 			}
+
+			// Advance barrier iterator so it always points to the current draw
+			for (;
+				current_barrier_it != draw_command_barriers.end() &&
+				current_barrier_it->draw_id < current_range_index;
+				++current_barrier_it);
 
 			if (draw_command_ranges[current_range_index].count == 0)
 			{
@@ -280,48 +294,19 @@ namespace rsx
 		 */
 		u32 execute_pipeline_dependencies(struct context* ctx, instanced_draw_config_t* instance_config = nullptr) const;
 
+		/**
+		 * Returns the first-count data for the current subdraw
+		 */
 		const draw_range_t& get_range() const
 		{
 			ensure(current_range_index < draw_command_ranges.size());
 			return draw_command_ranges[current_range_index];
 		}
 
-		simple_array<draw_range_t> get_subranges() const
-		{
-			ensure(!is_single_draw());
-
-			const auto range = get_range();
-			const auto limit = range.first + range.count;
-
-			simple_array<draw_range_t> ret;
-			u32 previous_barrier = range.first;
-			u32 vertex_counter = 0;
-
-			for (const auto& barrier : draw_command_barriers)
-			{
-				if (barrier.draw_id != current_range_index)
-					continue;
-
-				if (barrier.type != primitive_restart_barrier)
-					continue;
-
-				if (barrier.address <= range.first)
-					continue;
-
-				if (barrier.address >= limit)
-					break;
-
-				const u32 count = barrier.address - previous_barrier;
-				ret.push_back({0, vertex_counter, count});
-				previous_barrier = barrier.address;
-				vertex_counter += count;
-			}
-
-			ensure(!ret.empty());
-			ensure(previous_barrier < limit);
-			ret.push_back({0, vertex_counter, limit - previous_barrier});
-
-			return ret;
-		}
+		/*
+		 * Returns a compiled list of all subdraws.
+		 * NOTE: This is a non-trivial operation as it takes disjoint primitive boundaries into account.
+		 */
+		const rsx::simple_array<draw_range_t>& get_subranges() const;
 	};
-} // namespace rsx
+}

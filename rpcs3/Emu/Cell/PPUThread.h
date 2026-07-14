@@ -3,9 +3,8 @@
 #include "../CPU/CPUThread.h"
 #include "../CPU/Hypervisor.h"
 #include "../Memory/vm_ptr.h"
-#include "rx/cpu/cell/ppu/PPUContext.hpp"
-#include "util/lockless.h"
-#include "util/BitField.h"
+#include "Utilities/lockless.h"
+#include "Utilities/BitField.h"
 
 #include "util/logs.hpp"
 #include "util/v128.hpp"
@@ -16,14 +15,14 @@ enum class ppu_cmd : u32
 {
 	null,
 
-	opcode,     // Execute PPU instruction from arg
-	set_gpr,    // Set gpr[arg] (+1 cmd)
-	set_args,   // Set general-purpose args (+arg cmd)
-	lle_call,   // Load addr and rtoc at *arg or *gpr[arg] and execute
-	hle_call,   // Execute function by index (arg)
-	ptr_call,   // Execute function by pointer
-	opd_call,   // Execute function by provided rtoc and address (unlike lle_call, does not read memory)
-	cia_call,   // Execute from current CIA, mo GPR modification applied
+	opcode, // Execute PPU instruction from arg
+	set_gpr, // Set gpr[arg] (+1 cmd)
+	set_args, // Set general-purpose args (+arg cmd)
+	lle_call, // Load addr and rtoc at *arg or *gpr[arg] and execute
+	hle_call, // Execute function by index (arg)
+	ptr_call, // Execute function by pointer
+	opd_call, // Execute function by provided rtoc and address (unlike lle_call, does not read memory)
+	cia_call, // Execute from current CIA, mo GPR modification applied
 	entry_call, // Load addr and rtoc from entry_func
 	initialize, // ppu_initialize()
 	sleep,
@@ -135,7 +134,7 @@ enum class ppu_debugger_mode : u32
 	max_mode,
 };
 
-class ppu_thread : public cpu_thread, public PPUContext
+class ppu_thread : public cpu_thread
 {
 public:
 	static const u32 id_base = 0x01000000; // TODO (used to determine thread type)
@@ -146,12 +145,12 @@ public:
 	virtual void dump_regs(std::string&, std::any& custom_data) const override;
 	virtual std::string dump_callstack() const override;
 	virtual std::vector<std::pair<u32, u32>> dump_callstack_list() const override;
-	virtual std::string dump_misc() const override;
+	virtual void dump_misc(std::string& ret, std::any& custom_data) const override;
 	virtual void dump_all(std::string&) const override;
 	virtual void cpu_task() override final;
 	virtual void cpu_sleep() override;
 	virtual void cpu_on_stop() override;
-	virtual void cpu_wait(rx::EnumBitSet<cpu_flag> old) override;
+	virtual void cpu_wait(bs_t<cpu_flag> old) override;
 	virtual ~ppu_thread() override;
 
 	SAVESTATE_INIT_POS(3);
@@ -166,11 +165,115 @@ public:
 
 	using cpu_thread::operator=;
 
+	u64 gpr[32] = {}; // General-Purpose Registers
+	f64 fpr[32] = {}; // Floating Point Registers
+	v128 vr[32] = {}; // Vector Registers
+
+	union alignas(16) cr_bits
+	{
+		u8 bits[32];
+		u32 fields[8];
+
+		u8& operator [](usz i)
+		{
+			return bits[i];
+		}
+
+		// Pack CR bits
+		u32 pack() const
+		{
+			u32 result{};
+
+			for (u32 bit : bits)
+			{
+				result <<= 1;
+				result |= bit;
+			}
+
+			return result;
+		}
+
+		// Unpack CR bits
+		void unpack(u32 value)
+		{
+			for (u8& b : bits)
+			{
+				b = !!(value & (1u << 31));
+				value <<= 1;
+			}
+		}
+	};
+
+	cr_bits cr{}; // Condition Registers (unpacked)
+
+	// Floating-Point Status and Control Register (unpacked)
+	union
+	{
+		struct
+		{
+			// TODO
+			bool _start[16];
+			bool fl; // FPCC.FL
+			bool fg; // FPCC.FG
+			bool fe; // FPCC.FE
+			bool fu; // FPCC.FU
+			bool _end[12];
+		};
+
+		u32 fields[8];
+		cr_bits bits;
+	}
+	fpscr{};
+
+	u64 lr{}; // Link Register
+	u64 ctr{}; // Counter Register
+	u32 vrsave{0xffffffff}; // VR Save Register
+	u32 cia{}; // Current Instruction Address
+
+	// Fixed-Point Exception Register (abstract representation)
+	struct
+	{
+		ENABLE_BITWISE_SERIALIZATION;
+
+		bool so{}; // Summary Overflow
+		bool ov{}; // Overflow
+		bool ca{}; // Carry
+		u8 cnt{};  // 0..6
+	}
+	xer;
+
+	/*
+		Non-Java. A mode control bit that determines whether vector floating-point operations will be performed
+		in a Java-IEEE-C9X-compliant mode or a possibly faster non-Java/non-IEEE mode.
+		0	The Java-IEEE-C9X-compliant mode is selected. Denormalized values are handled as specified
+			by Java, IEEE, and C9X standard.
+		1	The non-Java/non-IEEE-compliant mode is selected. If an element in a source vector register
+			contains a denormalized value, the value '0' is used instead. If an instruction causes an underflow
+			exception, the corresponding element in the target vr is cleared to '0'. In both cases, the '0'
+			has the same sign as the denormalized or underflowing value.
+	*/
+	bool nj = true;
+
+	// Sticky saturation bit
+	v128 sat{};
+
+	// Optimization: precomputed java-mode mask for handling denormals
+	u32 jm_mask = 0x7f80'0000;
+
+	u32 raddr{0}; // Reservation addr
+	u64 rtime{0};
+	alignas(64) std::byte rdata[128]{}; // Reservation data
+	bool use_full_rdata{};
+	u32 res_cached{0}; // Reservation "cached" addresss
+	u32 res_notify{0};
+	u64 res_notify_time{0};
+	u32 res_notify_postpone_streak{0};
+
 	union ppu_prio_t
 	{
 		u64 all;
-		bf_t<s64, 0, 13> prio;         // Thread priority (0..3071) (firs 12-bits)
-		bf_t<s64, 13, 50> order;       // Thread enqueue order (last 52-bits)
+		bf_t<s64, 0, 13> prio; // Thread priority (0..3071) (firs 12-bits)
+		bf_t<s64, 13, 50> order; // Thread enqueue order (last 52-bits)
 		bf_t<u64, 63, 1> preserve_bit; // Preserve value for savestates
 	};
 
@@ -179,7 +282,7 @@ public:
 	const u32 stack_addr; // Stack address
 
 	atomic_t<ppu_join_status> joiner; // Joining thread or status
-	u32 hw_sleep_time = 0;            // Very specific delay for hardware threads switching, see lv2_obj::awake_unlocked for more details
+	u32 hw_sleep_time = 0; // Very specific delay for hardware threads switching, see lv2_obj::awake_unlocked for more details
 
 	lf_fifo<atomic_t<cmd64>, 127> cmd_queue; // Command queue for asynchronous operations.
 
@@ -187,20 +290,17 @@ public:
 	void cmd_list(std::initializer_list<cmd64>);
 	void cmd_pop(u32 = 0);
 	cmd64 cmd_wait(); // Empty command means caller must return, like true from cpu_thread::check_status().
-	cmd64 cmd_get(u32 index)
-	{
-		return cmd_queue[cmd_queue.peek() + index].load();
-	}
+	cmd64 cmd_get(u32 index) { return cmd_queue[cmd_queue.peek() + index].load(); }
 	atomic_t<u32> cmd_notify = 0;
 
 	alignas(64) const ppu_func_opd_t entry_func;
-	u64 start_time{0};              // Sleep start timepoint
-	u64 end_time{umax};             // Sleep end timepoint
-	s32 cancel_sleep{0};            // Flag to cancel the next lv2_obj::sleep call (when equals 2)
-	u64 syscall_args[8]{0};         // Last syscall arguments stored
+	u64 start_time{0}; // Sleep start timepoint
+	u64 end_time{umax}; // Sleep end timepoint
+	s32 cancel_sleep{0}; // Flag to cancel the next lv2_obj::sleep call (when equals 2)
+	u64 syscall_args[8]{0}; // Last syscall arguments stored
 	const char* current_function{}; // Current function name for diagnosis, optimized for speed.
-	const char* last_function{};    // Sticky copy of current_function, is not cleared on function return
-	const char* current_module{};   // Current module name, for savestates.
+	const char* last_function{}; // Sticky copy of current_function, is not cleared on function return
+	const char* current_module{}; // Current module name, for savestates.
 
 	const bool is_interrupt_thread; // True for interrupts-handler threads
 
@@ -262,11 +362,11 @@ public:
 		const ppu_thread* _this;
 
 		operator std::string() const;
-	} thread_name{this};
+	} thread_name{ this };
 
 	// For savestates
 	bool stop_flag_removal_protection = false; // If set, Emulator::Run won't remove stop flag
-	bool loaded_from_savestate = false;        // Indicates the thread had just started straight from savestate load
+	bool loaded_from_savestate = false; // Indicates the thread had just started straight from savestate load
 	std::shared_ptr<utils::serial> optional_savestate_state;
 	bool interrupt_thread_executing = false;
 
@@ -336,20 +436,6 @@ struct ppu_gpr_cast_impl<vm::_ptr_base<T, AT>>
 	}
 };
 
-template <typename T, typename AT>
-struct ppu_gpr_cast_impl<vm::_ref_base<T, AT>>
-{
-	static inline u64 to(const vm::_ref_base<T, AT>& value)
-	{
-		return ppu_gpr_cast_impl<AT>::to(value.addr());
-	}
-
-	static inline vm::_ref_base<T, AT> from(const u64 reg)
-	{
-		return vm::cast(ppu_gpr_cast_impl<AT>::from(reg));
-	}
-};
-
 template <>
 struct ppu_gpr_cast_impl<vm::null_t>
 {
@@ -364,7 +450,7 @@ struct ppu_gpr_cast_impl<vm::null_t>
 	}
 };
 
-template <typename To = u64, typename From>
+template<typename To = u64, typename From>
 inline To ppu_gpr_cast(const From& value)
 {
 	return ppu_gpr_cast_impl<To>::from(ppu_gpr_cast_impl<From>::to(value));

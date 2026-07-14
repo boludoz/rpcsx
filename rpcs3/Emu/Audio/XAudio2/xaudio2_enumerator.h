@@ -9,6 +9,7 @@
 class xaudio2_enumerator final : public audio_device_enumerator
 {
 public:
+
 	xaudio2_enumerator();
 	~xaudio2_enumerator() override;
 

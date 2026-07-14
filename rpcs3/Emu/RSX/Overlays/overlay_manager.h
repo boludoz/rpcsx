@@ -1,11 +1,12 @@
 #pragma once
 
 #include "overlays.h"
+#include "overlay_audio.h"
 
 #include "Emu/IdManager.h"
-#include "util/mutex.h"
-#include "util/Thread.h"
-#include "util/lockless.h"
+#include "Utilities/mutex.h"
+#include "Utilities/Thread.h"
+#include "Utilities/lockless.h"
 
 namespace rsx
 {
@@ -20,10 +21,12 @@ namespace rsx
 			std::vector<std::shared_ptr<overlay>> m_iface_list;
 			std::vector<std::shared_ptr<overlay>> m_dirty_list;
 
-			shared_mutex m_list_mutex;
+			mutable shared_mutex m_list_mutex;
 			lf_queue<u32> m_uids_to_remove;
 			lf_queue<u32> m_type_ids_to_remove;
 			atomic_t<u32> m_pending_removals_count = 0;
+
+			std::unique_ptr<audio_player> m_audio_player;
 
 			bool remove_type(u32 type_id);
 
@@ -71,7 +74,7 @@ namespace rsx
 			}
 
 			// Allocates object and adds to internal list. Returns pointer to created object
-			template <typename T, typename... Args>
+			template <typename T, typename ...Args>
 			std::shared_ptr<T> create(Args&&... args)
 			{
 				auto object = std::make_shared<T>(std::forward<Args>(args)...);
@@ -127,11 +130,11 @@ namespace rsx
 			void dispose(const std::vector<u32>& uids);
 
 			// Returns pointer to the object matching the given uid
-			std::shared_ptr<overlay> get(u32 uid);
+			std::shared_ptr<overlay> get(u32 uid) const;
 
 			// Returns pointer to the first object matching the given type
 			template <typename T>
-			std::shared_ptr<T> get()
+			std::shared_ptr<T> get() const
 			{
 				reader_lock lock(m_list_mutex);
 
@@ -161,11 +164,14 @@ namespace rsx
 
 			// Enable input thread attach to the specified interface
 			void attach_thread_input(
-				u32 uid,                                               // The input target
-				const std::string_view& name,                          // The name of the target
-				std::function<void()> on_input_loop_enter = nullptr,   // [optional] What to do before running the input routine
-				std::function<void(s32)> on_input_loop_exit = nullptr, // [optional] What to do with the result if any
-				std::function<s32()> input_loop_override = nullptr);   // [optional] What to do during the input loop. By default calls user_interface::run_input_loop
+				u32 uid,                                                 // The input target
+				const std::string_view& name,                            // The name of the target
+				std::function<void()> on_input_loop_enter = nullptr,     // [optional] What to do before running the input routine
+				std::function<void(s32)> on_input_loop_exit = nullptr,   // [optional] What to do with the result if any
+				std::function<s32()> input_loop_override = nullptr);     // [optional] What to do during the input loop. By default calls user_interface::run_input_loop
+
+			void start_audio(const std::string& audio_path);
+			void stop_audio();
 
 		private:
 			struct overlay_input_thread
@@ -182,9 +188,13 @@ namespace rsx
 					std::function<void()> on_input_loop_enter,
 					std::function<void(s32)> on_input_loop_exit,
 					std::function<s32()> input_loop_override)
-					: name(name), target(iface), input_loop_prologue(on_input_loop_enter), input_loop_epilogue(on_input_loop_exit), input_loop_override(input_loop_override), prologue_completed(false)
-				{
-				}
+					: name(name)
+					, target(iface)
+					, input_loop_prologue(on_input_loop_enter)
+					, input_loop_epilogue(on_input_loop_exit)
+					, input_loop_override(input_loop_override)
+					, prologue_completed(false)
+				{}
 
 				// Attributes
 				std::string_view name;
@@ -205,5 +215,5 @@ namespace rsx
 			std::shared_ptr<named_thread<overlay_input_thread>> m_input_thread;
 			void input_thread_loop();
 		};
-	} // namespace overlays
-} // namespace rsx
+	}
+}

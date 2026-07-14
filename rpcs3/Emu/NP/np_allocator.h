@@ -3,9 +3,8 @@
 #include <map>
 
 #include "Emu/Memory/vm_ptr.h"
-#include "util/mutex.h"
-#include "rx/asm.hpp"
-#include "rx/align.hpp"
+#include "Utilities/mutex.h"
+#include "util/asm.hpp"
 #include "util/logs.hpp"
 
 LOG_CHANNEL(np_mem_allocator);
@@ -16,10 +15,7 @@ namespace np
 	{
 	public:
 		memory_allocator() = default;
-		memory_allocator(utils::serial& ar) noexcept
-		{
-			save(ar);
-		}
+		memory_allocator(utils::serial& ar) noexcept { save(ar); }
 		memory_allocator(const memory_allocator&) = delete;
 		memory_allocator& operator=(const memory_allocator&) = delete;
 
@@ -28,8 +24,8 @@ namespace np
 		void setup(vm::ptr<void> ptr_pool, u32 size)
 		{
 			std::lock_guard lock(m_mutex);
-			m_pool = ptr_pool;
-			m_size = size;
+			m_pool  = ptr_pool;
+			m_size  = size;
 			m_avail = size;
 			m_allocs.clear();
 		}
@@ -37,10 +33,15 @@ namespace np
 		void release()
 		{
 			std::lock_guard lock(m_mutex);
-			m_pool = vm::null;
-			m_size = 0;
+			m_pool  = vm::null;
+			m_size  = 0;
 			m_avail = 0;
 			m_allocs.clear();
+		}
+
+		std::tuple<u32, u32, u32> get_stats() const
+		{
+			return {m_size, m_size - m_avail, m_max_usage};
 		}
 
 		u32 allocate(u32 size)
@@ -53,17 +54,17 @@ namespace np
 			}
 
 			// Align allocs
-			const u32 alloc_size = rx::alignUp(size, 4);
+			const u32 alloc_size = utils::align(size, 4);
 			if (alloc_size > m_avail)
 			{
 				np_mem_allocator.error("Not enough memory available in NP pool!");
 				return 0;
 			}
 
-			u32 last_free = 0;
+			u32 last_free    = 0;
 			bool found_space = false;
 
-			for (auto& a : m_allocs)
+			for (const auto& a : m_allocs)
 			{
 				if ((a.first - last_free) >= alloc_size)
 				{
@@ -85,6 +86,12 @@ namespace np
 
 			m_allocs.emplace(last_free, alloc_size);
 			m_avail -= alloc_size;
+
+			const u32 usage = m_size - m_avail;
+			if (usage > m_max_usage)
+			{
+				m_max_usage = usage;
+			}
 
 			memset((static_cast<u8*>(m_pool.get_ptr())) + last_free, 0, alloc_size);
 
@@ -123,8 +130,9 @@ namespace np
 	private:
 		shared_mutex m_mutex;
 		vm::ptr<void> m_pool{};
-		u32 m_size = 0;
+		u32 m_size  = 0;
 		u32 m_avail = 0;
+		u32 m_max_usage = 0;
 		std::map<u32, u32> m_allocs{}; // offset/size
 	};
 } // namespace np

@@ -78,18 +78,19 @@ namespace vk
 		vk::vmm_reset();
 	}
 
-	const vk::render_device* get_current_renderer()
+	const vk::render_device *get_current_renderer()
 	{
 		return g_render_device;
 	}
 
-	void set_current_renderer(const vk::render_device& device)
+	void set_current_renderer(const vk::render_device &device)
 	{
 		g_render_device = &device;
 		g_runtime_state.clear();
 		g_drv_no_primitive_restart = false;
 		g_drv_sanitize_fp_values = false;
 		g_drv_disable_fence_reset = false;
+		g_drv_strict_query_scopes = !!g_cfg.video.strict_rendering_mode;
 		g_drv_emulate_cond_render = (g_cfg.video.relaxed_zcull_sync && !g_render_device->get_conditional_render_support());
 		g_num_processed_frames = 0;
 		g_num_total_frames = 0;
@@ -157,13 +158,14 @@ namespace vk
 		{
 			// Buffer memory tests, only useful for portability on macOS
 			VkBufferUsageFlags types[] =
-				{
-					VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-					VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-					VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT,
-					VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-					VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-					VK_BUFFER_USAGE_VERTEX_BUFFER_BIT};
+			{
+				VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+				VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+				VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT,
+				VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+				VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+			};
 
 			VkFlags memory_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
@@ -176,18 +178,18 @@ namespace vk
 			info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 			info.flags = 0;
 
-			for (const auto& usage : types)
+			for (const auto &usage : types)
 			{
 				info.usage = usage;
-				CHECK_RESULT(VK_GET_SYMBOL(vkCreateBuffer)(*g_render_device, &info, nullptr, &tmp));
+				CHECK_RESULT(vkCreateBuffer(*g_render_device, &info, nullptr, &tmp));
 
-				VK_GET_SYMBOL(vkGetBufferMemoryRequirements)(*g_render_device, tmp, &memory_reqs);
+				vkGetBufferMemoryRequirements(*g_render_device, tmp, &memory_reqs);
 				if (g_render_device->get_compatible_memory_type(memory_reqs.memoryTypeBits, memory_flags, nullptr))
 				{
 					g_heap_compatible_buffer_types |= usage;
 				}
 
-				VK_GET_SYMBOL(vkDestroyBuffer)(*g_render_device, tmp, nullptr);
+				vkDestroyBuffer(*g_render_device, tmp, nullptr);
 			}
 		}
 
@@ -294,7 +296,7 @@ namespace vk
 
 	u64 get_last_completed_frame_id()
 	{
-		return (g_num_processed_frames > 0) ? g_num_processed_frames - 1 : 0;
+		return (g_num_processed_frames > 0)? g_num_processed_frames - 1: 0;
 	}
 
 	void do_query_cleanup(vk::command_buffer& cmd)
@@ -312,4 +314,4 @@ namespace vk
 			vkthr->on_descriptor_pool_fragmentation(is_fatal);
 		}
 	}
-} // namespace vk
+}

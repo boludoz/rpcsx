@@ -10,7 +10,7 @@
 
 #ifdef _MSC_VER
 #pragma warning(push)
-#pragma warning(disable : 4996)
+#pragma warning(disable: 4996)
 
 extern "C"
 {
@@ -66,7 +66,7 @@ namespace utils
 {
 	u128 __vectorcall atomic_load16(const void*);
 	void __vectorcall atomic_store16(void*, u128);
-} // namespace utils
+}
 #endif
 
 FORCE_INLINE void atomic_fence_consume()
@@ -112,7 +112,7 @@ FORCE_INLINE void atomic_fence_seq_cst()
 	_InterlockedOr(static_cast<long*>(_AddressOfReturnAddress()), 0);
 	_ReadWriteBarrier();
 #elif defined(ARCH_X64)
-	__asm__ volatile("lock orl $0, 0(%%rsp);" ::: "cc", "memory");
+	__asm__ volatile ("lock orl $0, 0(%%rsp);" ::: "cc", "memory");
 #else
 	__atomic_thread_fence(__ATOMIC_SEQ_CST);
 #endif
@@ -205,9 +205,9 @@ namespace atomic_wait
 		constexpr void set(lf_queue<T2>& var, std::nullptr_t = nullptr)
 		{
 			static_assert(Index < Max);
-			static_assert(sizeof(var) == sizeof(uptr));
+			static_assert(sizeof(var) == sizeof(uptr) * 2);
 
-			m_info[Index].data = reinterpret_cast<char*>(&var) + sizeof(u32);
+			m_info[Index].data = std::bit_cast<char*>(&var.get_wait_atomic().raw());
 			m_info[Index].old = 0;
 		}
 
@@ -215,9 +215,9 @@ namespace atomic_wait
 		constexpr void set(stx::atomic_ptr<T2>& var, std::nullptr_t = nullptr)
 		{
 			static_assert(Index < Max);
-			static_assert(sizeof(var) == sizeof(uptr));
+			static_assert(sizeof(var) == sizeof(uptr) * 2);
 
-			m_info[Index].data = reinterpret_cast<char*>(&var) + sizeof(u32);
+			m_info[Index].data = std::bit_cast<char*>(&var.get_wait_atomic().raw());
 			m_info[Index].old = 0;
 		}
 
@@ -234,13 +234,13 @@ namespace atomic_wait
 	template <typename... T>
 		requires(requires(T& t) { t.wait(any_value); } && ...)
 	list(T&... vars) -> list<sizeof...(T), T...>;
-} // namespace atomic_wait
+}
 
 namespace utils
 {
 	// RDTSC with adjustment for being unique
 	u64 get_unique_tsc();
-} // namespace utils
+}
 
 // Helper for waitable atomics (as in C++20 std::atomic)
 struct atomic_wait_engine
@@ -258,7 +258,7 @@ public:
 	static void notify_one(const void* data);
 	static void notify_all(const void* data);
 
-	static void set_wait_callback(bool (*cb)(const void* data, u64 attempts, u64 stamp0));
+	static void set_wait_callback(bool(*cb)(const void* data, u64 attempts, u64 stamp0));
 	static void set_one_time_use_wait_callback(bool (*cb)(u64 progress));
 };
 
@@ -479,10 +479,10 @@ struct atomic_storage
 #endif
 
 #if defined(_M_X64) && defined(_MSC_VER)
-		return _interlockedbittestandset((long*)dst, bit) != 0;
+		return _interlockedbittestandset(reinterpret_cast<long*>(dst), bit) != 0;
 #elif defined(ARCH_X64)
 		bool result;
-		__asm__ volatile("lock btsl %2, 0(%1)\n" : "=@ccc"(result) : "r"(dst), "Ir"(bit) : "cc", "memory");
+		__asm__ volatile ("lock btsl %2, 0(%1)\n" : "=@ccc" (result) : "r" (dst), "Ir" (bit) : "cc", "memory");
 		return result;
 #else
 		const T value = static_cast<T>(1) << bit;
@@ -506,10 +506,10 @@ struct atomic_storage
 #endif
 
 #if defined(_M_X64) && defined(_MSC_VER)
-		return _interlockedbittestandreset((long*)dst, bit) != 0;
+		return _interlockedbittestandreset(reinterpret_cast<long*>(dst), bit) != 0;
 #elif defined(ARCH_X64)
 		bool result;
-		__asm__ volatile("lock btrl %2, 0(%1)\n" : "=@ccc"(result) : "r"(dst), "Ir"(bit) : "cc", "memory");
+		__asm__ volatile ("lock btrl %2, 0(%1)\n" : "=@ccc" (result) : "r" (dst), "Ir" (bit) : "cc", "memory");
 		return result;
 #else
 		const T value = static_cast<T>(1) << bit;
@@ -536,14 +536,14 @@ struct atomic_storage
 		while (true)
 		{
 			// Keep trying until we actually invert desired bit
-			if (!_bittest((long*)dst, bit) && !_interlockedbittestandset((long*)dst, bit))
+			if (!_bittest(reinterpret_cast<const long*>(dst), bit) && !_interlockedbittestandset(reinterpret_cast<long*>(dst), bit))
 				return false;
-			if (_interlockedbittestandreset((long*)dst, bit))
+			if (_interlockedbittestandreset(reinterpret_cast<long*>(dst), bit))
 				return true;
 		}
 #elif defined(ARCH_X64)
 		bool result;
-		__asm__ volatile("lock btcl %2, 0(%1)\n" : "=@ccc"(result) : "r"(dst), "Ir"(bit) : "cc", "memory");
+		__asm__ volatile ("lock btcl %2, 0(%1)\n" : "=@ccc" (result) : "r" (dst), "Ir" (bit) : "cc", "memory");
 		return result;
 #else
 		const T value = static_cast<T>(1) << bit;
@@ -917,26 +917,19 @@ struct atomic_storage<T, 16> : atomic_storage<T, 0>
 
 	static inline bool compare_exchange(T& dest, T& comp, T exch)
 	{
-		struct alignas(16) llong2
-		{
-			llong ll[2];
-		};
+		struct alignas(16) llong2 { llong ll[2]; };
 		const llong2 _exch = std::bit_cast<llong2>(exch);
 		return _InterlockedCompareExchange128(reinterpret_cast<volatile llong*>(&dest), _exch.ll[1], _exch.ll[0], reinterpret_cast<llong*>(&comp)) != 0;
 	}
 
 	static inline T exchange(T& dest, T value)
 	{
-		struct alignas(16) llong2
-		{
-			llong ll[2];
-		};
+		struct alignas(16) llong2 { llong ll[2]; };
 		const llong2 _value = std::bit_cast<llong2>(value);
 
 		const auto llptr = reinterpret_cast<volatile llong*>(&dest);
-		llong2 cmp{llptr[0], llptr[1]};
-		while (!_InterlockedCompareExchange128(llptr, _value.ll[1], _value.ll[0], cmp.ll))
-			;
+		llong2 cmp{ llptr[0], llptr[1] };
+		while (!_InterlockedCompareExchange128(llptr, _value.ll[1], _value.ll[0], cmp.ll));
 		return std::bit_cast<T>(cmp);
 	}
 
@@ -958,9 +951,9 @@ struct atomic_storage<T, 16> : atomic_storage<T, 0>
 	{
 		alignas(16) T r;
 #ifdef __AVX__
-		__asm__ volatile("vmovdqa %1, %0;" : "=x"(r) : "m"(dest) : "memory");
+		__asm__ volatile("vmovdqa %1, %0;" : "=x" (r) : "m" (dest) : "memory");
 #else
-		__asm__ volatile("movdqa %1, %0;" : "=x"(r) : "m"(dest) : "memory");
+		__asm__ volatile("movdqa %1, %0;" : "=x" (r) : "m" (dest) : "memory");
 #endif
 		return r;
 	}
@@ -994,8 +987,12 @@ struct atomic_storage<T, 16> : atomic_storage<T, 0>
 		}
 
 		__asm__ volatile("lock cmpxchg16b %1;"
-			: "=@ccz"(result), "+m"(dest), "+d"(cmp_hi), "+a"(cmp_lo)
-			: "c"(exc_hi), "b"(exc_lo)
+			: "=@ccz" (result)
+			, "+m" (dest)
+			, "+d" (cmp_hi)
+			, "+a" (cmp_lo)
+			: "c" (exc_hi)
+			, "b" (exc_lo)
 			: "cc");
 
 		if constexpr (std::is_same_v<T, u128> || std::is_same_v<T, s128>)
@@ -1014,7 +1011,12 @@ struct atomic_storage<T, 16> : atomic_storage<T, 0>
 	static inline T exchange(T& dest, T value)
 	{
 		__atomic_thread_fence(__ATOMIC_ACQ_REL);
+		// GCC has recently started thinking using this instrinsic is breaking strict aliasing rules
+		// TODO: remove if this ever get fixed in GCC
+		#pragma GCC diagnostic push
+		#pragma GCC diagnostic ignored "-Wstrict-aliasing"
 		return std::bit_cast<T>(__sync_lock_test_and_set(reinterpret_cast<u128*>(&dest), std::bit_cast<u128>(value)));
+		#pragma GCC diagnostic pop
 	}
 
 	static inline void store(T& dest, T value)
@@ -1027,9 +1029,9 @@ struct atomic_storage<T, 16> : atomic_storage<T, 0>
 	{
 		u128 val = std::bit_cast<u128>(value);
 #ifdef __AVX__
-		__asm__ volatile("vmovdqa %0, %1;" ::"x"(val), "m"(dest) : "memory");
+		__asm__ volatile("vmovdqa %0, %1;" :: "x" (val), "m" (dest) : "memory");
 #else
-		__asm__ volatile("movdqa %0, %1;" ::"x"(val), "m"(dest) : "memory");
+		__asm__ volatile("movdqa %0, %1;" :: "x" (val), "m" (dest) : "memory");
 #endif
 	}
 #elif defined(ARCH_ARM64)
@@ -1039,8 +1041,8 @@ struct atomic_storage<T, 16> : atomic_storage<T, 0>
 #if defined(ARM_FEATURE_LSE2)
 		u64 data[2];
 		__asm__ volatile("1:\n"
-						 "ldp %x[data0], %x[data1], %[dest]\n"
-						 "dmb ish\n"
+			"ldp %x[data0], %x[data1], %[dest]\n"
+			"dmb ish\n"
 			: [data0] "=r"(data[0]), [data1] "=r"(data[1])
 			: [dest] "Q"(dest)
 			: "memory");
@@ -1051,12 +1053,13 @@ struct atomic_storage<T, 16> : atomic_storage<T, 0>
 		u32 tmp;
 		u64 data[2];
 		__asm__ volatile("1:\n"
-						 "ldaxp %x[data0], %x[data1], %[dest]\n"
-						 "stlxp %w[tmp], %x[data0], %x[data1], %[dest]\n"
-						 "cbnz %w[tmp], 1b\n"
-			: [tmp] "=&r"(tmp), [data0] "=&r"(data[0]), [data1] "=&r"(data[1])
-			: [dest] "Q"(dest)
-			: "memory");
+			"ldaxp %x[data0], %x[data1], %[dest]\n"
+			"stlxp %w[tmp], %x[data0], %x[data1], %[dest]\n"
+			"cbnz %w[tmp], 1b\n"
+			: [tmp] "=&r" (tmp), [data0] "=&r" (data[0]), [data1] "=&r" (data[1])
+			: [dest] "Q" (dest)
+			: "memory"
+		);
 		T result;
 		std::memcpy(&result, data, 16);
 		return result;
@@ -1078,17 +1081,18 @@ struct atomic_storage<T, 16> : atomic_storage<T, 0>
 		std::memcpy(data, &exch, 16);
 		u64 prev[2];
 		__asm__ volatile("1:\n"
-						 "ldaxp %x[prev0], %x[prev1], %[storage]\n"
-						 "cmp %x[prev0], %x[cmp0]\n"
-						 "ccmp %x[prev1], %x[cmp1], #0, eq\n"
-						 "b.ne 2f\n"
-						 "stlxp %w[result], %x[data0], %x[data1], %[storage]\n"
-						 "cbnz %w[result], 1b\n"
-						 "2:\n"
-						 "cset %w[result], eq\n"
-			: [result] "=&r"(result), [storage] "+Q"(dest), [prev0] "=&r"(prev[0]), [prev1] "=&r"(prev[1])
-			: [data0] "r"(data[0]), [data1] "r"(data[1]), [cmp0] "r"(cmp[0]), [cmp1] "r"(cmp[1])
-			: "cc", "memory");
+			"ldaxp %x[prev0], %x[prev1], %[storage]\n"
+			"cmp %x[prev0], %x[cmp0]\n"
+			"ccmp %x[prev1], %x[cmp1], #0, eq\n"
+			"b.ne 2f\n"
+			"stlxp %w[result], %x[data0], %x[data1], %[storage]\n"
+			"cbnz %w[result], 1b\n"
+			"2:\n"
+			"cset %w[result], eq\n"
+			: [result] "=&r" (result), [storage] "+Q" (dest), [prev0] "=&r" (prev[0]), [prev1] "=&r" (prev[1])
+			: [data0] "r" (data[0]), [data1] "r" (data[1]), [cmp0] "r" (cmp[0]), [cmp1] "r" (cmp[1])
+			: "cc", "memory"
+		);
 
 		if (result)
 		{
@@ -1106,12 +1110,13 @@ struct atomic_storage<T, 16> : atomic_storage<T, 0>
 		u64 data[2];
 		std::memcpy(src, &value, 16);
 		__asm__ volatile("1:\n"
-						 "ldaxp %x[data0], %x[data1], %[dest]\n"
-						 "stlxp %w[tmp], %x[src0], %x[src1], %[dest]\n"
-						 "cbnz %w[tmp], 1b\n"
-			: [tmp] "=&r"(tmp), [dest] "+Q"(dest), [data0] "=&r"(data[0]), [data1] "=&r"(data[1])
-			: [src0] "r"(src[0]), [src1] "r"(src[1])
-			: "memory");
+			"ldaxp %x[data0], %x[data1], %[dest]\n"
+			"stlxp %w[tmp], %x[src0], %x[src1], %[dest]\n"
+			"cbnz %w[tmp], 1b\n"
+			: [tmp] "=&r" (tmp), [dest] "+Q" (dest), [data0] "=&r" (data[0]), [data1] "=&r" (data[1])
+			: [src0] "r" (src[0]), [src1] "r" (src[1])
+			: "memory"
+		);
 		T result;
 		std::memcpy(&result, data, 16);
 		return result;
@@ -1124,12 +1129,13 @@ struct atomic_storage<T, 16> : atomic_storage<T, 0>
 		u64 src[2];
 		std::memcpy(src, &value, 16);
 		__asm__ volatile("1:\n"
-						 "dmb ish\n"
-						 "stp %x[data0], %x[data1], %[dest]\n"
-						 "dmb ish\n"
-			: [dest] "=Q"(dest)
-			: [data0] "r"(src[0]), [data1] "r"(src[1])
-			: "memory");
+			"dmb ish\n"
+			"stp %x[data0], %x[data1], %[dest]\n"
+			"dmb ish\n"
+			: [dest] "=Q" (dest)
+			: [data0] "r" (src[0]), [data1] "r" (src[1])
+			: "memory"
+		);
 #else
 		exchange(dest, value);
 #endif
@@ -1141,11 +1147,12 @@ struct atomic_storage<T, 16> : atomic_storage<T, 0>
 		u64 src[2];
 		std::memcpy(src, &value, 16);
 		__asm__ volatile("1:\n"
-						 "dmb ish\n"
-						 "stp %x[data0], %x[data1], %[dest]\n"
-			: [dest] "=Q"(dest)
-			: [data0] "r"(src[0]), [data1] "r"(src[1])
-			: "memory");
+			 "dmb ish\n"
+			 "stp %x[data0], %x[data1], %[dest]\n"
+			 : [dest] "=Q" (dest)
+			 : [data0] "r" (src[0]), [data1] "r" (src[1])
+			 : "memory"
+		);
 #else
 		// TODO
 		exchange(dest, value);
@@ -1191,7 +1198,7 @@ public:
 
 	atomic_t(const atomic_t&) = delete;
 
-	atomic_t& operator=(const atomic_t&) = delete;
+	atomic_t& operator =(const atomic_t&) = delete;
 
 	constexpr atomic_t(const type& value) noexcept
 		: m_data(value)
@@ -1233,7 +1240,7 @@ public:
 
 	// Atomic operation; returns old value, or pair of old value and return value (cancel op if evaluates to false)
 	template <typename F, typename RT = std::invoke_result_t<F, T&>>
-		requires(!std::is_invocable_v<F, const T> && !std::is_invocable_v<F, volatile T>)
+		requires (!std::is_invocable_v<F, const T> && !std::is_invocable_v<F, volatile T>)
 	std::conditional_t<std::is_void_v<RT>, type, std::pair<type, RT>> fetch_op(F func)
 	{
 		type _new, old = atomic_storage<type>::load(m_data);
@@ -1265,7 +1272,7 @@ public:
 
 	// Atomic operation; returns function result value, function is the lambda
 	template <typename F, typename RT = std::invoke_result_t<F, T&>>
-		requires(!std::is_invocable_v<F, const T> && !std::is_invocable_v<F, volatile T>)
+		requires (!std::is_invocable_v<F, const T> && !std::is_invocable_v<F, volatile T>)
 	RT atomic_op(F func)
 	{
 		type _new, old = atomic_storage<type>::load(m_data);
@@ -1319,7 +1326,7 @@ public:
 		atomic_storage<type>::store(m_data, rhs);
 	}
 
-	type operator=(const type& rhs)
+	type operator =(const type& rhs)
 	{
 		atomic_storage<type>::store(m_data, rhs);
 		return rhs;
@@ -1339,254 +1346,254 @@ public:
 
 	auto fetch_add(const ptr_rt& rhs)
 	{
-		if constexpr (std::is_integral_v<type>)
+		if constexpr(std::is_integral_v<type>)
 		{
 			return atomic_storage<type>::fetch_add(m_data, rhs);
 		}
 
 		return fetch_op([&](T& v)
-			{
-				v += rhs;
-			});
+		{
+			v += rhs;
+		});
 	}
 
 	auto add_fetch(const ptr_rt& rhs)
 	{
-		if constexpr (std::is_integral_v<type>)
+		if constexpr(std::is_integral_v<type>)
 		{
 			return atomic_storage<type>::add_fetch(m_data, rhs);
 		}
 
 		return atomic_op([&](T& v)
-			{
-				v += rhs;
-				return v;
-			});
+		{
+			v += rhs;
+			return v;
+		});
 	}
 
-	auto operator+=(const ptr_rt& rhs)
+	auto operator +=(const ptr_rt& rhs)
 	{
-		if constexpr (std::is_integral_v<type>)
+		if constexpr(std::is_integral_v<type>)
 		{
 			return atomic_storage<type>::add_fetch(m_data, rhs);
 		}
 
 		return atomic_op([&](T& v)
-			{
-				return v += rhs;
-			});
+		{
+			return v += rhs;
+		});
 	}
 
 	auto fetch_sub(const ptr_rt& rhs)
 	{
-		if constexpr (std::is_integral_v<type>)
+		if constexpr(std::is_integral_v<type>)
 		{
 			return atomic_storage<type>::fetch_sub(m_data, rhs);
 		}
 
 		return fetch_op([&](T& v)
-			{
-				v -= rhs;
-			});
+		{
+			v -= rhs;
+		});
 	}
 
 	auto sub_fetch(const ptr_rt& rhs)
 	{
-		if constexpr (std::is_integral_v<type>)
+		if constexpr(std::is_integral_v<type>)
 		{
 			return atomic_storage<type>::sub_fetch(m_data, rhs);
 		}
 
 		return atomic_op([&](T& v)
-			{
-				v -= rhs;
-				return v;
-			});
+		{
+			v -= rhs;
+			return v;
+		});
 	}
 
-	auto operator-=(const ptr_rt& rhs)
+	auto operator -=(const ptr_rt& rhs)
 	{
-		if constexpr (std::is_integral_v<type>)
+		if constexpr(std::is_integral_v<type>)
 		{
 			return atomic_storage<type>::sub_fetch(m_data, rhs);
 		}
 
 		return atomic_op([&](T& v)
-			{
-				return v -= rhs;
-			});
+		{
+			return v -= rhs;
+		});
 	}
 
 	auto fetch_and(const type& rhs)
 	{
-		if constexpr (std::is_integral_v<type>)
+		if constexpr(std::is_integral_v<type>)
 		{
 			return atomic_storage<type>::fetch_and(m_data, rhs);
 		}
 
 		return fetch_op([&](T& v)
-			{
-				v &= rhs;
-			});
+		{
+			v &= rhs;
+		});
 	}
 
 	auto and_fetch(const type& rhs)
 	{
-		if constexpr (std::is_integral_v<type>)
+		if constexpr(std::is_integral_v<type>)
 		{
 			return atomic_storage<type>::and_fetch(m_data, rhs);
 		}
 
 		return atomic_op([&](T& v)
-			{
-				v &= rhs;
-				return v;
-			});
+		{
+			v &= rhs;
+			return v;
+		});
 	}
 
-	auto operator&=(const type& rhs)
+	auto operator &=(const type& rhs)
 	{
-		if constexpr (std::is_integral_v<type>)
+		if constexpr(std::is_integral_v<type>)
 		{
 			return atomic_storage<type>::and_fetch(m_data, rhs);
 		}
 
 		return atomic_op([&](T& v)
-			{
-				return v &= rhs;
-			});
+		{
+			return v &= rhs;
+		});
 	}
 
 	auto fetch_or(const type& rhs)
 	{
-		if constexpr (std::is_integral_v<type>)
+		if constexpr(std::is_integral_v<type>)
 		{
 			return atomic_storage<type>::fetch_or(m_data, rhs);
 		}
 
 		return fetch_op([&](T& v)
-			{
-				v |= rhs;
-			});
+		{
+			v |= rhs;
+		});
 	}
 
 	auto or_fetch(const type& rhs)
 	{
-		if constexpr (std::is_integral_v<type>)
+		if constexpr(std::is_integral_v<type>)
 		{
 			return atomic_storage<type>::or_fetch(m_data, rhs);
 		}
 
 		return atomic_op([&](T& v)
-			{
-				v |= rhs;
-				return v;
-			});
+		{
+			v |= rhs;
+			return v;
+		});
 	}
 
-	auto operator|=(const type& rhs)
+	auto operator |=(const type& rhs)
 	{
-		if constexpr (std::is_integral_v<type>)
+		if constexpr(std::is_integral_v<type>)
 		{
 			return atomic_storage<type>::or_fetch(m_data, rhs);
 		}
 
 		return atomic_op([&](T& v)
-			{
-				return v |= rhs;
-			});
+		{
+			return v |= rhs;
+		});
 	}
 
 	auto fetch_xor(const type& rhs)
 	{
-		if constexpr (std::is_integral_v<type>)
+		if constexpr(std::is_integral_v<type>)
 		{
 			return atomic_storage<type>::fetch_xor(m_data, rhs);
 		}
 
 		return fetch_op([&](T& v)
-			{
-				v ^= rhs;
-			});
+		{
+			v ^= rhs;
+		});
 	}
 
 	auto xor_fetch(const type& rhs)
 	{
-		if constexpr (std::is_integral_v<type>)
+		if constexpr(std::is_integral_v<type>)
 		{
 			return atomic_storage<type>::xor_fetch(m_data, rhs);
 		}
 
 		return atomic_op([&](T& v)
-			{
-				v ^= rhs;
-				return v;
-			});
+		{
+			v ^= rhs;
+			return v;
+		});
 	}
 
-	auto operator^=(const type& rhs)
+	auto operator ^=(const type& rhs)
 	{
-		if constexpr (std::is_integral_v<type>)
+		if constexpr(std::is_integral_v<type>)
 		{
 			return atomic_storage<type>::xor_fetch(m_data, rhs);
 		}
 
 		return atomic_op([&](T& v)
-			{
-				return v ^= rhs;
-			});
+		{
+			return v ^= rhs;
+		});
 	}
 
-	auto operator++()
+	auto operator ++()
 	{
-		if constexpr (std::is_integral_v<type>)
+		if constexpr(std::is_integral_v<type>)
 		{
 			return atomic_storage<type>::inc_fetch(m_data);
 		}
 
 		return atomic_op([](T& v)
-			{
-				return ++v;
-			});
+		{
+			return ++v;
+		});
 	}
 
-	auto operator--()
+	auto operator --()
 	{
-		if constexpr (std::is_integral_v<type>)
+		if constexpr(std::is_integral_v<type>)
 		{
 			return atomic_storage<type>::dec_fetch(m_data);
 		}
 
 		return atomic_op([](T& v)
-			{
-				return --v;
-			});
+		{
+			return --v;
+		});
 	}
 
-	auto operator++(int)
+	auto operator ++(int)
 	{
-		if constexpr (std::is_integral_v<type>)
+		if constexpr(std::is_integral_v<type>)
 		{
 			return atomic_storage<type>::fetch_inc(m_data);
 		}
 
 		return atomic_op([](T& v)
-			{
-				return v++;
-			});
+		{
+			return v++;
+		});
 	}
 
-	auto operator--(int)
+	auto operator --(int)
 	{
-		if constexpr (std::is_integral_v<type>)
+		if constexpr(std::is_integral_v<type>)
 		{
 			return atomic_storage<type>::fetch_dec(m_data);
 		}
 
 		return atomic_op([](T& v)
-			{
-				return v--;
-			});
+		{
+			return v--;
+		});
 	}
 
 	// Conditionally decrement
@@ -1643,12 +1650,12 @@ public:
 		}
 
 		return atomic_op([](type& v)
-			{
-				const auto old = v;
-				const auto bit = type(1) << (sizeof(T) * 8 - 1);
-				v |= bit;
-				return !!(old & bit);
-			});
+		{
+			const auto old = v;
+			const auto bit = type(1) << (sizeof(T) * 8 - 1);
+			v |= bit;
+			return !!(old & bit);
+		});
 	}
 
 	bool bit_test_reset(uint bit)
@@ -1659,12 +1666,12 @@ public:
 		}
 
 		return atomic_op([](type& v)
-			{
-				const auto old = v;
-				const auto bit = type(1) << (sizeof(T) * 8 - 1);
-				v &= ~bit;
-				return !!(old & bit);
-			});
+		{
+			const auto old = v;
+			const auto bit = type(1) << (sizeof(T) * 8 - 1);
+			v &= ~bit;
+			return !!(old & bit);
+		});
 	}
 
 	bool bit_test_invert(uint bit)
@@ -1675,12 +1682,12 @@ public:
 		}
 
 		return atomic_op([](type& v)
-			{
-				const auto old = v;
-				const auto bit = type(1) << (sizeof(T) * 8 - 1);
-				v ^= bit;
-				return !!(old & bit);
-			});
+		{
+			const auto old = v;
+			const auto bit = type(1) << (sizeof(T) * 8 - 1);
+			v ^= bit;
+			return !!(old & bit);
+		});
 	}
 
 	void wait(type old_value, atomic_wait_timeout timeout = atomic_wait_timeout::inf) const
@@ -1723,7 +1730,7 @@ public:
 
 	atomic_t(const atomic_t&) = delete;
 
-	atomic_t& operator=(const atomic_t&) = delete;
+	atomic_t& operator =(const atomic_t&) = delete;
 
 	constexpr atomic_t(bool value) noexcept
 		: base(value)
@@ -1753,7 +1760,7 @@ public:
 		base::store(value);
 	}
 
-	bool operator=(bool value)
+	bool operator =(bool value)
 	{
 		base::store(value);
 		return value;
@@ -1788,19 +1795,13 @@ public:
 // Specializations
 
 template <typename T, usz Align, typename T2, usz Align2>
-struct std::common_type<atomic_t<T, Align>, atomic_t<T2, Align2>> : std::common_type<T, T2>
-{
-};
+struct std::common_type<atomic_t<T, Align>, atomic_t<T2, Align2>> : std::common_type<T, T2> {};
 
 template <typename T, usz Align, typename T2>
-struct std::common_type<atomic_t<T, Align>, T2> : std::common_type<T, std::common_type_t<T2>>
-{
-};
+struct std::common_type<atomic_t<T, Align>, T2> : std::common_type<T, std::common_type_t<T2>> {};
 
 template <typename T, typename T2, usz Align2>
-struct std::common_type<T, atomic_t<T2, Align2>> : std::common_type<std::common_type_t<T>, T2>
-{
-};
+struct std::common_type<T, atomic_t<T2, Align2>> : std::common_type<std::common_type_t<T>, T2> {};
 
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop
@@ -1819,8 +1820,7 @@ namespace utils
 		{
 		}
 
-		template <typename Arg>
-			requires(std::is_same_v<std::remove_reference_t<Arg>, std::remove_cvref_t<Arg>> && !std::is_rvalue_reference_v<Arg>)
+		template <typename Arg> requires (std::is_same_v<std::remove_reference_t<Arg>, std::remove_cvref_t<Arg>> && !std::is_rvalue_reference_v<Arg>)
 		auto operator()(Arg& arg) const noexcept
 		{
 			return f(std::forward<Arg&>(arg));
@@ -1829,11 +1829,9 @@ namespace utils
 
 	template <typename F>
 	aofn_helper(F&& f) -> aofn_helper<F>;
-} // namespace utils
+}
 
 // Shorter lambda for non-cv qualified L-values
 // For use with atomic operations
-#define AOFN(...)                       \
-	::utils::aofn_helper([&](auto& x) { \
-		return (__VA_ARGS__);           \
-	})
+#define AOFN(...) \
+	::utils::aofn_helper([&](auto& x) { return (__VA_ARGS__); })

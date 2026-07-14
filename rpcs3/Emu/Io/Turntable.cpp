@@ -2,7 +2,7 @@
 
 #include "stdafx.h"
 #include "Turntable.h"
-#include "cellos/sys_usbd.h"
+#include "Emu/Cell/lv2/sys_usbd.h"
 #include "Emu/Io/turntable_config.h"
 #include "Input/pad_thread.h"
 #include "Emu/system_config.h"
@@ -13,36 +13,36 @@ template <>
 void fmt_class_string<turntable_btn>::format(std::string& out, u64 arg)
 {
 	format_enum(out, arg, [](turntable_btn value)
+	{
+		switch (value)
 		{
-			switch (value)
-			{
-			case turntable_btn::blue: return "Blue";
-			case turntable_btn::green: return "Green";
-			case turntable_btn::red: return "Red";
-			case turntable_btn::dpad_up: return "D-Pad Up";
-			case turntable_btn::dpad_down: return "D-Pad Down";
-			case turntable_btn::dpad_left: return "D-Pad Left";
-			case turntable_btn::dpad_right: return "D-Pad Right";
-			case turntable_btn::start: return "Start";
-			case turntable_btn::select: return "Select";
-			case turntable_btn::square: return "Square";
-			case turntable_btn::circle: return "Circle";
-			case turntable_btn::cross: return "Cross";
-			case turntable_btn::triangle: return "Triangle";
-			case turntable_btn::right_turntable: return "Right Turntable";
-			case turntable_btn::crossfader: return "Crossfader";
-			case turntable_btn::effects_dial: return "Effects Dial";
-			case turntable_btn::count: return "Count";
-			}
+		case turntable_btn::blue: return "Blue";
+		case turntable_btn::green: return "Green";
+		case turntable_btn::red: return "Red";
+		case turntable_btn::dpad_up: return "D-Pad Up";
+		case turntable_btn::dpad_down: return "D-Pad Down";
+		case turntable_btn::dpad_left: return "D-Pad Left";
+		case turntable_btn::dpad_right: return "D-Pad Right";
+		case turntable_btn::start: return "Start";
+		case turntable_btn::select: return "Select";
+		case turntable_btn::square: return "Square";
+		case turntable_btn::circle: return "Circle";
+		case turntable_btn::cross: return "Cross";
+		case turntable_btn::triangle: return "Triangle";
+		case turntable_btn::right_turntable: return "Right Turntable";
+		case turntable_btn::crossfader: return "Crossfader";
+		case turntable_btn::effects_dial: return "Effects Dial";
+		case turntable_btn::count: return "Count";
+		}
 
-			return unknown;
-		});
+		return unknown;
+	});
 }
 
 usb_device_turntable::usb_device_turntable(u32 controller_index, const std::array<u8, 7>& location)
 	: usb_device_emulated(location), m_controller_index(controller_index)
 {
-	device = UsbDescriptorNode(USB_DESCRIPTOR_DEVICE, UsbDeviceDescriptor{0x0100, 0x00, 0x00, 0x00, 0x40, 0x12BA, 0x0140, 0x0005, 0x01, 0x02, 0x00, 0x01});
+	device        = UsbDescriptorNode(USB_DESCRIPTOR_DEVICE, UsbDeviceDescriptor{0x0100, 0x00, 0x00, 0x00, 0x40, 0x12BA, 0x0140, 0x0005, 0x01, 0x02, 0x00, 0x01});
 	auto& config0 = device.add_node(UsbDescriptorNode(USB_DESCRIPTOR_CONFIG, UsbDeviceConfiguration{0x0029, 0x01, 0x01, 0x00, 0x80, 0x19}));
 	config0.add_node(UsbDescriptorNode(USB_DESCRIPTOR_INTERFACE, UsbDeviceInterface{0x00, 0x00, 0x02, 0x03, 0x00, 0x00, 0x00}));
 	config0.add_node(UsbDescriptorNode(USB_DESCRIPTOR_HID, UsbDeviceHID{0x0110, 0x00, 0x01, 0x22, 0x0089}));
@@ -71,20 +71,20 @@ void usb_device_turntable::control_transfer(u8 bmRequestType, u8 bRequest, u16 w
 	// Control transfers are nearly instant
 	switch (bmRequestType)
 	{
-	case 0x21:
-		switch (bRequest)
-		{
-		case 0x09:
-			// Do nothing here - not sure what it should do.
+		case 0x21:
+			switch (bRequest)
+			{
+			case 0x09:
+				// Do nothing here - not sure what it should do.
+				break;
+			default:
+				turntable_log.error("Unhandled Query: buf_size=0x%02X, Type=0x%02X, bRequest=0x%02X, bmRequestType=0x%02X", buf_size, (buf_size > 0) ? buf[0] : -1, bRequest, bmRequestType);
+				break;
+			}
 			break;
 		default:
-			turntable_log.error("Unhandled Query: buf_size=0x%02X, Type=0x%02X, bRequest=0x%02X, bmRequestType=0x%02X", buf_size, (buf_size > 0) ? buf[0] : -1, bRequest, bmRequestType);
+			usb_device_emulated::control_transfer(bmRequestType, bRequest, wValue, wIndex, wLength, buf_size, buf, transfer);
 			break;
-		}
-		break;
-	default:
-		usb_device_emulated::control_transfer(bmRequestType, bRequest, wValue, wIndex, wLength, buf_size, buf, transfer);
-		break;
 	}
 }
 
@@ -92,8 +92,8 @@ void usb_device_turntable::interrupt_transfer(u32 buf_size, u8* buf, u32 /*endpo
 {
 	ensure(buf_size >= 27);
 
-	transfer->fake = true;
-	transfer->expected_count = buf_size;
+	transfer->fake            = true;
+	transfer->expected_count  = buf_size;
 	transfer->expected_result = HC_CC_NOERR;
 	// Turntable runs at 100hz --> 10ms
 	// But make the emulated table go at 1ms for better input behavior
@@ -134,9 +134,9 @@ void usb_device_turntable::interrupt_transfer(u32 buf_size, u8* buf, u32 /*endpo
 
 	// The following bytes are NOTed (set to 0xFF) when active.
 	// If multiple buttons are pressed for one byte, the byte is NOTed twice (reset to 0x00).
-	buf[7] = 0x00;  // Square Button / D-Pad Right
-	buf[8] = 0x00;  // D-Pad Left
-	buf[9] = 0x00;  // Cross Button / D-Pad Up
+	buf[7]  = 0x00; // Square Button / D-Pad Right
+	buf[8]  = 0x00; // D-Pad Left
+	buf[9]  = 0x00; // Cross Button / D-Pad Up
 	buf[10] = 0x00; // D-Pad Down
 	buf[11] = 0x00; // Triangle / Euphoria Button
 	buf[12] = 0x00; // Circle Button
@@ -163,10 +163,10 @@ void usb_device_turntable::interrupt_transfer(u32 buf_size, u8* buf, u32 /*endpo
 
 	std::lock_guard lock(pad::g_pad_mutex);
 	const auto handler = pad::get_pad_thread();
-	const auto& pads = handler->GetPads();
-	const auto& pad = ::at32(pads, m_controller_index);
+	const auto& pads   = handler->GetPads();
+	const auto& pad    = ::at32(pads, m_controller_index);
 
-	if (!(pad->m_port_status & CELL_PAD_STATUS_CONNECTED))
+	if (!pad->is_connected() || pad->is_copilot())
 		return;
 
 	const auto& cfg = ::at32(g_cfg_turntable.players, m_controller_index);
@@ -278,7 +278,7 @@ void usb_device_turntable::interrupt_transfer(u32 buf_size, u8* buf, u32 /*endpo
 				// DJ Hero does not register input if the turntable is 0, so force it to 1.
 				buf[6] = std::max(1, 255 - value); // Right Turntable
 				// DJ Hero requires turntables to be centered at 128.
-			    // If this axis ends up centered at 127, force it to 128.
+				// If this axis ends up centered at 127, force it to 128.
 				if (buf[6] == 127)
 				{
 					buf[6] = 128;

@@ -1,8 +1,8 @@
 #pragma once
 
 #include <map>
-#include "util/mutex.h"
-#include "rpcsx/fw/ps3/sceNp.h"
+#include "Utilities/mutex.h"
+#include "Emu/Cell/Modules/sceNp.h"
 
 template <>
 struct std::less<SceNpRoomId>
@@ -45,10 +45,10 @@ namespace np
 		void add_member(const SceNpRoomId& room_id, const SceNpMatchingRoomMember* user_info, bool new_member);
 		void del_member(const SceNpRoomId& room_id, const SceNpMatchingRoomMember* user_info);
 
-		error_code get_room_member_list(const SceNpRoomId& room_id, u32 buf_len, vm::ptr<void> data);
+		error_code get_room_member_list(const SceNpRoomId& room_id, u32 buf_len, vm::ptr<void> data) const;
 
 	private:
-		shared_mutex mutex;
+		mutable shared_mutex mutex;
 		std::map<SceNpRoomId, gui_room_cache> rooms;
 	};
 } // namespace np

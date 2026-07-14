@@ -8,6 +8,18 @@ namespace gl
 {
 	blitter* g_hw_blitter = nullptr;
 
+	void blitter::init()
+	{
+		blit_src.create();
+		blit_dst.create();
+	}
+
+	void blitter::destroy()
+	{
+		blit_dst.remove();
+		blit_src.remove();
+	}
+
 	void blitter::copy_image(gl::command_context&, const texture* src, const texture* dst, int src_level, int dst_level, const position3i& src_offset, const position3i& dst_offset, const size3i& size) const
 	{
 		ensure(src_level == 0);
@@ -36,23 +48,21 @@ namespace gl
 			auto src_w = src_rect.width();
 			auto dst_w = dst_rect.width();
 
-			if (xfer_info.src_is_typeless)
-				src_w = static_cast<int>(src_w * xfer_info.src_scaling_hint);
-			if (xfer_info.dst_is_typeless)
-				dst_w = static_cast<int>(dst_w * xfer_info.dst_scaling_hint);
+			if (xfer_info.src_is_typeless) src_w = static_cast<int>(src_w * xfer_info.src_scaling_hint);
+			if (xfer_info.dst_is_typeless) dst_w = static_cast<int>(dst_w * xfer_info.dst_scaling_hint);
 
 			if (src_w == dst_w)
 			{
 				// Final dimensions are a match
 				if (xfer_info.src_is_typeless || xfer_info.dst_is_typeless)
 				{
-					const coord3i src_region = {{src_rect.x1, src_rect.y1, 0}, {src_rect.width(), src_rect.height(), 1}};
-					const coord3i dst_region = {{dst_rect.x1, dst_rect.y1, 0}, {dst_rect.width(), dst_rect.height(), 1}};
+					const coord3i src_region = { { src_rect.x1, src_rect.y1, 0 }, { src_rect.width(), src_rect.height(), 1 } };
+					const coord3i dst_region = { { dst_rect.x1, dst_rect.y1, 0 }, { dst_rect.width(), dst_rect.height(), 1 } };
 					gl::copy_typeless(cmd, dst, src, static_cast<coord3u>(dst_region), static_cast<coord3u>(src_region));
 				}
 				else
 				{
-					copy_image(cmd, src, dst, 0, 0, position3i{src_rect.x1, src_rect.y1, 0u}, position3i{dst_rect.x1, dst_rect.y1, 0}, size3i{src_rect.width(), src_rect.height(), 1});
+					copy_image(cmd, src, dst, 0, 0, position3i{ src_rect.x1, src_rect.y1, 0u }, position3i{ dst_rect.x1, dst_rect.y1, 0 }, size3i{ src_rect.width(), src_rect.height(), 1 });
 				}
 
 				return;
@@ -62,8 +72,8 @@ namespace gl
 		if (xfer_info.src_is_typeless)
 		{
 			const auto internal_fmt = xfer_info.src_native_format_override ?
-			                              GLenum(xfer_info.src_native_format_override) :
-			                              get_sized_internal_format(xfer_info.src_gcm_format);
+				GLenum(xfer_info.src_native_format_override) :
+				get_sized_internal_format(xfer_info.src_gcm_format);
 
 			if (static_cast<gl::texture::internal_format>(internal_fmt) != src->get_internal_format())
 			{
@@ -80,8 +90,8 @@ namespace gl
 		if (xfer_info.dst_is_typeless)
 		{
 			const auto internal_fmt = xfer_info.dst_native_format_override ?
-			                              GLenum(xfer_info.dst_native_format_override) :
-			                              get_sized_internal_format(xfer_info.dst_gcm_format);
+				GLenum(xfer_info.dst_native_format_override) :
+				get_sized_internal_format(xfer_info.dst_gcm_format);
 
 			if (static_cast<gl::texture::internal_format>(internal_fmt) != dst->get_internal_format())
 			{
@@ -111,7 +121,7 @@ namespace gl
 			src_rect.height() == dst_rect.height() &&
 			!src_rect.is_flipped() && !dst_rect.is_flipped())
 		{
-			copy_image(cmd, real_src, real_dst, 0, 0, position3i{src_rect.x1, src_rect.y1, 0}, position3i{dst_rect.x1, dst_rect.y1, 0}, size3i{src_rect.width(), src_rect.height(), 1});
+			copy_image(cmd, real_src, real_dst, 0, 0, position3i{ src_rect.x1, src_rect.y1, 0 }, position3i{ dst_rect.x1, dst_rect.y1, 0 }, size3i{ src_rect.width(), src_rect.height(), 1 });
 		}
 		else
 		{
@@ -143,11 +153,14 @@ namespace gl
 
 			save_binding_state saved;
 
-			gl::fbo::attachment src_att{blit_src, static_cast<fbo::attachment::type>(attachment)};
+			gl::fbo::attachment src_att{ blit_src, static_cast<fbo::attachment::type>(attachment) };
 			src_att = *real_src;
 
-			gl::fbo::attachment dst_att{blit_dst, static_cast<fbo::attachment::type>(attachment)};
+			gl::fbo::attachment dst_att{ blit_dst, static_cast<fbo::attachment::type>(attachment) };
 			dst_att = *real_dst;
+
+			blit_src.check();
+			blit_dst.check();
 
 			blit_src.blit(blit_dst, src_rect, dst_rect, target, interp);
 
@@ -200,7 +213,7 @@ namespace gl
 		}
 
 		save_binding_state saved;
-		fbo::attachment attach_point{blit_dst, attachment};
+		fbo::attachment attach_point{ blit_dst, attachment };
 
 		blit_dst.bind();
 		attach_point = *dst;
@@ -212,4 +225,4 @@ namespace gl
 		glClear(clear_mask);
 		attach_point = GL_NONE;
 	}
-} // namespace gl
+}

@@ -1,23 +1,23 @@
 #include "stdafx.h"
 #include "midi_config_types.h"
-#include "util/StrUtil.h"
-#include "util/Config.h"
+#include "Utilities/StrUtil.h"
+#include "Utilities/Config.h"
 
 template <>
 void fmt_class_string<midi_device_type>::format(std::string& out, u64 arg)
 {
 	format_enum(out, arg, [](midi_device_type value)
+	{
+		switch (value)
 		{
-			switch (value)
-			{
-			case midi_device_type::guitar: return "Guitar (17 frets)";
-			case midi_device_type::guitar_22fret: return "Guitar (22 frets)";
-			case midi_device_type::keyboard: return "Keyboard";
-			case midi_device_type::drums: return "Drums";
-			}
+		case midi_device_type::guitar: return "Guitar (17 frets)";
+		case midi_device_type::guitar_22fret: return "Guitar (22 frets)";
+		case midi_device_type::keyboard: return "Keyboard";
+		case midi_device_type::drums: return "Drums";
+		}
 
-			return unknown;
-		});
+		return unknown;
+	});
 }
 
 template <>
@@ -27,11 +27,11 @@ void fmt_class_string<midi_device>::format(std::string& out, u64 arg)
 	fmt::append(out, "%sßßß%s", obj.type, obj.name);
 }
 
-midi_device midi_device::from_string(const std::string& str)
+midi_device midi_device::from_string(std::string_view str)
 {
 	midi_device res{};
 
-	if (const std::vector<std::string> parts = fmt::split(str, {"ßßß"}); !parts.empty())
+	if (const std::vector<std::string_view> parts = fmt::split_sv(str, {"ßßß"}); !parts.empty())
 	{
 		u64 result;
 

@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "overlay_manager.h"
 #include "overlay_osk.h"
-#include "rpcsx/fw/ps3/cellSysutil.h"
+#include "Emu/Cell/Modules/cellSysutil.h"
 #include "Emu/Io/Keyboard.h"
 #include "Emu/System.h"
 #include "Emu/system_config.h"
@@ -40,9 +40,9 @@ namespace rsx
 				if (on_osk_close)
 				{
 					Emu.CallFromMainThread([this, status]()
-						{
-							on_osk_close(status);
-						});
+					{
+						on_osk_close(status);
+					});
 				}
 				return;
 			}
@@ -56,9 +56,9 @@ namespace rsx
 				if (on_osk_close)
 				{
 					Emu.CallFromMainThread([this, status]()
-						{
-							on_osk_close(status);
-						});
+					{
+						on_osk_close(status);
+					});
 				}
 
 				set_visible(false);
@@ -159,10 +159,7 @@ namespace rsx
 			if (m_panels.size() < 7)
 			{
 				// Don't add this panel if there already exists one with the same panel mode
-				if (std::none_of(m_panels.begin(), m_panels.end(), [&panel](const osk_panel& existing)
-						{
-							return existing.osk_panel_mode == panel.osk_panel_mode;
-						}))
+				if (std::none_of(m_panels.begin(), m_panels.end(), [&panel](const osk_panel& existing) { return existing.osk_panel_mode == panel.osk_panel_mode; }))
 				{
 					m_panels.push_back(panel);
 				}
@@ -226,7 +223,7 @@ namespace rsx
 
 					auto& _cell = m_grid[index++];
 					_cell.button_flag = props.type_flags;
-					_cell.pos = {grid_origin.x + col * cell_size_x, grid_origin.y + row * cell_size_y};
+					_cell.pos = { grid_origin.x + col * cell_size_x, grid_origin.y + row * cell_size_y };
 					_cell.backcolor = props.color;
 					_cell.callback = props.callback;
 					_cell.outputs = props.outputs;
@@ -480,7 +477,7 @@ namespace rsx
 				}
 			};
 
-			m_pointer.set_color(color4f{1.f, 1.f, 1.f, 1.f});
+			m_pointer.set_color(color4f{ 1.f, 1.f, 1.f, 1.f });
 
 			m_background.set_size(virtual_width, virtual_height);
 
@@ -826,7 +823,7 @@ namespace rsx
 			}
 			case pad_button::start:
 			{
-				Emu.GetCallbacks().play_sound(fs::get_config_dir() + "sounds/snd_oskenter.wav");
+				play_sound(sound_effect::osk_accept);
 				Close(CELL_OSKDIALOG_CLOSE_CONFIRM);
 				play_cursor_sound = false;
 				break;
@@ -843,7 +840,7 @@ namespace rsx
 			}
 			case pad_button::cross:
 			{
-				Emu.GetCallbacks().play_sound(fs::get_config_dir() + "sounds/snd_oskenter.wav");
+				play_sound(sound_effect::osk_accept);
 				on_accept();
 				m_reset_pulse = true;
 				play_cursor_sound = false;
@@ -851,7 +848,7 @@ namespace rsx
 			}
 			case pad_button::circle:
 			{
-				Emu.GetCallbacks().play_sound(fs::get_config_dir() + "sounds/snd_oskcancel.wav");
+				play_sound(sound_effect::osk_cancel);
 				Close(CELL_OSKDIALOG_CLOSE_CANCEL);
 				play_cursor_sound = false;
 				break;
@@ -875,22 +872,10 @@ namespace rsx
 				{
 					switch (button_press)
 					{
-					case pad_button::rs_left:
-						m_x_input_pos -= 5;
-						m_x_panel_pos -= 5;
-						break;
-					case pad_button::rs_right:
-						m_x_input_pos += 5;
-						m_x_panel_pos += 5;
-						break;
-					case pad_button::rs_down:
-						m_y_input_pos += 5;
-						m_y_panel_pos += 5;
-						break;
-					case pad_button::rs_up:
-						m_y_input_pos -= 5;
-						m_y_panel_pos -= 5;
-						break;
+					case pad_button::rs_left:  m_x_input_pos -= 5; m_x_panel_pos -= 5; break;
+					case pad_button::rs_right: m_x_input_pos += 5; m_x_panel_pos += 5; break;
+					case pad_button::rs_down:  m_y_input_pos += 5; m_y_panel_pos += 5; break;
+					case pad_button::rs_up:    m_y_input_pos -= 5; m_y_panel_pos -= 5; break;
 					default: break;
 					}
 					update_panel();
@@ -905,7 +890,7 @@ namespace rsx
 			// Play a sound unless this is a fast auto repeat which would induce a nasty noise
 			if (play_cursor_sound && (!is_auto_repeat || m_auto_repeat_ms_interval >= m_auto_repeat_ms_interval_default))
 			{
-				Emu.GetCallbacks().play_sound(fs::get_config_dir() + "sounds/snd_cursor.wav");
+				play_sound(sound_effect::cursor);
 			}
 
 			if (m_reset_pulse)
@@ -1179,7 +1164,9 @@ namespace rsx
 
 		std::u32string osk_dialog::get_placeholder() const
 		{
-			const localized_string_id id = m_password_mode ? localized_string_id::RSX_OVERLAYS_OSK_DIALOG_ENTER_PASSWORD : localized_string_id::RSX_OVERLAYS_OSK_DIALOG_ENTER_TEXT;
+			const localized_string_id id = m_password_mode
+				? localized_string_id::RSX_OVERLAYS_OSK_DIALOG_ENTER_PASSWORD
+				: localized_string_id::RSX_OVERLAYS_OSK_DIALOG_ENTER_TEXT;
 			return get_localized_u32string(id);
 		}
 
@@ -1251,12 +1238,12 @@ namespace rsx
 				u16 buffered_cell_count = 0;
 				bool render_label = false;
 
-				const color4f disabled_back_color = {0.3f, 0.3f, 0.3f, 1.f};
-				const color4f disabled_fore_color = {0.8f, 0.8f, 0.8f, 1.f};
-				const color4f normal_fore_color = {0.f, 0.f, 0.f, 1.f};
+				const color4f disabled_back_color = { 0.3f, 0.3f, 0.3f, 1.f };
+				const color4f disabled_fore_color = { 0.8f, 0.8f, 0.8f, 1.f };
+				const color4f normal_fore_color = { 0.f, 0.f, 0.f, 1.f };
 
 				label label;
-				label.back_color = {0.f, 0.f, 0.f, 0.f};
+				label.back_color = { 0.f, 0.f, 0.f, 0.f };
 				label.set_padding(0, 0, get_scaled(10), 0);
 
 				const auto scale_font = [this](overlay_element& elem)
@@ -1328,7 +1315,7 @@ namespace rsx
 
 					buffered_cell_count++;
 
-					tmp.back_color = c.enabled ? c.backcolor : disabled_back_color;
+					tmp.back_color = c.enabled? c.backcolor : disabled_back_color;
 					tmp.set_pos(x, y);
 					tmp.set_size(w, h);
 					tmp.pulse_effect_enabled = c.selected;
@@ -1384,26 +1371,11 @@ namespace rsx
 				m_title.back_color.a = 0.7f; // Uses the dimmed color of the frame background
 			}
 
-			const callback_t shift_cb = [this](const std::u32string& text)
-			{
-				on_shift(text);
-			};
-			const callback_t layer_cb = [this](const std::u32string& text)
-			{
-				on_layer(text);
-			};
-			const callback_t space_cb = [this](const std::u32string& text)
-			{
-				on_space(text);
-			};
-			const callback_t delete_cb = [this](const std::u32string& text)
-			{
-				on_backspace(text);
-			};
-			const callback_t enter_cb = [this](const std::u32string& text)
-			{
-				on_enter(text);
-			};
+			const callback_t shift_cb  = [this](const std::u32string& text){ on_shift(text); };
+			const callback_t layer_cb  = [this](const std::u32string& text){ on_layer(text); };
+			const callback_t space_cb  = [this](const std::u32string& text){ on_space(text); };
+			const callback_t delete_cb = [this](const std::u32string& text){ on_backspace(text); };
+			const callback_t enter_cb  = [this](const std::u32string& text){ on_enter(text); };
 
 			const auto is_supported = [&](u32 mode) -> bool
 			{
@@ -1673,16 +1645,13 @@ namespace rsx
 
 			overlayman.attach_thread_input(
 				uid, "OSK",
-				[notify]()
-				{
-					*notify = true;
-					notify->notify_one();
-				});
+				[notify]() { *notify = true; notify->notify_one(); }
+			);
 
 			while (!Emu.IsStopped() && !*notify)
 			{
 				notify->wait(0, atomic_wait_timeout{1'000'000});
 			}
 		}
-	} // namespace overlays
-} // namespace rsx
+	}
+}

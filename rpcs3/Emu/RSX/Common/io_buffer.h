@@ -7,8 +7,9 @@
 namespace rsx
 {
 	template <typename T>
-	concept SpanLike = requires(T t) {
-		{ t.data() } -> std::convertible_to<void*>;
+	concept SpanLike = requires(T t)
+	{
+		{ t.data() } -> std::convertible_to<const void*>;
 		{ t.size_bytes() } -> std::convertible_to<usz>;
 	};
 
@@ -42,14 +43,12 @@ namespace rsx
 		template <Integral T>
 		io_buffer(void* ptr, T size)
 			: m_ptr(ptr), m_size(size)
-		{
-		}
+		{}
 
 		template <Integral T>
 		io_buffer(const void* ptr, T size)
 			: m_ptr(const_cast<void*>(ptr)), m_size(size)
-		{
-		}
+		{}
 
 		void reserve(usz size) const
 		{
@@ -58,7 +57,7 @@ namespace rsx
 
 		std::pair<void*, usz> raw() const
 		{
-			return {m_ptr, m_size};
+			return { m_ptr, m_size };
 		}
 
 		template <Integral T = u8>
@@ -72,16 +71,25 @@ namespace rsx
 			return static_cast<T*>(m_ptr);
 		}
 
-		usz size() const
+		template <Integral T = usz>
+		T size() const
 		{
-			return m_size;
+			return static_cast<T>(m_size);
 		}
 
-		template <typename T>
+		template<typename T>
 		std::span<T> as_span() const
 		{
 			auto bytes = data();
-			return {utils::bless<T>(bytes), m_size / sizeof(T)};
+			ensure(is_naturally_aligned<T>(), "IO buffer span cast requires naturally aligned pointers.");
+			return { utils::bless<T>(bytes), m_size / sizeof(T) };
+		}
+
+		template<typename T>
+		bool is_naturally_aligned() const
+		{
+			return ((reinterpret_cast<uintptr_t>(data()) & (alignof(T) - 1)) == 0) &&
+				(m_size % sizeof(T)) == 0;
 		}
 
 		bool empty() const
@@ -89,4 +97,4 @@ namespace rsx
 			return m_size == 0;
 		}
 	};
-} // namespace rsx
+}
