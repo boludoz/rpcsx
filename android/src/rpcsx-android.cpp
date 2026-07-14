@@ -30,12 +30,11 @@
 #include "Input/hid_pad_handler.h"
 #include "Input/pad_thread.h"
 #include "Input/virtual_pad_handler.h"
+#include "Loader/ISO.h"
 #include "Loader/PSF.h"
 #include "Loader/PUP.h"
 #include "Loader/TAR.h"
 #include "cellos/sys_sync.h"
-#include "dev/block_dev.hpp"
-#include "dev/iso.hpp"
 #include "hidapi_libusb.h"
 #include "libusb.h"
 #include "rpcs3_version.h"
@@ -313,8 +312,17 @@ static FileType getFileType(const fs::file &file) {
     return FileType::Rap;
   }
 
-  if (iso_dev::open(std::make_unique<file_view_block_dev>(file))) {
-    return FileType::Iso;
+  // Same ISO9660 Primary Volume Descriptor signature check
+  // Loader/ISO.cpp's is_iso_file() does, just without needing a real path
+  // (this file is fd-backed from Android's SAF picker, staged to a real
+  // path only once we commit to actually installing it as an ISO).
+  if (file.size() >= 32768ULL + 6) {
+    char magic[5];
+    file.read_at(32768ULL + 1, magic, 5);
+    if (magic[0] == 'C' && magic[1] == 'D' && magic[2] == '0' &&
+        magic[3] == '0' && magic[4] == '1') {
+      return FileType::Iso;
+    }
   }
 
   return FileType::Unknown;
@@ -2341,16 +2349,64 @@ static bool installRap(JNIEnv *env, fs::file &&file, jlong progressId,
   return true;
 }
 
+// Stages an fd-backed file (Android's SAF picker only hands us a file
+// descriptor, never a real path) to a real path under the app's storage,
+// since iso_device/iso_archive (Loader/ISO.h) open by path -- that's what
+// buys us the new parser's Redump/3k3y encrypted-ISO support, which the
+// old block-device-based iso_dev couldn't do at all. Streamed in chunks:
+// ISOs are routinely several GB, too large to buffer in memory on a phone.
+static bool stageIsoToTempFile(fs::file &src, const std::string &destPath,
+                                Progress &progress) {
+  std::filesystem::path destFsPath = destPath;
+  std::error_code ec;
+  std::filesystem::create_directories(destFsPath.parent_path(), ec);
+
+  fs::file dest(destPath, fs::open_mode::create + fs::open_mode::trunc +
+                              fs::open_mode::write);
+  if (!dest) {
+    progress.failure(fmt::format("Failed to create temp file: %s", destPath));
+    return false;
+  }
+
+  src.seek(0);
+  const auto totalSize = src.size();
+  std::vector<std::uint8_t> buffer(1 * 1024 * 1024);
+  std::uint64_t copied = 0;
+
+  while (true) {
+    auto read = src.read(buffer.data(), buffer.size());
+    if (read == 0) {
+      break;
+    }
+    if (dest.write(buffer.data(), read) != read) {
+      progress.failure(fmt::format("Failed to write temp file: %s", destPath));
+      return false;
+    }
+    copied += read;
+    progress.report(static_cast<jlong>(copied), static_cast<jlong>(totalSize),
+                     "Reading ISO");
+  }
+
+  return true;
+}
+
 static bool installIso(JNIEnv *env, fs::file &&file, jlong progressId) {
-  auto optIso = iso_dev::open(std::make_unique<file_view_block_dev>(file));
   Progress progress(env, progressId);
 
-  if (!optIso) {
+  const std::string stagedPath =
+      fs::get_config_dir() + "tmp/install.iso";
+  AtExit removeStaged{[&] { fs::remove_file(stagedPath); }};
+
+  if (!stageIsoToTempFile(file, stagedPath, progress)) {
+    return false;
+  }
+
+  if (!is_iso_file(stagedPath)) {
     progress.failure("Failed to read ISO");
     return false;
   }
 
-  auto iso = std::move(*optIso);
+  iso_device iso(stagedPath, "android_install_iso_dev");
   auto sfo_raw_file = iso.open("PS3_GAME/PARAM.SFO", fs::read);
 
   if (!sfo_raw_file) {
@@ -2388,7 +2444,7 @@ static bool installIso(JNIEnv *env, fs::file &&file, jlong progressId) {
       workList.pop_back();
 
       fs::dir dir;
-      dir.reset(iso.open_dir(path));
+      dir.reset(iso.open_dir(path.string()));
 
       for (auto &entry : dir) {
         if (entry.name == "." || entry.name == "..") {
@@ -2426,7 +2482,7 @@ static bool installIso(JNIEnv *env, fs::file &&file, jlong progressId) {
     }
 
     fs::dir dir;
-    dir.reset(iso.open_dir(root));
+    dir.reset(iso.open_dir(root.string()));
 
     for (auto &entry : dir) {
       if (entry.name == "." || entry.name == "..") {
@@ -2445,7 +2501,7 @@ static bool installIso(JNIEnv *env, fs::file &&file, jlong progressId) {
 
         continue;
       }
-      auto raw_file = iso.open(root / entry.name, fs::read);
+      auto raw_file = iso.open((root / entry.name).string(), fs::read);
 
       if (!raw_file) {
         progress.failure(fmt::format("Failed to open file in ISO: %s",
