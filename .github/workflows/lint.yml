@@ -16,7 +16,8 @@ jobs:
       with:
         clang_tidy_version: 18
         apt_packages: libunwind-dev, libglfw3-dev, libvulkan-dev, vulkan-validationlayers, spirv-tools, glslang-tools, libspirv-cross-c-shared-dev
-        cmake_command: cmake . -DCMAKE_EXPORT_COMPILE_COMMANDS=on
+        cmake_command: cmake -S . -B build-lint -DCMAKE_EXPORT_COMPILE_COMMANDS=on
+        build_dir: build-lint
         split_workflow: true
     - name: Upload review
       uses: ZedThree/clang-tidy-review/upload@v0.19.0
