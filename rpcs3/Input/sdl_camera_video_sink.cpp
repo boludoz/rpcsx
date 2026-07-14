@@ -2,7 +2,7 @@
 
 #include "stdafx.h"
 #include "sdl_camera_video_sink.h"
-#include "Utilities/Thread.h"
+#include "util/Thread.h"
 #include "Emu/system_config.h"
 
 LOG_CHANNEL(camera_log, "Camera");

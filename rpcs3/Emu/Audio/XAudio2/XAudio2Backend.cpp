@@ -6,7 +6,7 @@
 #include "util/logs.hpp"
 #include "Emu/System.h"
 #include "Emu/Audio/audio_device_enumerator.h"
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 
 #include "XAudio2Backend.h"
 #include <Windows.h>

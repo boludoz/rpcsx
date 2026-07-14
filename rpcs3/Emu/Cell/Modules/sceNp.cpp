@@ -4,7 +4,7 @@
 #include "Emu/Cell/PPUModule.h"
 #include "Emu/Cell/Modules/cellUserInfo.h"
 #include "Emu/Io/interception.h"
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 
 #include "sysPrxForUser.h"
 #include "Emu/IdManager.h"

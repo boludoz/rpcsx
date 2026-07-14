@@ -29,7 +29,7 @@
 #include "Emu/Cell/lv2/sys_usbd.h"
 #include "Emu/Cell/Modules/cellGem.h"
 #include "Emu/Cell/timers.hpp"
-#include "Utilities/Thread.h"
+#include "util/Thread.h"
 #include "util/atomic.hpp"
 
 LOG_CHANNEL(sys_log, "SYS");

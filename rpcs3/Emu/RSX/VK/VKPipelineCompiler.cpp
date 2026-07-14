@@ -2,7 +2,7 @@
 #include "VKPipelineCompiler.h"
 #include "VKRenderPass.h"
 #include "vkutils/device.h"
-#include "Utilities/Thread.h"
+#include "util/Thread.h"
 
 #include "util/sysinfo.hpp"
 

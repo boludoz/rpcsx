@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Emu/Io/usb_device.h"
-#include "Utilities/Config.h"
+#include "util/Config.h"
 
 class usb_device_vfs : public usb_device_emulated
 {

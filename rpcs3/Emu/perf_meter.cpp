@@ -4,8 +4,8 @@
 #include "util/sysinfo.hpp"
 #include "util/fence.hpp"
 #include "util/tsc.hpp"
-#include "Utilities/Thread.h"
-#include "Utilities/mutex.h"
+#include "util/Thread.h"
+#include "util/mutex.h"
 
 #include <map>
 #include <mutex>

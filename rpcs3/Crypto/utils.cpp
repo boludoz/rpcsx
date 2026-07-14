@@ -12,9 +12,9 @@
 #include <cstring>
 #include <cstdio>
 #include <ctime>
-#include "Utilities/StrFmt.h"
-#include "Utilities/StrUtil.h"
-#include "Utilities/File.h"
+#include "util/StrFmt.h"
+#include "util/StrUtil.h"
+#include "util/File.h"
 
 #include <memory>
 #include <string>

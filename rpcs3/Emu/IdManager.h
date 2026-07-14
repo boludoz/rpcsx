@@ -1,7 +1,7 @@
 #pragma once
 
 #include "util/types.hpp"
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 
 #include <memory>
 #include <vector>

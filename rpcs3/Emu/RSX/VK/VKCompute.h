@@ -5,7 +5,7 @@
 
 #include "Emu/IdManager.h"
 
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 #include "util/asm.hpp"
 
 #include <unordered_map>

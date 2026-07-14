@@ -9,8 +9,8 @@
 #include "Emu/IdManager.h"
 #include "Emu/localized_string.h"
 #include "Crypto/sha1.h"
-#include "Utilities/StrUtil.h"
-#include "Utilities/JIT.h"
+#include "util/StrUtil.h"
+#include "util/JIT.h"
 #include "util/init_mutex.hpp"
 #include "util/shared_ptr.hpp"
 

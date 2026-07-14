@@ -3,7 +3,7 @@
 #include "Emu/Cell/PPUModule.h"
 #include "Emu/IdManager.h"
 #include "Emu/RSX/rsx_utils.h"
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 
 #include "cellMic.h"
 #include "cellAudioIn.h"

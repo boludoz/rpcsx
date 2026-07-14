@@ -2,7 +2,7 @@
 
 #include <vector>
 #include <map>
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 #include "Emu/Cell/PPUThread.h"
 
 #include "nt_p2p_port.h"

@@ -4,7 +4,7 @@
 #include <util/vm.hpp>
 #include <Emu/Memory/vm.h>
 
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 
 #include "rsx_utils.h"
 

@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "RSXDMAWriter.h"
 
-#include "Utilities//Thread.h"
+#include "util//Thread.h"
 #include <util/asm.hpp>
 
 namespace rsx

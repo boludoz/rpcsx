@@ -3,8 +3,8 @@
 #include "util/logs.hpp"
 #include "util/v128.hpp"
 #include "util/simd.hpp"
-#include "Utilities/File.h"
-#include "Utilities/StrFmt.h"
+#include "util/File.h"
+#include "util/StrFmt.h"
 #include "system_config.h"
 #include "savestate_utils.hpp"
 

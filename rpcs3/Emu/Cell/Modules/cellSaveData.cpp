@@ -18,9 +18,9 @@
 #include "cellMsgDialog.h"
 
 #include "Loader/PSF.h"
-#include "Utilities/StrUtil.h"
-#include "Utilities/date_time.h"
-#include "Utilities/sema.h"
+#include "util/StrUtil.h"
+#include "util/date_time.h"
+#include "util/sema.h"
 
 #include <mutex>
 #include <algorithm>

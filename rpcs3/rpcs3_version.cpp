@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "rpcs3_version.h"
 #include "git-version.h"
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 
 namespace rpcs3
 {

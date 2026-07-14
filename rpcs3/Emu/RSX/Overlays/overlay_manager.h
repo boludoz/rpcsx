@@ -4,9 +4,9 @@
 #include "overlay_audio.h"
 
 #include "Emu/IdManager.h"
-#include "Utilities/mutex.h"
-#include "Utilities/Thread.h"
-#include "Utilities/lockless.h"
+#include "util/mutex.h"
+#include "util/Thread.h"
+#include "util/lockless.h"
 
 namespace rsx
 {

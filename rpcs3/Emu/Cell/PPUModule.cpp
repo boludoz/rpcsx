@@ -1,9 +1,9 @@
 #include "stdafx.h"
 #include "Emu/Cell/PPUModule.h"
 
-#include "Utilities/bin_patch.h"
-#include "Utilities/StrUtil.h"
-#include "Utilities/address_range.h"
+#include "util/bin_patch.h"
+#include "util/StrUtil.h"
+#include "util/address_range.h"
 #include "util/serialization.hpp"
 #include "Crypto/sha1.h"
 #include "Crypto/unself.h"

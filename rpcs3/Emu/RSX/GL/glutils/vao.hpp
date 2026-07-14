@@ -3,7 +3,7 @@
 #include "common.h"
 #include "buffer_object.h"
 
-#include "Utilities/geometry.h"
+#include "util/geometry.h"
 
 namespace gl
 {

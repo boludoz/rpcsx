@@ -3,7 +3,7 @@
 
 #include "cellSync2.h"
 
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 
 LOG_CHANNEL(cellSync2);
 

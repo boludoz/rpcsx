@@ -3,9 +3,9 @@
 #include "util/types.hpp"         // IWYU pragma: export
 #include "util/atomic.hpp"        // IWYU pragma: export
 #include "util/endian.hpp"        // IWYU pragma: export
-#include "Utilities/Config.h"     // IWYU pragma: export
-#include "Utilities/StrFmt.h"     // IWYU pragma: export
-#include "Utilities/File.h"       // IWYU pragma: export
+#include "util/Config.h"     // IWYU pragma: export
+#include "util/StrFmt.h"     // IWYU pragma: export
+#include "util/File.h"       // IWYU pragma: export
 #include "util/logs.hpp"          // IWYU pragma: export
 #include "util/shared_ptr.hpp"    // IWYU pragma: export
 #include "util/typeindices.hpp"   // IWYU pragma: export

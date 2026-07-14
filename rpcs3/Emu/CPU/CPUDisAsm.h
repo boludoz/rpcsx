@@ -2,7 +2,7 @@
 
 #include <string>
 #include "Emu/CPU/CPUThread.h"
-#include "Utilities/StrFmt.h"
+#include "util/StrFmt.h"
 
 enum class cpu_disasm_mode
 {

@@ -3,7 +3,7 @@
 #include "Emu/Cell/timers.hpp"
 #include "Emu/Cell/lv2/sys_usbd.h"
 #include "Emu/Io/usb_device.h"
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 
 LOG_CHANNEL(sys_usbd);
 

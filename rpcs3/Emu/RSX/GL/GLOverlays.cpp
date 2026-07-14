@@ -1,7 +1,7 @@
 #include "GLOverlays.h"
 
-#include "Utilities/StrUtil.h"
-#include "Utilities/stereo_config.h"
+#include "util/StrUtil.h"
+#include "util/stereo_config.h"
 #include "../Program/RSXOverlay.h"
 #include "Emu/Cell/timers.hpp"
 

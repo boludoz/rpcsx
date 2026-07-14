@@ -6,7 +6,7 @@
 #include "Emu/Cell/Modules/sceNp2.h"
 #include "Emu/Cell/Modules/cellNetCtl.h"
 #include "Emu/Cell/timers.hpp"
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 #include "Emu/IdManager.h"
 #include "Emu/System.h"
 #include "Emu/NP/rpcn_config.h"

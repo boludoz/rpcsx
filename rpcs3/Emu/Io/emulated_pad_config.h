@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Utilities/Config.h"
-#include "Utilities/mutex.h"
+#include "util/Config.h"
+#include "util/mutex.h"
 #include "pad_types.h"
 #include "MouseHandler.h"
 

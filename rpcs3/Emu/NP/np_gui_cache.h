@@ -1,7 +1,7 @@
 #pragma once
 
 #include <map>
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 #include "Emu/Cell/Modules/sceNp.h"
 
 template <>

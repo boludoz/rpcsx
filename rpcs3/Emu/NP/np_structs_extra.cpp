@@ -1,4 +1,4 @@
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 #include "stdafx.h"
 #include <span>
 #include "np_structs_extra.h"

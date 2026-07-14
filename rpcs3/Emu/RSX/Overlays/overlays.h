@@ -4,7 +4,7 @@
 
 #include "Emu/Io/pad_types.h"
 
-#include "Utilities/Timer.h"
+#include "util/Timer.h"
 
 #include "../Common/bitfield.hpp"
 

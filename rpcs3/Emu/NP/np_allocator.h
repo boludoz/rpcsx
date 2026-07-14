@@ -3,7 +3,7 @@
 #include <map>
 
 #include "Emu/Memory/vm_ptr.h"
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 #include "util/asm.hpp"
 #include "util/logs.hpp"
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "util/types.hpp"
-#include "Utilities/File.h"
+#include "util/File.h"
 #include "Emu/Audio/AudioBackend.h"
 
 struct WAVHeader

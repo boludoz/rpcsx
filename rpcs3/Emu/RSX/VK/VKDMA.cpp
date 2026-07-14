@@ -5,7 +5,7 @@
 
 #include "Emu/Memory/vm.h"
 #include "Emu/RSX/RSXThread.h"
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 
 #include "util/asm.hpp"
 #include <unordered_map>

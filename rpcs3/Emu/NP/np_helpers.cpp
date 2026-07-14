@@ -1,7 +1,7 @@
 #include "Emu/Cell/Modules/sceNp.h"
 #include "stdafx.h"
 #include "util/types.hpp"
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 #include "rpcn_client.h"
 
 #ifdef _WIN32

@@ -2,7 +2,7 @@
 #ifdef HAVE_LIBEVDEV
 
 #include <map>
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 
 enum class gun_button
 {

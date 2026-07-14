@@ -2,7 +2,7 @@
 #ifdef HAVE_LIBEVDEV
 
 #include "util/types.hpp"
-#include "Utilities/File.h"
+#include "util/File.h"
 #include "Emu/Io/PadHandler.h"
 #include <libevdev/libevdev.h>
 #include <memory>

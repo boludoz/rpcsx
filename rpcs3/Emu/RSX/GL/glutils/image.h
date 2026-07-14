@@ -2,7 +2,7 @@
 
 #include "common.h"
 
-#include "Utilities/geometry.h"
+#include "util/geometry.h"
 #include "Emu/RSX/Common/TextureUtils.h"
 #include "Emu/RSX/Common/io_buffer.h"
 

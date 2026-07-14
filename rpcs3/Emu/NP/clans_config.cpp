@@ -1,7 +1,7 @@
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 #include "stdafx.h"
 #include "clans_config.h"
-#include "Utilities/File.h"
+#include "util/File.h"
 
 cfg_clans g_cfg_clans;
 

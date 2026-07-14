@@ -7,7 +7,7 @@
 #include "Crypto/unedat.h"
 #include "Crypto/sha1.h"
 #include "Loader/ELF.h"
-#include "Utilities/bin_patch.h"
+#include "util/bin_patch.h"
 
 #include "Emu/Cell/ErrorCodes.h"
 #include "Emu/Cell/PPUThread.h"

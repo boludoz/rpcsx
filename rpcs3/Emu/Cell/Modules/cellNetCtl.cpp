@@ -7,7 +7,7 @@
 #include "cellSysutil.h"
 #include "cellNetCtl.h"
 
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 
 #include "Emu/NP/np_handler.h"
 #include "Emu/NP/np_helpers.h"

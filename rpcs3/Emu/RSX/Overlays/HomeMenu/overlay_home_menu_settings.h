@@ -4,7 +4,7 @@
 #include "../overlay_tabs.h"
 
 #include "Emu/System.h"
-#include "Utilities/Config.h"
+#include "util/Config.h"
 
 namespace rsx
 {

@@ -1,6 +1,6 @@
 #include "stdafx.h"
 
-#include "Utilities/Thread.h"
+#include "util/Thread.h"
 #include "util/atomic.hpp"
 #include "lv2_socket_p2ps.h"
 #include "Emu/NP/np_helpers.h"

@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "texture_cache_utils.h"
-#include "Utilities/address_range.h"
+#include "util/address_range.h"
 #include "util/fnv_hash.hpp"
 
 namespace rsx

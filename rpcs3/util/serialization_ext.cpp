@@ -3,9 +3,9 @@
 #include "util/asm.hpp"
 #include "util/sysinfo.hpp"
 #include "util/endian.hpp"
-#include "Utilities/lockless.h"
-#include "Utilities/File.h"
-#include "Utilities/StrFmt.h"
+#include "util/lockless.h"
+#include "util/File.h"
+#include "util/StrFmt.h"
 #include "serialization_ext.hpp"
 
 #include <zlib.h>

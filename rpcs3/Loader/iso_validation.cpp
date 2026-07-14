@@ -4,8 +4,8 @@
 #include "ISO.h"
 
 #include "Emu/system_utils.hpp"
-#include "Utilities/File.h"
-#include "Utilities/rXml.h"
+#include "util/File.h"
+#include "util/rXml.h"
 #include "Crypto/md5.h"
 #include "Crypto/utils.h"
 

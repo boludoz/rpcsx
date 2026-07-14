@@ -3,7 +3,7 @@
 #include "util/types.hpp"
 #include "util/atomic.hpp"
 #include "util/init_mutex.hpp"
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 #include "Emu/Memory/vm_ptr.h"
 #include <string>
 #include <functional>

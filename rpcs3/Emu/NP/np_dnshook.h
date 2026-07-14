@@ -6,7 +6,7 @@
 #include <optional>
 
 #include "util/types.hpp"
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 
 namespace np
 {

@@ -1,8 +1,8 @@
 #include "util/logs.hpp"
-#include "Utilities/File.h"
-#include "Utilities/mutex.h"
-#include "Utilities/Thread.h"
-#include "Utilities/StrFmt.h"
+#include "util/File.h"
+#include "util/mutex.h"
+#include "util/Thread.h"
+#include "util/StrFmt.h"
 #include <cstring>
 #include <cstdarg>
 #include <string>

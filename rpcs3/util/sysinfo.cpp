@@ -1,8 +1,8 @@
 #include "util/sysinfo.hpp"
-#include "Utilities/StrFmt.h"
-#include "Utilities/File.h"
+#include "util/StrFmt.h"
+#include "util/File.h"
 #include "Emu/vfs_config.h"
-#include "Utilities/Thread.h"
+#include "util/Thread.h"
 
 #if defined(ARCH_ARM64)
 #include "Emu/CPU/Backends/AArch64/AArch64Common.h"

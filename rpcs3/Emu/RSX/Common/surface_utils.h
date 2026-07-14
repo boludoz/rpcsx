@@ -1,7 +1,7 @@
 #pragma once
 
 #include "util/types.hpp"
-#include "Utilities/geometry.h"
+#include "util/geometry.h"
 #include "TextureUtils.h"
 #include "../rsx_utils.h"
 #include "Emu/Memory/vm.h"

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 #include <map>
 
 class games_config

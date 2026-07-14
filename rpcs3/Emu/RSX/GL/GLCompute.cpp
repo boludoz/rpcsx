@@ -1,6 +1,6 @@
 #include "GLCompute.h"
 #include "GLTexture.h"
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 
 namespace gl
 {

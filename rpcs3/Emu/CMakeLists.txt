@@ -77,6 +77,7 @@ target_sources(rpcs3_emu PRIVATE
     ../util/sema.cpp
     ../util/simple_ringbuf.cpp
     ../util/stack_trace.cpp
+    ../util/stereo_config.cpp
     ../util/StrFmt.cpp
     ../util/Thread.cpp
     ../util/version.cpp

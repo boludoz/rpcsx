@@ -6,7 +6,7 @@
 #include "Emu/Io/pad_config.h"
 #include "Emu/Io/pad_config_types.h"
 #include "Input/mouse_gyro_handler.h"
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 
 #include <map>
 #include <mutex>

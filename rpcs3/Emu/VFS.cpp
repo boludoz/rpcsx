@@ -5,8 +5,8 @@
 
 #include "Cell/lv2/sys_fs.h"
 
-#include "Utilities/mutex.h"
-#include "Utilities/StrUtil.h"
+#include "util/mutex.h"
+#include "util/StrUtil.h"
 
 #ifdef _WIN32
 #include <Windows.h>

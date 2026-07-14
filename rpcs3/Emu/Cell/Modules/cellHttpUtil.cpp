@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "Emu/Cell/PPUModule.h"
-#include "Utilities/LUrlParser.h"
+#include "util/LUrlParser.h"
 
 #include "cellHttpUtil.h"
 

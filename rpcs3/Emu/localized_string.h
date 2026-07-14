@@ -1,7 +1,7 @@
 #pragma once
 
 #include "localized_string_id.h"
-#include "Utilities/StrFmt.h"
+#include "util/StrFmt.h"
 
 std::string get_localized_string(localized_string_id id, const char* args = "");
 std::u32string get_localized_u32string(localized_string_id id, const char* args = "");

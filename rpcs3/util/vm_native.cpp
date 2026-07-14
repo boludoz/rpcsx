@@ -2,9 +2,9 @@
 #include "util/vm.hpp"
 #include "util/asm.hpp"
 #ifdef _WIN32
-#include "Utilities/File.h"
+#include "util/File.h"
 #include "util/dyn_lib.hpp"
-#include "Utilities/lockless.h"
+#include "util/lockless.h"
 #include <Windows.h>
 #include <span>
 #else

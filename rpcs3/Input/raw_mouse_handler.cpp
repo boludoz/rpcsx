@@ -5,7 +5,7 @@
 #include "Emu/RSX/RSXThread.h"
 #include "Emu/Io/interception.h"
 #include "Input/raw_mouse_config.h"
-#include "Utilities/Timer.h"
+#include "util/Timer.h"
 
 #ifdef _WIN32
 #include <hidusage.h>

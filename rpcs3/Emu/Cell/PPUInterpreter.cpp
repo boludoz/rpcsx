@@ -18,7 +18,7 @@
 #include "util/v128.hpp"
 #include "util/simd.hpp"
 #include "util/sysinfo.hpp"
-#include "Utilities/JIT.h"
+#include "util/JIT.h"
 
 #if !defined(_MSC_VER)
 #pragma GCC diagnostic push

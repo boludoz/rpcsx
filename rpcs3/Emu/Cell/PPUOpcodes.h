@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Utilities/BitField.h"
+#include "util/BitField.h"
 
 template<typename T, u32 I, u32 N> using ppu_bf_t = bf_t<T, sizeof(T) * 8 - N - I, N>;
 

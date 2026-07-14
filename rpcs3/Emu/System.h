@@ -3,7 +3,7 @@
 #include "util/types.hpp"
 #include "util/atomic.hpp"
 #include "util/shared_ptr.hpp"
-#include "Utilities/bit_set.h"
+#include "util/bit_set.hpp"
 #include "config_mode.h"
 #include "games_config.h"
 #include <functional>

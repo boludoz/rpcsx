@@ -14,7 +14,7 @@
 #include "../Program/RSXOverlay.h"
 
 #include "util/fnv_hash.hpp"
-#include "Utilities/stereo_config.h"
+#include "util/stereo_config.h"
 
 #include "Emu/Cell/timers.hpp"
 

@@ -1,8 +1,8 @@
 #pragma once
 
 #include "util/types.hpp"
-#include "Utilities/BitField.h"
-#include "Utilities/StrFmt.h"
+#include "util/BitField.h"
+#include "util/StrFmt.h"
 #include <tuple>
 #include <algorithm>
 #include "gcm_enums.h"

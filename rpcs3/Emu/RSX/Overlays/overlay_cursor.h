@@ -1,7 +1,7 @@
 #pragma once
 
 #include "overlays.h"
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 #include <map>
 
 namespace rsx

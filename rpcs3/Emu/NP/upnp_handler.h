@@ -5,7 +5,7 @@
 #include <miniupnpc.h>
 
 #include "upnp_config.h"
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 
 class upnp_handler
 {

@@ -2,7 +2,7 @@
 
 #include "capabilities.h"
 
-#include "Utilities/geometry.h"
+#include "util/geometry.h"
 #include <unordered_map>
 
 namespace gl

@@ -6,7 +6,7 @@
 #include "FAudioBackend.h"
 #include "Emu/System.h"
 #include "Emu/Audio/audio_device_enumerator.h"
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 
 LOG_CHANNEL(FAudio_, "FAudio");
 

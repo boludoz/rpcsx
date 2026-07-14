@@ -19,7 +19,7 @@
 #ifdef ARCH_ARM64
 #include "Emu/CPU/Backends/AArch64/AArch64JIT.h"
 #include "Emu/IdManager.h"
-#include "Utilities/ppu_patch.h"
+#include "util/ppu_patch.h"
 #endif
 
 using namespace llvm;

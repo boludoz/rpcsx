@@ -1,9 +1,9 @@
 #pragma once
 
 #include "Emu/Memory/vm_ptr.h"
-#include "Utilities/mutex.h"
-#include "Utilities/cond.h"
-#include "Utilities/simple_ringbuf.h"
+#include "util/mutex.h"
+#include "util/cond.h"
+#include "util/simple_ringbuf.h"
 
 enum : u32
 {

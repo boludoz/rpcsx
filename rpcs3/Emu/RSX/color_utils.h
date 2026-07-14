@@ -3,7 +3,7 @@
 #include <util/types.hpp>
 #include <Utilities/geometry.h>
 #include "gcm_enums.h"
-#include "Utilities/StrFmt.h"
+#include "util/StrFmt.h"
 
 namespace rsx
 {

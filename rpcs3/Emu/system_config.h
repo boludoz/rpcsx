@@ -1,7 +1,7 @@
 #pragma once
 
 #include "system_config_types.h"
-#include "Utilities/Config.h"
+#include "util/Config.h"
 
 enum CellNetCtlState : s32;
 enum CellSysutilLicenseArea : s32;

@@ -1,6 +1,6 @@
 #include "stdafx.h"
 
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 
 #include "Emu/Cell/PPUModule.h"
 

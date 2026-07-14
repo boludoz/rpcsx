@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Utilities/StrFmt.h"
+#include "util/StrFmt.h"
 #include "util/asm.hpp"
 
 namespace rsx

@@ -2,9 +2,9 @@
 
 #include "Emu/Io/MouseHandler.h"
 #include "Emu/RSX/display.h"
-#include "Utilities/Config.h"
-#include "Utilities/mutex.h"
-#include "Utilities/Thread.h"
+#include "util/Config.h"
+#include "util/mutex.h"
+#include "util/Thread.h"
 
 class raw_mouse_handler;
 

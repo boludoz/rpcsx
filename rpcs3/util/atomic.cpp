@@ -25,8 +25,8 @@ namespace utils
 }
 #endif
 
-#include "Utilities/sync.h"
-#include "Utilities/StrFmt.h"
+#include "util/sync.h"
+#include "util/StrFmt.h"
 
 #ifdef __linux__
 static bool has_waitv()

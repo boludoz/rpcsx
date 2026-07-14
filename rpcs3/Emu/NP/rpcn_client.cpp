@@ -6,9 +6,9 @@
 #include <thread>
 #include <chrono>
 #include "rpcn_client.h"
-#include "Utilities/StrUtil.h"
-#include "Utilities/StrFmt.h"
-#include "Utilities/Thread.h"
+#include "util/StrUtil.h"
+#include "util/StrFmt.h"
+#include "util/Thread.h"
 #include "Emu/System.h"
 #include "Emu/NP/rpcn_config.h"
 #include "Emu/NP/np_helpers.h"

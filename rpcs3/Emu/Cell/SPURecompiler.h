@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Utilities/File.h"
-#include "Utilities/lockless.h"
-#include "Utilities/address_range.h"
+#include "util/File.h"
+#include "util/lockless.h"
+#include "util/address_range.h"
 #include "util/bit_set.hpp"
 #include "SPUThread.h"
 #include "SPUAnalyser.h"

@@ -1,8 +1,8 @@
 #pragma once
 #include "../system_config.h"
-#include "Utilities/File.h"
-#include "Utilities/lockless.h"
-#include "Utilities/Thread.h"
+#include "util/File.h"
+#include "util/lockless.h"
+#include "util/Thread.h"
 #include "Common/bitfield.hpp"
 #include "Common/unordered_map.hpp"
 #include "Emu/System.h"

@@ -3,7 +3,7 @@
 #include "Emu/Cell/Modules/sceNp2.h"
 #include "Emu/NP/clans_client.h"
 #include "Emu/NP/rpcn_types.h"
-#include "Utilities/StrFmt.h"
+#include "util/StrFmt.h"
 #include "Emu/Cell/PPUCallback.h"
 #include "Emu/Cell/lv2/sys_sync.h"
 #include "Emu/system_config.h"

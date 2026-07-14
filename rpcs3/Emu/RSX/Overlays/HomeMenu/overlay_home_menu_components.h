@@ -6,7 +6,7 @@
 #include "Emu/RSX/Overlays/overlay_slider.h"
 
 #include "Emu/System.h"
-#include "Utilities/Config.h"
+#include "util/Config.h"
 
 #include "overlay_home_icons.h"
 

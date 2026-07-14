@@ -2,7 +2,7 @@
 #include "disc.h"
 #include "PSF.h"
 #include "util/logs.hpp"
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 #include "Emu/System.h"
 #include "Emu/system_utils.hpp"
 

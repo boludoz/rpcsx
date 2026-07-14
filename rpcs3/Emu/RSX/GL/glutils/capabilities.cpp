@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "capabilities.h"
 
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 #include "Emu/system_config.h"
 
 #include <unordered_set>

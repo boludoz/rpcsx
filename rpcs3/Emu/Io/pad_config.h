@@ -2,7 +2,7 @@
 
 #include "pad_types.h"
 
-#include "Utilities/Config.h"
+#include "util/Config.h"
 
 #include <array>
 #include <vector>

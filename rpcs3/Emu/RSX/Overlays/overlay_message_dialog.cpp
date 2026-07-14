@@ -6,7 +6,7 @@
 #include "Emu/system_utils.hpp"
 #include "Emu/Cell/ErrorCodes.h"
 #include "Emu/IdManager.h"
-#include "Utilities/Thread.h"
+#include "util/Thread.h"
 
 #include <thread>
 

@@ -7,7 +7,7 @@
 #include "Emu/Cell/timers.hpp"
 #include "Emu/Cell/Modules/cellMsgDialog.h"
 
-#include "Utilities/rXml.h"
+#include "util/rXml.h"
 #include "Loader/TRP.h"
 #include "Loader/TROPUSR.h"
 
@@ -15,7 +15,7 @@
 #include "sceNpTrophy.h"
 #include "cellSysutil.h"
 
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 
 #include "Emu/Cell/lv2/sys_event.h"
 #include "Emu/Cell/lv2/sys_fs.h"

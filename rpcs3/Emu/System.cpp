@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "VFS.h"
-#include "Utilities/bin_patch.h"
+#include "util/bin_patch.h"
 #include "Emu/Memory/vm.h"
 #include "Emu/System.h"
 #include "Emu/system_progress.hpp"
@@ -40,7 +40,7 @@
 
 #include "rpcs3_version.h"
 
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 
 #include "../Crypto/unself.h"
 #include "util/logs.hpp"
@@ -51,7 +51,7 @@
 #include <regex>
 #include <shared_mutex>
 
-#include "Utilities/JIT.h"
+#include "util/JIT.h"
 
 #include "Emu/IPC_socket.h"
 

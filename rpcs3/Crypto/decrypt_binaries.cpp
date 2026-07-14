@@ -4,7 +4,7 @@
 #include "unself.h"
 #include "Emu/IdManager.h"
 #include "Emu/System.h"
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 
 #include <charconv>
 #include <iostream>

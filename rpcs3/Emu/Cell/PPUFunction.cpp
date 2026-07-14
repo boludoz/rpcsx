@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "PPUFunction.h"
-#include "Utilities/JIT.h"
+#include "util/JIT.h"
 #include "util/serialization.hpp"
 
 #include "PPUModule.h"

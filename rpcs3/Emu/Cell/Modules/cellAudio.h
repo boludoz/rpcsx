@@ -1,8 +1,8 @@
 #pragma once
 
 #include "Emu/Memory/vm_ptr.h"
-#include "Utilities/Thread.h"
-#include "Utilities/simple_ringbuf.h"
+#include "util/Thread.h"
+#include "util/simple_ringbuf.h"
 #include "Emu/Memory/vm.h"
 #include "Emu/Audio/AudioBackend.h"
 #include "Emu/Audio/AudioDumper.h"

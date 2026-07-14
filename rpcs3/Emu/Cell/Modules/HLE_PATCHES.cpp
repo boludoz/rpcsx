@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "Emu/IdManager.h"
 #include "Emu/Cell/PPUModule.h"
-#include "Utilities/Thread.h"
+#include "util/Thread.h"
 
 #include "Emu/Cell/lv2/sys_spu.h"
 

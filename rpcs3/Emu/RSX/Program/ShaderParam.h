@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 #include "util/types.hpp"
 
 #include <unordered_map>

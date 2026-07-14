@@ -10,7 +10,7 @@
 
 #include "cellUserInfo.h"
 
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 #include "cellSysutil.h"
 
 LOG_CHANNEL(cellUserInfo);

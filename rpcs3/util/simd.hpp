@@ -4,7 +4,7 @@
 #include "util/v128.hpp"
 #include "util/sysinfo.hpp"
 #include "util/asm.hpp"
-#include "Utilities/JIT.h"
+#include "util/JIT.h"
 
 #if defined(ARCH_X64)
 #ifdef _MSC_VER

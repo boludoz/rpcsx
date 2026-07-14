@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "SPUInterpreter.h"
 
-#include "Utilities/JIT.h"
+#include "util/JIT.h"
 #include "SPUThread.h"
 #include "Emu/Cell/SPUAnalyser.h"
 #include "Emu/system_config.h"

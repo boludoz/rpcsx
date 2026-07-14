@@ -2,7 +2,7 @@
 
 #include <unordered_map>
 
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 
 #include "util/shared_ptr.hpp"
 

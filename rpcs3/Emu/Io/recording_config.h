@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Utilities/Config.h"
+#include "util/Config.h"
 
 struct cfg_recording final : cfg::node
 {

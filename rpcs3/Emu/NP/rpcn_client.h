@@ -4,7 +4,7 @@
 #include <chrono>
 #include <thread>
 #include <semaphore>
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 #include "Emu/localized_string_id.h"
 
 #ifdef _WIN32

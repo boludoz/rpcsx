@@ -4,7 +4,7 @@
 
 #include "Emu/Audio/XAudio2/xaudio2_enumerator.h"
 #include "util/logs.hpp"
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 #include <algorithm>
 
 #include <wrl/client.h>

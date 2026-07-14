@@ -3,7 +3,7 @@
 #include <map>
 #include <optional>
 
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 
 #include "Emu/Cell/Modules/sceNp.h"
 #include "Emu/Cell/Modules/sceNp2.h"

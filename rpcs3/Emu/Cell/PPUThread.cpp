@@ -1,6 +1,6 @@
 #include "stdafx.h"
-#include "Utilities/JIT.h"
-#include "Utilities/StrUtil.h"
+#include "util/JIT.h"
+#include "util/StrUtil.h"
 #include "util/serialization.hpp"
 #include "Crypto/sha1.h"
 #include "Crypto/unself.h"
@@ -65,7 +65,7 @@
 #include "util/simd.hpp"
 #include "util/sysinfo.hpp"
 
-#include "Utilities/sema.h"
+#include "util/sema.h"
 
 #ifdef __APPLE__
 #include <libkern/OSCacheControl.h>

@@ -2,7 +2,7 @@
 #include "GLHelpers.h"
 #include "glutils/program.h"
 #include "Emu/RSX/display.h"
-#include "Utilities/lockless.h"
+#include "util/lockless.h"
 
 namespace gl
 {

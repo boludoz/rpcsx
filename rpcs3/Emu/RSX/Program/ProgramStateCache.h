@@ -3,7 +3,7 @@
 #include "RSXFragmentProgram.h"
 #include "RSXVertexProgram.h"
 
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 #include "util/logs.hpp"
 #include "util/fnv_hash.hpp"
 #include "util/v128.hpp"

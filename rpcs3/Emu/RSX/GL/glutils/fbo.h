@@ -4,7 +4,7 @@
 #include "image.h"
 #include "pixel_settings.hpp"
 
-#include "Utilities/geometry.h"
+#include "util/geometry.h"
 
 namespace gl
 {

@@ -3,8 +3,8 @@
 #include "vm_ptr.h"
 #include "vm_reservation.h"
 
-#include "Utilities/Thread.h"
-#include "Utilities/address_range.h"
+#include "util/Thread.h"
+#include "util/address_range.h"
 #include "Emu/CPU/CPUThread.h"
 #include "Emu/RSX/RSXThread.h"
 #include "Emu/Cell/SPURecompiler.h"

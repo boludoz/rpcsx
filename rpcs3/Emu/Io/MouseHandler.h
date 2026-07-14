@@ -2,8 +2,8 @@
 
 #include <deque>
 #include <vector>
-#include "Utilities/StrFmt.h"
-#include "Utilities/mutex.h"
+#include "util/StrFmt.h"
+#include "util/mutex.h"
 #include "util/init_mutex.hpp"
 #include "Emu/system_config_types.h"
 

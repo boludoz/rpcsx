@@ -4,7 +4,7 @@
 #include "vkutils/query_pool.hpp"
 #include "vkutils/sampler.h"
 
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 
 #include <deque>
 #include <memory>

@@ -2,7 +2,7 @@
 #define VMA_VULKAN_VERSION 1002000
 
 #include "util/atomic.hpp"
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 
 // Protect some STL headers from macro (add more if it fails to compile)
 #include <atomic>

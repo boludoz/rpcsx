@@ -3,7 +3,7 @@
 #include <functional>
 #include <optional>
 
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 #include "Emu/IdManager.h"
 #include "Emu/Cell/lv2/sys_net.h"
 #include "Emu/NP/ip_address.h"

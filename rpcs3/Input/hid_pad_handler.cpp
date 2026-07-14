@@ -5,7 +5,7 @@
 #include "skateboard_pad_handler.h"
 #include "ps_move_handler.h"
 #include "util/logs.hpp"
-#include "Utilities/Timer.h"
+#include "util/Timer.h"
 #include "Emu/System.h"
 #include "pad_thread.h"
 

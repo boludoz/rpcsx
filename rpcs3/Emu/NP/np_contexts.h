@@ -5,13 +5,13 @@
 #include <thread>
 #include <variant>
 
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 #include "Emu/Memory/vm_ptr.h"
 #include "Emu/Cell/Modules/sceNp.h"
 #include "Emu/Cell/Modules/sceNp2.h"
 #include "Emu/Cell/Modules/sceNpCommerce2.h"
 #include "Emu/Cell/Modules/sceNpTus.h"
-#include "Utilities/Thread.h"
+#include "util/Thread.h"
 
 // Used By Score and Tus
 struct generic_async_transaction_context

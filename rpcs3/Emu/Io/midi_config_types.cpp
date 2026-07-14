@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "midi_config_types.h"
-#include "Utilities/StrUtil.h"
-#include "Utilities/Config.h"
+#include "util/StrUtil.h"
+#include "util/Config.h"
 
 template <>
 void fmt_class_string<midi_device_type>::format(std::string& out, u64 arg)

@@ -7,7 +7,7 @@
 #include <string>
 
 #include "cellSearch.h"
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 #include "util/media_utils.h"
 
 #include <random>

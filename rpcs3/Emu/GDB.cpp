@@ -2,7 +2,7 @@
 
 #include "GDB.h"
 #include "util/logs.hpp"
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 #include "Emu/Memory/vm.h"
 #include "Emu/System.h"
 #include "Emu/system_config.h"

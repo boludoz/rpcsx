@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "mouse_config.h"
 #include "MouseHandler.h"
-#include "Utilities/File.h"
+#include "util/File.h"
 
 mouse_config::mouse_config()
 	: cfg_name(fs::get_config_dir(true) + "config_mouse.yml")

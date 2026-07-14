@@ -1,7 +1,7 @@
 #pragma once
 #include "stdafx.h"
-#include "Utilities/rXml.h"
-#include "Utilities/File.h"
+#include "util/rXml.h"
+#include "util/File.h"
 
 struct TROPUSRHeader
 {

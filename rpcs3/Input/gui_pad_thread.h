@@ -5,8 +5,8 @@
 #include "Emu/Io/pad_types.h"
 #include "Emu/Io/pad_config.h"
 #include "Emu/Io/pad_config_types.h"
-#include "Utilities/Timer.h"
-#include "Utilities/Thread.h"
+#include "util/Timer.h"
+#include "util/Thread.h"
 
 class PadHandlerBase;
 class gui_settings;

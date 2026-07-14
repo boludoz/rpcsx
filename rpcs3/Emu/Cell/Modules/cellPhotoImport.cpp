@@ -5,7 +5,7 @@
 #include "Emu/RSX/Overlays/overlay_media_list_dialog.h"
 #include "Emu/VFS.h"
 #include "Emu/System.h"
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 #include "cellSysutil.h"
 
 LOG_CHANNEL(cellPhotoImportUtil, "cellPhotoImport");

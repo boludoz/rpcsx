@@ -2,7 +2,7 @@
 
 #include "Emu/Memory/vm_ptr.h"
 
-#include "Utilities/BitField.h"
+#include "util/BitField.h"
 
 #include "Emu/Cell/ErrorCodes.h"
 

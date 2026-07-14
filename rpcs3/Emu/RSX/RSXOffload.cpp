@@ -6,7 +6,7 @@
 #include "RSXOffload.h"
 #include "RSXThread.h"
 
-#include "Utilities/lockless.h"
+#include "util/lockless.h"
 
 #include <thread>
 #include "util/asm.hpp"

@@ -14,8 +14,8 @@
 #include "Program/RSXVertexProgram.h"
 #include "Program/RSXFragmentProgram.h"
 
-#include "Utilities/Thread.h"
-#include "Utilities/geometry.h"
+#include "util/Thread.h"
+#include "util/geometry.h"
 #include "Capture/rsx_trace.h"
 #include "Capture/rsx_replay.h"
 

@@ -5,7 +5,7 @@
 #include <unordered_map>
 
 #include "util/types.hpp"
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 
 #ifdef _WIN32
 #include <winsock2.h>

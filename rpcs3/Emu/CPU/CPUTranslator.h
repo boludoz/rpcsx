@@ -4,8 +4,8 @@
 
 #include "util/types.hpp"
 #include "util/sysinfo.hpp"
-#include "Utilities/StrFmt.h"
-#include "Utilities/JIT.h"
+#include "util/StrFmt.h"
+#include "util/JIT.h"
 #include "util/v128.hpp"
 
 #ifdef _MSC_VER

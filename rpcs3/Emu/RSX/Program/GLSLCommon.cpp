@@ -4,7 +4,7 @@
 #include "RSXFragmentProgram.h"
 
 #include "Emu/RSX/gcm_enums.h"
-#include "Utilities/StrFmt.h"
+#include "util/StrFmt.h"
 
 namespace program_common
 {

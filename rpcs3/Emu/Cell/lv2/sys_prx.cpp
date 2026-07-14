@@ -11,7 +11,7 @@
 #include "Emu/Cell/PPUThread.h"
 #include "Emu/Cell/ErrorCodes.h"
 #include "Crypto/unedat.h"
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 #include "sys_fs.h"
 #include "sys_process.h"
 #include "sys_memory.h"

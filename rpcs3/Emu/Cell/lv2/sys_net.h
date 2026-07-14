@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Utilities/bit_set.h"
-#include "Utilities/mutex.h"
+#include "util/bit_set.hpp"
+#include "util/mutex.h"
 
 #include "Emu/Memory/vm_ptr.h"
 #include "Emu/Cell/ErrorCodes.h"

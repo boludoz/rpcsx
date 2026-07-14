@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Utilities/BitField.h"
+#include "util/BitField.h"
 
 union spu_opcode_t
 {

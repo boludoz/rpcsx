@@ -1,6 +1,6 @@
 #include "stdafx.h"
 
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 #include "VKRenderPass.h"
 #include "vkutils/image.h"
 

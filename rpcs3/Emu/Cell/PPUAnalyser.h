@@ -8,7 +8,7 @@
 #include "util/asm.hpp"
 #include "util/to_endian.hpp"
 
-#include "Utilities/bit_set.h"
+#include "util/bit_set.hpp"
 #include "PPUOpcodes.h"
 
 // PPU Function Attributes

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 
 #include "Emu/CPU/CPUThread.h"
 #include "Emu/Cell/ErrorCodes.h"

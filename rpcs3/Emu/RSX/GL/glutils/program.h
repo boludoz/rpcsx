@@ -4,8 +4,8 @@
 #include "sync.hpp"
 
 #include "Emu/RSX/Program/GLSLTypes.h"
-#include "Utilities/geometry.h"
-#include "Utilities/mutex.h"
+#include "util/geometry.h"
+#include "util/mutex.h"
 
 #include <span>
 

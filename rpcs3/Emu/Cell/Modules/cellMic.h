@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Utilities/Thread.h"
-#include "Utilities/mutex.h"
+#include "util/Thread.h"
+#include "util/mutex.h"
 
 #include "alc.h"
 

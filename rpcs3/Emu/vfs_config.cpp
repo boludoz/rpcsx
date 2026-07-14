@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "vfs_config.h"
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 
 LOG_CHANNEL(vfs_log, "VFS");
 

@@ -5,8 +5,8 @@
 
 #include "Emu/Cell/Modules/cellMusic.h"
 #include "Emu/VFS.h"
-#include "Utilities/StrUtil.h"
-#include "Utilities/Thread.h"
+#include "util/StrUtil.h"
+#include "util/Thread.h"
 
 template <>
 void fmt_class_string<rsx::overlays::media_list_dialog::media_type>::format(std::string& out, u64 arg)

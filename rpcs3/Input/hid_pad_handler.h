@@ -1,8 +1,8 @@
 #pragma once
 
 #include "Emu/Io/PadHandler.h"
-#include "Utilities/CRC.h"
-#include "Utilities/Thread.h"
+#include "util/CRC.h"
+#include "util/Thread.h"
 
 #include <hidapi.h>
 

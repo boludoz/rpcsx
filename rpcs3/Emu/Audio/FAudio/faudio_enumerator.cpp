@@ -4,7 +4,7 @@
 
 #include "Emu/Audio/FAudio/faudio_enumerator.h"
 #include <algorithm>
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 #include "util/logs.hpp"
 
 LOG_CHANNEL(faudio_dev_enum);

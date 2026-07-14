@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Utilities/Config.h"
+#include "util/Config.h"
 
 // For simplicity's sake, there is only one config instead of 127 for MAX_MICE
 struct mouse_config final : cfg::node

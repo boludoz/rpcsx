@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "Emu/system_config.h"
 #include "ip_address.h"
-#include "Utilities/StrFmt.h"
+#include "util/StrFmt.h"
 #include "Emu/IdManager.h"
 #include "util/endian.hpp"
 #include "util/types.hpp"

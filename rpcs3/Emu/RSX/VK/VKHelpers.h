@@ -4,7 +4,7 @@
 #include <vector>
 
 #include "VulkanAPI.h"
-#include "Utilities/geometry.h"
+#include "util/geometry.h"
 #include "Emu/RSX/Common/TextureUtils.h"
 #include "Emu/RSX/rsx_utils.h"
 

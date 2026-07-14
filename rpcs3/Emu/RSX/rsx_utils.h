@@ -1,8 +1,8 @@
 #pragma once
 
 #include "../system_config.h"
-#include "Utilities/address_range.h"
-#include "Utilities/geometry.h"
+#include "util/address_range.h"
+#include "util/geometry.h"
 #include "gcm_enums.h"
 
 extern "C"

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Utilities/StrUtil.h"
-#include "Utilities/Thread.h"
+#include "util/StrUtil.h"
+#include "util/Thread.h"
 #include "util/video_sink.h"
 #include "Emu/Cell/Modules/cellMusic.h"
 

@@ -8,7 +8,7 @@
 #include "Emu/Cell/lv2/sys_fs.h"
 #include "cellSysutil.h"
 #include "util/init_mutex.hpp"
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 
 LOG_CHANNEL(cellSysutil);
 

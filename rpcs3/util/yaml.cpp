@@ -1,7 +1,7 @@
 #include "util/yaml.hpp"
 #include "util/types.hpp"
-#include "Utilities/cheat_info.h"
-#include "Utilities/Config.h"
+#include "util/cheat_info.h"
+#include "util/Config.h"
 
 namespace YAML
 {

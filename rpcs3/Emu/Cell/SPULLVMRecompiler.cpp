@@ -9,7 +9,7 @@
 #include "Emu/Memory/vm_reservation.h"
 #include "Emu/RSX/Core/RSXReservationLock.hpp"
 #include "Crypto/sha1.h"
-#include "Utilities/JIT.h"
+#include "util/JIT.h"
 
 #include "SPUThread.h"
 #include "SPUAnalyser.h"

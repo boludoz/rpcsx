@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Emu/Cell/Modules/cellOskDialog.h"
-#include "Utilities/geometry.h"
+#include "util/geometry.h"
 
 namespace rsx
 {

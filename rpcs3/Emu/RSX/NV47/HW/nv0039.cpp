@@ -5,7 +5,7 @@
 #include "Emu/RSX/Core/RSXReservationLock.hpp"
 #include "Emu/RSX/Host/MM.h"
 
-#include "Utilities/deferred_op.hpp"
+#include "util/deferred_op.hpp"
 
 #include "context_accessors.define.h"
 

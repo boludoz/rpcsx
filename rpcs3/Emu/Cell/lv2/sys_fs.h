@@ -2,9 +2,9 @@
 
 #include "Emu/Memory/vm_ptr.h"
 #include "Emu/Cell/ErrorCodes.h"
-#include "Utilities/File.h"
-#include "Utilities/StrUtil.h"
-#include "Utilities/mutex.h"
+#include "util/File.h"
+#include "util/StrUtil.h"
+#include "util/mutex.h"
 
 #include <string>
 

@@ -5,7 +5,7 @@
 #include "Emu/Cell/timers.hpp"
 #include "util/cpu_stats.hpp"
 #include "util/sysinfo.hpp"
-#include "Utilities/Thread.h"
+#include "util/Thread.h"
 
 LOG_CHANNEL(perf_log, "PERF");
 

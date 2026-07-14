@@ -1,7 +1,7 @@
 #pragma once
 
 #include "VulkanAPI.h"
-#include "Utilities/geometry.h"
+#include "util/geometry.h"
 
 namespace vk
 {

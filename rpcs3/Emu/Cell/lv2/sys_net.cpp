@@ -3,7 +3,7 @@
 
 #include "Emu/IdManager.h"
 #include "Emu/Cell/PPUThread.h"
-#include "Utilities/Thread.h"
+#include "util/Thread.h"
 
 #include "sys_sync.h"
 

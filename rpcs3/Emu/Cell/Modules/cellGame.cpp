@@ -15,7 +15,7 @@
 #include "cellGame.h"
 
 #include "Loader/PSF.h"
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 #include "util/init_mutex.hpp"
 #include "util/asm.hpp"
 #include "Crypto/utils.h"

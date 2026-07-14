@@ -1,6 +1,6 @@
 #include "stdafx.h"
-#include "Utilities/JIT.h"
-#include "Utilities/date_time.h"
+#include "util/JIT.h"
+#include "util/date_time.h"
 #include "Emu/Memory/vm.h"
 #include "Emu/Memory/vm_ptr.h"
 #include "Emu/Memory/vm_reservation.h"

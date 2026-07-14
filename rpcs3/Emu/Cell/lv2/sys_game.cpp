@@ -7,8 +7,8 @@
 #include "Emu/System.h"
 #include "Emu/system_utils.hpp"
 #include "Emu/IdManager.h"
-#include "Utilities/StrUtil.h"
-#include "Utilities/Thread.h"
+#include "util/StrUtil.h"
+#include "util/Thread.h"
 
 #include "Emu/Cell/timers.hpp"
 #include "sys_game.h"

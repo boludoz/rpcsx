@@ -2,7 +2,7 @@
 #include "util/cpu_stats.hpp"
 #include "util/sysinfo.hpp"
 #include "util/logs.hpp"
-#include "Utilities/StrUtil.h"
+#include "util/StrUtil.h"
 
 #include <algorithm>
 

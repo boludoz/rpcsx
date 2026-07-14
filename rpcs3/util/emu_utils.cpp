@@ -8,7 +8,7 @@
 #include "Emu/Cell/PPUThread.h"
 #include "Emu/RSX/RSXDisAsm.h"
 #include "Emu/Memory/vm.h"
-#include "Utilities/Thread.h"
+#include "util/Thread.h"
 
 bool is_using_interpreter(thread_class t_class)
 {

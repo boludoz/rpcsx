@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Utilities/Thread.h"
+#include "util/Thread.h"
 #include "util/logs.hpp"
 #include "Emu/Memory/vm.h"
 #include "3rdparty/pine/pine_server.h"

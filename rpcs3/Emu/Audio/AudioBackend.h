@@ -2,8 +2,8 @@
 
 #include "util/types.hpp"
 #include "util/logs.hpp"
-#include "Utilities/mutex.h"
-#include "Utilities/StrFmt.h"
+#include "util/mutex.h"
+#include "util/StrFmt.h"
 #include "Emu/system_config_types.h"
 #include <numbers>
 

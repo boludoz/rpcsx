@@ -3,8 +3,8 @@
 #include "../CPU/CPUThread.h"
 #include "../CPU/Hypervisor.h"
 #include "../Memory/vm_ptr.h"
-#include "Utilities/lockless.h"
-#include "Utilities/BitField.h"
+#include "util/lockless.h"
+#include "util/BitField.h"
 
 #include "util/logs.hpp"
 #include "util/v128.hpp"
