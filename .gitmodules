@@ -140,3 +140,8 @@
 [submodule "3rdparty/glfw"]
 	path = 3rdparty/glfw
 	url = ../../glfw/glfw.git
+
+[submodule "3rdparty/protobuf/protobuf"]
+	path = 3rdparty/protobuf/protobuf
+	url = https://github.com/protocolbuffers/protobuf.git
+
