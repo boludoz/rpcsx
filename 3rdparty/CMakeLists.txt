@@ -416,6 +416,12 @@ add_subdirectory(fmtlib)
 # Protobuf
 add_subdirectory(protobuf EXCLUDE_FROM_ALL)
 
+# VulkanMemoryAllocator (header-only; the submodule ships no CMakeLists.txt
+# of its own, so wrap it directly instead of add_subdirectory)
+add_library(3rdparty_vulkanmemoryallocator INTERFACE)
+target_include_directories(3rdparty_vulkanmemoryallocator SYSTEM INTERFACE
+	"${CMAKE_CURRENT_SOURCE_DIR}/GPUOpen/VulkanMemoryAllocator/src")
+
 # add nice ALIAS targets for ease of use
 if(USE_SYSTEM_LIBUSB)
 	add_library(3rdparty::libusb ALIAS usb-1.0-shared)
@@ -484,6 +490,7 @@ add_library(3rdparty::sdl3 ALIAS ${SDL3_TARGET})
 add_library(3rdparty::miniupnpc ALIAS libminiupnpc-static)
 add_library(3rdparty::rtmidi ALIAS rtmidi)
 add_library(3rdparty::protobuf ALIAS 3rdparty_protobuf)
+add_library(3rdparty::vulkanmemoryallocator ALIAS 3rdparty_vulkanmemoryallocator)
 add_library(3rdparty::opencv ALIAS ${OPENCV_TARGET})
 add_library(3rdparty::fusion ALIAS Fusion)
 add_library(3rdparty::json ALIAS 3rdparty_json)
