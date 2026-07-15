@@ -195,7 +195,7 @@ struct GraphicsFrame : GSFrameBase {
   void flip(draw_context_t ctx, bool skip_frame = false) override {}
   int client_width() override { return width; }
   int client_height() override { return height; }
-  f64 client_display_rate() override { return 30.f; }
+  f64 client_display_rate() override { return 120.0f; }
   bool has_alpha() override {
     return ANativeWindow_getFormat(getNativeWindow()) ==
            WINDOW_FORMAT_RGBA_8888;
@@ -1830,7 +1830,7 @@ extern "C" bool _rpcsx_initialize(std::string_view rootDir,
 
   set_rlim(RLIMIT_MEMLOCK, RLIM_INFINITY);
   set_rlim(RLIMIT_NOFILE, RLIM_INFINITY);
-  set_rlim(RLIMIT_STACK, 128 * 1024 * 1024);
+  set_rlim(RLIMIT_STACK, 256 * 1024 * 1024);
   set_rlim(RLIMIT_AS, RLIM_INFINITY);
 
   virtual_pad_handler::set_on_connect_cb(initVirtualPad);
@@ -1851,7 +1851,7 @@ extern "C" bool _rpcsx_initialize(std::string_view rootDir,
 
   g_cfg_input.save("", g_cfg_input_configs.default_config);
 
-  g_cfg.core.llvm_cpu.from_string("cortex-a34");
+  g_cfg.core.llvm_cpu.from_string("oryon-1");
 
   Emulator::SaveSettings(g_cfg.to_string(), Emu.GetTitleID());
   return true;
