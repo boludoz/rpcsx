@@ -452,9 +452,6 @@ inline bool has_monitor_wait() {
 //
 // Never a false negative, but can return spuriously with `old_value` still
 // current -- callers must always re-check afterward.
-#if defined(ARCH_X64) && !defined(_MSC_VER)
-__attribute__((target("waitpkg,mwaitx")))
-#endif
 inline void monitor_wait32(const std::atomic<u32> &var, u32 old_value,
                            u64 timeout_us) {
 #if defined(ARCH_ARM64)
@@ -479,7 +476,12 @@ inline void monitor_wait32(const std::atomic<u32> &var, u32 old_value,
   const u64 cycles = get_wait_cycles(timeout_us, get_tsc_freq());
 
   if (use_umwait && cycles) {
+#ifdef _MSC_VER
     _umonitor(const_cast<void *>(addr));
+#else
+    // umonitor %rax (0xf3, 0x0f, 0xae, 0xf0)
+    __asm__ volatile(".byte 0xf3, 0x0f, 0xae, 0xf0" ::"a"(addr) : "memory");
+#endif
 
     if (var.load(std::memory_order::relaxed) != old_value) {
       return;
@@ -488,17 +490,42 @@ inline void monitor_wait32(const std::atomic<u32> &var, u32 old_value,
     constexpr u64 max_timeout = u64{umax};
     const u64 now = get_tsc();
     const u64 deadline = cycles > max_timeout - now ? max_timeout : now + cycles;
+
+#ifdef _MSC_VER
     _umwait(0, deadline);
+#else
+    // umwait %ecx (0xf2, 0x0f, 0xae, 0xf1)
+    __asm__ volatile(".byte 0xf2, 0x0f, 0xae, 0xf1"
+                     :: "c"(0u), 
+                        "a"(static_cast<u32>(deadline)), 
+                        "d"(static_cast<u32>(deadline >> 32))
+                     : "memory");
+#endif
   } else if (use_waitx && cycles) {
+#ifdef _MSC_VER
     _mm_monitorx(const_cast<void *>(addr), 0, 0);
+#else
+    // monitorx (implicit %rax, %rcx, %rdx)
+    __asm__ volatile(".byte 0x0f, 0x01, 0xfa" 
+                     :: "a"(addr), "c"(0u), "d"(0u) 
+                     : "memory");
+#endif
 
     if (var.load(std::memory_order::relaxed) != old_value) {
       return;
     }
 
     constexpr u32 timer_enable = 2;
-    _mm_mwaitx(timer_enable, 0,
-              cycles > u32{umax} ? u32{umax} : static_cast<u32>(cycles));
+    u32 cycles_u32 = cycles > u32{umax} ? u32{umax} : static_cast<u32>(cycles);
+
+#ifdef _MSC_VER
+    _mm_mwaitx(timer_enable, 0, cycles_u32);
+#else
+    // mwaitx (implicit %rax, %rcx, %rbx)
+    __asm__ volatile(".byte 0x0f, 0x01, 0xfb" 
+                     :: "a"(0u), "c"(timer_enable), "b"(cycles_u32) 
+                     : "memory");
+#endif
   } else {
     yield();
   }
