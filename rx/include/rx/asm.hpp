@@ -3,37 +3,16 @@
 #include "rx/tsc.hpp"
 #include "types.hpp"
 #include <atomic>
-#include <chrono>
 #include <thread>
 
-#if defined(ARCH_X64) && !defined(_MSC_VER)
-#include <cpuid.h>
-// _umonitor/_umwait (WAITPKG) live here, not in <immintrin.h>; mwaitx is
-// pulled in by <immintrin.h> already.
-#if __has_include(<x86gprintrin.h>)
-#include <x86gprintrin.h>
-#endif
-#endif
-
-// True when hardware transactional memory is usable:
-// Intel TSX (RTM) on x86-64, FEAT_TME on ARM64. Defined in asm.cpp.
 extern bool g_use_rtm;
-// Suggested transaction attempt budget for spin loops (defined in asm.cpp).
 extern u64 g_rtm_tx_limit1;
-
-#ifdef ARCH_ARM64
-// cntvct_el0 usually ticks at 19-100MHz instead of the ~3GHz a TSC-based
-// busy_wait assumes; this scale (cntfrq/30MHz, min 1) compensates.
-extern u64 g_arm_tsc_scale;
-#endif
 
 #ifdef _M_X64
 #ifdef _MSC_VER
 extern "C" {
 u32 _xbegin();
 void _xend();
-void _xabort(unsigned int);
-unsigned char _xtest(void);
 void _mm_pause();
 void _mm_prefetch(const char *, int);
 void _m_prefetchw(const volatile void *);
@@ -50,14 +29,9 @@ u64 _udiv128(u64, u64, u64, u64 *);
 void __debugbreak();
 }
 #include <intrin.h>
-#include <immintrin.h>
 #else
 #include <immintrin.h>
 #endif
-#endif
-
-#ifdef __ARM_FEATURE_TME
-#include <arm_acle.h>
 #endif
 
 #ifndef __has_builtin
@@ -103,9 +77,7 @@ constexpr void prefetch_write(void *ptr) {
 #if defined(_M_X64) && !defined(__clang__)
   return _m_prefetchw(ptr);
 #else
-  // Locality 3: keep the line resident in L1; locality 0 hinted an immediate
-  // eviction which defeats the purpose of prefetching before a write.
-  return __builtin_prefetch(ptr, 1, 3);
+  return __builtin_prefetch(ptr, 1, 0);
 #endif
 }
 
@@ -295,10 +267,7 @@ constexpr u32 clz128(u128 arg) {
 
 inline void pause() {
 #if defined(ARCH_ARM64)
-  // "yield" is a NOP on most ARM cores, so spin loops built on it hammer the
-  // memory system and starve SMT siblings. "isb" stalls the pipeline for a
-  // duration comparable to x86 "pause".
-  __asm__ volatile("isb" ::: "memory");
+  __asm__ volatile("yield");
 #elif defined(_M_X64)
   _mm_pause();
 #elif defined(ARCH_X64)
@@ -310,323 +279,13 @@ inline void pause() {
 
 inline void yield() { std::this_thread::yield(); }
 
-// Synchronization helper (cache-friendly busy waiting).
-// "cycles" is expressed in ~3GHz TSC cycles as on x86.
+// Synchronization helper (cache-friendly busy waiting)
 inline void busy_wait(usz cycles = 3000) {
-#ifdef ARCH_ARM64
-  // cntvct_el0 ticks far slower than an x86 TSC (e.g. 19.2MHz on Snapdragon
-  // 8 gen 2). Without rescaling, a "nanoseconds" wait becomes microseconds.
-  const u64 stop = get_tsc() + (cycles / 100) * g_arm_tsc_scale;
-#else
   const u64 stop = get_tsc() + cycles;
-#endif
   do
     pause();
   while (get_tsc() < stop);
 }
-
-#if defined(ARCH_X64)
-// WAITPKG (umonitor/umwait/tpause): leaf 7 subleaf 0, ECX bit 5.
-inline bool has_waitpkg() {
-  static const bool result = [] {
-#ifdef _MSC_VER
-    int regs[4]{};
-    __cpuid(regs, 0);
-    if (regs[0] < 7) {
-      return false;
-    }
-    __cpuidex(regs, 7, 0);
-    return (static_cast<u32>(regs[2]) & (1u << 5)) != 0;
-#else
-    u32 eax = 0, ebx = 0, ecx = 0, edx = 0;
-    if (!__get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx)) {
-      return false;
-    }
-    return (ecx & (1u << 5)) != 0;
-#endif
-  }();
-  return result;
-}
-
-// MONITORX/MWAITX (AMD): extended leaf 0x80000001, ECX bit 29.
-inline bool has_waitx() {
-  static const bool result = [] {
-#ifdef _MSC_VER
-    int regs[4]{};
-    __cpuid(regs, 0x80000001);
-    return (static_cast<u32>(regs[2]) & (1u << 29)) != 0;
-#else
-    u32 eax = 0, ebx = 0, ecx = 0, edx = 0;
-    if (!__get_cpuid(0x80000001, &eax, &ebx, &ecx, &edx)) {
-      return false;
-    }
-    return (ecx & (1u << 29)) != 0;
-#endif
-  }();
-  return result;
-}
-
-// TSC tick rate in Hz, used to translate a microsecond timeout into the
-// cycle-count deadline that umwait/mwaitx expect. 0 means "unknown".
-inline u64 get_tsc_freq() {
-  static const u64 freq = [] {
-#ifndef _MSC_VER
-    // CPUID leaf 0x15 (Skylake+): freq = crystal_hz * ebx / eax.
-    u32 eax = 0, ebx = 0, ecx = 0, edx = 0;
-    if (__get_cpuid_count(0x15, 0, &eax, &ebx, &ecx, &edx) && eax && ebx &&
-        ecx) {
-      return static_cast<u64>(ecx) * ebx / eax;
-    }
-#endif
-    // Fallback: calibrate against the (already-synced) steady_clock over a
-    // short busy window. Runs once and is cached in this static.
-    const u64 tsc0 = get_tsc();
-    const auto t0 = std::chrono::steady_clock::now();
-    while (std::chrono::steady_clock::now() - t0 <
-           std::chrono::milliseconds(1)) {
-    }
-    const u64 tsc1 = get_tsc();
-    const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                        std::chrono::steady_clock::now() - t0)
-                        .count();
-    if (ns <= 0) {
-      return u64{0};
-    }
-    return static_cast<u64>((tsc1 - tsc0) * 1'000'000'000ull /
-                            static_cast<u64>(ns));
-  }();
-  return freq;
-}
-
-inline u64 get_wait_cycles(u64 timeout_us, u64 tsc_freq) {
-  constexpr u64 max_timeout = u64{umax};
-
-  if (!tsc_freq) {
-    return 0;
-  }
-
-  if (timeout_us == max_timeout) {
-    return max_timeout;
-  }
-
-  const u64 seconds = timeout_us / 1'000'000;
-  const u64 micros = timeout_us % 1'000'000;
-
-  if (seconds > max_timeout / tsc_freq) {
-    return max_timeout;
-  }
-
-  const u64 sec_cycles = seconds * tsc_freq;
-  const u64 cycles_per_us = tsc_freq / 1'000'000;
-
-  if (micros && cycles_per_us > max_timeout / micros) {
-    return max_timeout;
-  }
-
-  const u64 us_cycles = micros * cycles_per_us +
-                        (micros * (tsc_freq % 1'000'000)) / 1'000'000;
-  return sec_cycles > max_timeout - us_cycles ? max_timeout
-                                              : sec_cycles + us_cycles;
-}
-#endif // ARCH_X64
-
-// True when monitor_wait32 below actually parks on the cacheline (WFE on
-// ARM, umwait/mwaitx on x86). When false it degrades to a plain yield, and
-// callers with a hot bounded retry loop may prefer busy_wait instead.
-inline bool has_monitor_wait() {
-#if defined(ARCH_ARM64)
-  return true;
-#elif defined(ARCH_X64)
-  return has_waitpkg() || has_waitx();
-#else
-  return false;
-#endif
-}
-
-// Arms a monitor on the word at `addr` and sleeps until something writes to
-// that cacheline, the timeout elapses, or (lacking WAITPKG/MWAITX/on other
-// architectures) falls back to a plain thread yield. This lets the core idle
-// instead of polling, which is both faster to react to a wakeup than a
-// futex/WaitOnAddress syscall and much cheaper on power/SMT-sibling
-// throughput than a pure pause() spin.
-//
-// Never a false negative, but can return spuriously with `old_value` still
-// current -- callers must always re-check afterward.
-#if defined(ARCH_X64) && !defined(_MSC_VER)
-__attribute__((target("waitpkg,mwaitx")))
-#endif
-inline void monitor_wait32(const std::atomic<u32> &var, u32 old_value,
-                           u64 timeout_us) {
-#if defined(ARCH_ARM64)
-  (void)timeout_us; // WFE also wakes periodically via the event stream
-
-  const auto *wait_addr = reinterpret_cast<const volatile u32 *>(&var);
-  u32 value;
-  __asm__ volatile("ldaxr %w0, %1" : "=r"(value) : "Q"(*wait_addr) : "memory");
-
-  if (value != old_value) {
-    __asm__ volatile("clrex" ::: "memory");
-    return;
-  }
-
-  __asm__ volatile("wfe" ::: "memory");
-  __asm__ volatile("clrex" ::: "memory");
-#elif defined(ARCH_X64)
-  static const bool use_umwait = has_waitpkg();
-  static const bool use_waitx = has_waitx();
-
-  const void *addr = &var;
-  const u64 cycles = get_wait_cycles(timeout_us, get_tsc_freq());
-
-  if (use_umwait && cycles) {
-    _umonitor(const_cast<void *>(addr));
-
-    if (var.load(std::memory_order::relaxed) != old_value) {
-      return;
-    }
-
-    constexpr u64 max_timeout = u64{umax};
-    const u64 now = get_tsc();
-    const u64 deadline = cycles > max_timeout - now ? max_timeout : now + cycles;
-    _umwait(0, deadline);
-  } else if (use_waitx && cycles) {
-    _mm_monitorx(const_cast<void *>(addr), 0, 0);
-
-    if (var.load(std::memory_order::relaxed) != old_value) {
-      return;
-    }
-
-    constexpr u32 timer_enable = 2;
-    _mm_mwaitx(timer_enable, 0,
-              cycles > u32{umax} ? u32{umax} : static_cast<u32>(cycles));
-  } else {
-    yield();
-  }
-#else
-  (void)var;
-  (void)old_value;
-  (void)timeout_us;
-  yield();
-#endif
-}
-
-// --- Hardware transactional memory (Intel TSX RTM on x86, FEAT_TME on ARM) --
-//
-// Unified interface; only call these when g_use_rtm is true, otherwise the
-// instructions are undefined on the current CPU.
-//
-// tx_start() returns tx_started (0) when speculative execution begins. On
-// abort, execution resumes at the tx_start call site with all transactional
-// effects rolled back and a non-zero status describing the cause.
-
-constexpr u32 tx_started = 0;
-constexpr u32 tx_abort_retry = 1u << 0;    // transient abort, retry may help
-constexpr u32 tx_abort_explicit = 1u << 1; // tx_cancel() was executed
-constexpr u32 tx_abort_other = 1u << 31;   // ensures abort status is non-zero
-
-#if defined(ARCH_X64)
-inline u32 tx_start() {
-#ifdef _MSC_VER
-  const u32 code = _xbegin();
-#else
-  u32 code = 0xffffffffu; // _XBEGIN_STARTED
-  // xbegin +0 encoded as raw bytes so no -mrtm/target attribute is required
-  __asm__ volatile(".byte 0xc7,0xf8,0x00,0x00,0x00,0x00" : "+a"(code)::"memory");
-#endif
-  if (code == 0xffffffffu) {
-    return tx_started;
-  }
-
-  u32 status = tx_abort_other;
-  if (code & (1u << 1)) // _XABORT_RETRY
-    status |= tx_abort_retry;
-  if (code & (1u << 0)) // _XABORT_EXPLICIT
-    status |= tx_abort_explicit;
-  return status;
-}
-
-inline void tx_commit() {
-#ifdef _MSC_VER
-  _xend();
-#else
-  __asm__ volatile(".byte 0x0f,0x01,0xd5" ::: "memory"); // xend
-#endif
-}
-
-inline void tx_cancel() {
-#ifdef _MSC_VER
-  _xabort(0xff);
-#else
-  __asm__ volatile(".byte 0xc6,0xf8,0xff" ::: "memory"); // xabort $0xff
-#endif
-}
-
-inline bool tx_active() {
-#ifdef _MSC_VER
-  return _xtest() != 0;
-#else
-  unsigned char in_tx;
-  // xtest clears ZF when executed inside a transaction
-  __asm__ volatile(".byte 0x0f,0x01,0xd6\n\tsetnz %0"
-                   : "=r"(in_tx)::"cc", "memory");
-  return in_tx != 0;
-#endif
-}
-#elif defined(ARCH_ARM64)
-inline u32 tx_start() {
-  u64 code;
-#ifdef __ARM_FEATURE_TME
-  code = __tstart();
-#else
-  // tstart x0 (raw encoding so no -march=...+tme is required)
-  register u64 x0_out __asm__("x0");
-  __asm__ volatile(".inst 0xd5233060" : "=r"(x0_out)::"memory");
-  code = x0_out;
-#endif
-  if (code == 0) {
-    return tx_started;
-  }
-
-  u32 status = tx_abort_other;
-  if (code & (1u << 15)) // _TMFAILURE_RTRY
-    status |= tx_abort_retry;
-  if (code & (1u << 16)) // _TMFAILURE_CNCL
-    status |= tx_abort_explicit;
-  return status;
-}
-
-inline void tx_commit() {
-#ifdef __ARM_FEATURE_TME
-  __tcommit();
-#else
-  __asm__ volatile(".inst 0xd503307f" ::: "memory"); // tcommit
-#endif
-}
-
-inline void tx_cancel() {
-#ifdef __ARM_FEATURE_TME
-  __tcancel(0);
-#else
-  __asm__ volatile(".inst 0xd4600000" ::: "memory"); // tcancel #0
-#endif
-}
-
-inline bool tx_active() {
-#ifdef __ARM_FEATURE_TME
-  return __ttest() != 0;
-#else
-  // ttest x0: returns the transactional nesting depth (0 = not in txn)
-  register u64 x0_out __asm__("x0");
-  __asm__ volatile(".inst 0xd5233160" : "=r"(x0_out)::"memory");
-  return x0_out != 0;
-#endif
-}
-#else
-inline u32 tx_start() { return tx_abort_other; }
-inline void tx_commit() {}
-inline void tx_cancel() {}
-inline bool tx_active() { return false; }
-#endif
 
 // Align to power of 2
 template <typename T, typename U>

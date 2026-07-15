@@ -95,19 +95,8 @@ std::errc shared_atomic32::wait_impl(std::uint32_t oldValue,
     }
   }
 
-  // __ulock_wait takes the timeout in microseconds as u32, where 0 means
-  // "wait forever". Passing microseconds::max() truncated it to ~71 minutes.
-  uint32_t timeout_us = 0;
-  if (useTimeout) {
-    const auto count = usec_timeout.count();
-    timeout_us = count <= 0 ? 1
-                 : count > 0xffffffffll
-                     ? 0xffffffffu
-                     : static_cast<uint32_t>(count);
-  }
-
   int result = __ulock_wait(UL_COMPARE_AND_WAIT_SHARED, (void *)this, oldValue,
-                            timeout_us);
+                            usec_timeout.count());
 
   if (unblock) {
     if (!g_scopedUnblock(false)) {
@@ -168,25 +157,19 @@ std::errc shared_atomic32::wait_impl(std::uint32_t oldValue,
     }
   }
 
-  // WaitOnAddress takes milliseconds; INFINITE (not the float INFINITY) is
-  // the sentinel for "no timeout". Round sub-millisecond timeouts up so they
-  // don't truncate to 0ms and degrade into a syscall busy-loop.
-  DWORD timeout_ms = INFINITE;
-  if (useTimeout) {
-    const auto count = usec_timeout.count();
-    const auto ms = count / 1000 + (count % 1000 ? 1 : 0);
-    timeout_ms = ms >= INFINITE ? INFINITE - 1 : static_cast<DWORD>(ms);
-  }
-
-  BOOL result =
-      WaitOnAddress(this, &oldValue, sizeof(std::uint32_t), timeout_ms);
+  BOOL result = WaitOnAddress(
+      this, &oldValue, sizeof(std::uint32_t),
+      useTimeout
+          ? std::chrono::duration_cast<std::chrono::milliseconds>(usec_timeout)
+                .count()
+          : INFINITY);
 
   DWORD error = 0;
   if (!result) {
     error = GetLastError();
   } else {
     if (load(std::memory_order::relaxed) == oldValue) {
-      error = ERROR_ALERTED; // dummy error, spurious wakeup
+      error = ERROR_ALERTED; // dummy error
     }
   }
 
@@ -204,19 +187,10 @@ std::errc shared_atomic32::wait_impl(std::uint32_t oldValue,
     return std::errc::timed_out;
   }
 
-  if (error != 0) {
-    // Spurious wakeup or transient failure: let the caller re-check and retry
-    return std::errc::resource_unavailable_try_again;
-  }
-
-  // The value changed: report success, otherwise callers looping on
-  // wait_impl(...) != errc{} would spin forever re-entering the kernel.
-  return {};
+  return std::errc::resource_unavailable_try_again;
 }
 
 int shared_atomic32::notify_n(int count) const {
-  // WakeByAddress* does not report how many waiters were woken; return the
-  // requested count. The function previously fell off the end (UB).
   if (count == 1) {
     WakeByAddressSingle(const_cast<shared_atomic32 *>(this));
   } else if (count == std::numeric_limits<int>::max()) {
@@ -226,8 +200,6 @@ int shared_atomic32::notify_n(int count) const {
       WakeByAddressSingle(const_cast<shared_atomic32 *>(this));
     }
   }
-
-  return count;
 }
 #else
 #error Unimplemented atomic for this platform

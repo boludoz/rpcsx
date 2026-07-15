@@ -1,9 +1,9 @@
 #pragma once
 
 #include "BitSet.hpp"
+#include "FunctionRef.hpp"
 #include "Rc.hpp"
 #include "SharedMutex.hpp"
-#include "FunctionRef.hpp"
 
 #include <algorithm>
 #include <bit>
