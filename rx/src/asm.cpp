@@ -61,8 +61,8 @@ u64 detect_arm_tsc_scale() {
 #endif
 } // namespace
 
-// bool g_use_rtm = detect_tm();
-// u64 g_rtm_tx_limit1 = 65535;
+bool g_use_rtm = detect_tm();
+u64 g_rtm_tx_limit1 = 65535;
 
 #ifdef ARCH_ARM64
 u64 g_arm_tsc_scale = detect_arm_tsc_scale();
