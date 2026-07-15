@@ -1,7 +1,5 @@
 #include "SharedMutex.hpp"
 #include "asm.hpp"
-#include <syscall.h>
-#include <unistd.h>
 
 namespace rx {
 void shared_mutex::impl_lock_shared(unsigned val) {
@@ -25,7 +23,13 @@ void shared_mutex::impl_lock_shared(unsigned val) {
       return;
     }
 
-    busy_wait();
+    // Park on the lock word: wakes the instant the holder writes m_value,
+    // instead of blindly burning a fixed ~1us slice and re-polling.
+    if (has_monitor_wait()) {
+      monitor_wait32(m_value, old, 3);
+    } else {
+      busy_wait();
+    }
   }
 
   // Acquire writer lock and downgrade
@@ -91,8 +95,6 @@ void shared_mutex::impl_lock(unsigned val) {
   }
 
   for (int i = 0; i < 10; i++) {
-    busy_wait();
-
     unsigned old = m_value;
 
     if (!old && try_lock()) {
@@ -102,6 +104,14 @@ void shared_mutex::impl_lock(unsigned val) {
     if (old & c_sig &&
         m_value.compare_exchange_strong(old, old - c_sig + c_one)) {
       return;
+    }
+
+    // Park on the lock word: wakes the instant the holder writes m_value,
+    // instead of blindly burning a fixed ~1us slice and re-polling.
+    if (has_monitor_wait()) {
+      monitor_wait32(m_value, old, 3);
+    } else {
+      busy_wait();
     }
   }
 
@@ -129,10 +139,14 @@ void shared_mutex::impl_unlock(unsigned old) {
 }
 void shared_mutex::impl_lock_upgrade() {
   for (int i = 0; i < 10; i++) {
-    busy_wait();
-
     if (try_lock_upgrade()) {
       return;
+    }
+
+    if (has_monitor_wait()) {
+      monitor_wait32(m_value, m_value.load(std::memory_order::relaxed), 3);
+    } else {
+      busy_wait();
     }
   }
 

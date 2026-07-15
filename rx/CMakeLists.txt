@@ -3,6 +3,7 @@ project(rx)
 find_package(Git)
 
 add_library(${PROJECT_NAME} OBJECT
+    src/asm.cpp
     src/debug.cpp
     src/die.cpp
     src/FileLock.cpp
