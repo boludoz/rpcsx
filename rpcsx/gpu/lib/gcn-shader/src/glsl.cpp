@@ -194,6 +194,16 @@ compileGlsl(const std::filesystem::path &cwd, std::string_view shaderSource,
                      glslang::EShClientVulkan, 100);
   shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_2);
   shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_4);
+  shader.setPreamble(
+      "#extension GL_EXT_shader_explicit_arithmetic_types_float16 : disable\n"
+      "#define float16_t float\n"
+      "#define f16vec2 vec2\n"
+      "#define f16vec3 vec3\n"
+      "#define f16vec4 vec4\n"
+      "#define f16mat2 mat2\n"
+      "#define f16mat3 mat3\n"
+      "#define f16mat4 mat4\n");
+  }
 
   auto text = shaderSource.data();
   int textLength = shaderSource.length();
