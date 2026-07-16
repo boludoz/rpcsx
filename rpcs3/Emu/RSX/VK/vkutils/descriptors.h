@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../VulkanAPI.h"
-#include "Utilities/mutex.h"
+#include "util/mutex.h"
 
 #include "commands.h"
 #include "device.h"
