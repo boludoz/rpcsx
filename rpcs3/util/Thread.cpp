@@ -3224,7 +3224,7 @@ void thread_ctrl::set_thread_affinity_mask(u64 mask)
 			break;
 		}
 	}
-#ifdef ANDROID
+#ifdef defined(ANDROID) && __ANDROID_API__ < 21
 	if (int err = sched_setaffinity(::gettid(), sizeof(cpu_set_t), &cs))
 #else
 	if (int err = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cs))
@@ -3256,7 +3256,7 @@ u64 thread_ctrl::get_thread_affinity_mask()
 	cpu_set_t cs;
 	CPU_ZERO(&cs);
 
-#ifdef ANDROID
+#ifdef defined(ANDROID) && __ANDROID_API__ < 21
 	if (int err = sched_getaffinity(::gettid(), sizeof(cpu_set_t), &cs))
 #else
 	if (int err = pthread_getaffinity_np(pthread_self(), sizeof(cpu_set_t), &cs))
